@@ -1,0 +1,33 @@
+get:
+  operationId: getPetById
+  tags: [pets]
+  description: Get a single pet by id.
+  # `petId` is missing from parameters — oasis lint will report
+  # path-params-defined here.
+  responses:
+    '200':
+      description: The pet.
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/pet.yaml'
+    '404':
+      description: Not found.
+      content:
+        application/json:
+          schema:
+            $ref: '../openapi.yaml#/components/schemas/Error'
+delete:
+  operationId: deletePet
+  tags: [pets]
+  description: Delete a pet.
+  parameters:
+    - name: petId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+  responses:
+    '204':
+      description: Deleted.

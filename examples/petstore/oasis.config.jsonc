@@ -1,0 +1,9 @@
+{
+  "lint": {
+    "rules": {
+      // Path files intentionally $ref back into the entry document
+      // (for the shared Error schema) — that file-level cycle is fine here.
+      "no-ref-cycle": "off"
+    }
+  }
+}

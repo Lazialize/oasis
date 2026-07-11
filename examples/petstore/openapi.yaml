@@ -1,0 +1,26 @@
+openapi: 3.0.3
+info:
+  title: Petstore API
+  version: 1.0.0
+  description: Demo multi-file OpenAPI project for oasis.
+paths:
+  /pets:
+    $ref: './paths/pets.yaml'
+  /pets/{petId}:
+    $ref: './paths/pet-by-id.yaml'
+components:
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
+    # Deliberately unused — oasis lint will flag this.
+    LegacyPet:
+      type: object
+      properties:
+        name:
+          type: string

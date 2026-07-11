@@ -1,0 +1,41 @@
+get:
+  operationId: listPets
+  tags: [pets]
+  description: List all pets.
+  parameters:
+    - name: limit
+      in: query
+      schema:
+        type: integer
+  responses:
+    '200':
+      description: A list of pets.
+      content:
+        application/json:
+          schema:
+            type: array
+            items:
+              $ref: '../schemas/pet.yaml'
+post:
+  operationId: createPet
+  tags: [pets]
+  # No description/summary — oasis lint will warn here.
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../schemas/new-pet.yaml'
+  responses:
+    '201':
+      description: Created.
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/pet.yaml'
+    default:
+      description: Unexpected error.
+      content:
+        application/json:
+          schema:
+            $ref: '../openapi.yaml#/components/schemas/Error'
