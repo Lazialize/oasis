@@ -1,0 +1,380 @@
+import { isMap, isNode, isScalar, isSeq } from "yaml";
+import type { Node } from "yaml";
+import { resolveRef } from "@oasis/core";
+import type { OasisDocument, OpenApiVersion, WorkspaceGraph } from "@oasis/core";
+import { childAt, keyToString } from "../util.ts";
+
+/**
+ * A small, honest subset of JSON Schema / OpenAPI Schema Object validation, hand-rolled rather
+ * than pulled in as a dependency (keeps the binary lean). It deliberately favors false negatives
+ * over false positives: anything it can't confidently evaluate (schemas using `not`,
+ * `discriminator`, or an unresolved `$ref`) is skipped rather than guessed at.
+ *
+ * Keywords checked: `type` (version-aware: 3.0 `nullable` vs 3.1 type arrays / `"null"`), `enum`,
+ * `const` (3.1), `required`/`properties`, `additionalProperties: false` (and, if it's itself a
+ * schema, validation against it), `items` (+ 3.1 `prefixItems`), `minItems`/`maxItems`,
+ * `minimum`/`maximum`/`exclusiveMinimum`/`exclusiveMaximum` (version-aware boolean vs numeric
+ * exclusive bounds), `minLength`/`maxLength`/`pattern`, `allOf` (all branches), `oneOf`/`anyOf`
+ * (at least one branch, not enforcing `oneOf` exclusivity).
+ */
+
+export interface SchemaLoc {
+  doc: OasisDocument;
+  node: Node;
+}
+
+export interface ExampleFailure {
+  node: Node;
+  message: string;
+}
+
+export interface ValidateEnv {
+  graph: WorkspaceGraph;
+  version: OpenApiVersion;
+}
+
+/** Follow a `$ref` chain on a schema node. Returns `"unresolved"` if any link can't be followed. */
+function resolveSchema(env: ValidateEnv, loc: SchemaLoc): SchemaLoc | "unresolved" {
+  let current = loc;
+  for (let depth = 0; depth < 10; depth++) {
+    if (!isMap(current.node)) return current;
+    const refPair = current.node.items.find((p) => keyToString(p.key) === "$ref");
+    if (!refPair) return current;
+    if (!isScalar(refPair.value) || typeof refPair.value.value !== "string") return "unresolved";
+    const result = resolveRef(env.graph, current.doc, refPair.value.value, undefined);
+    if (!result.ok) return "unresolved";
+    current = { doc: result.doc, node: result.node };
+  }
+  return "unresolved";
+}
+
+function toPlain(node: Node | undefined): unknown {
+  if (!node) return undefined;
+  if (isScalar(node)) return node.value;
+  if (isSeq(node)) return node.items.filter(isNode).map(toPlain);
+  if (isMap(node)) {
+    const obj: Record<string, unknown> = {};
+    for (const pair of node.items) {
+      if (!isNode(pair.value)) continue;
+      obj[keyToString(pair.key)] = toPlain(pair.value);
+    }
+    return obj;
+  }
+  return undefined;
+}
+
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== typeof b) return false;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((v, i) => deepEqual(v, b[i]));
+  }
+  if (a && b && typeof a === "object" && typeof b === "object" && !Array.isArray(a) && !Array.isArray(b)) {
+    const aKeys = Object.keys(a as Record<string, unknown>);
+    const bKeys = Object.keys(b as Record<string, unknown>);
+    if (aKeys.length !== bKeys.length) return false;
+    return aKeys.every((k) => deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
+  }
+  return false;
+}
+
+function numberOf(node: Node | undefined): number | undefined {
+  return isScalar(node) && typeof node.value === "number" ? node.value : undefined;
+}
+
+/** Describes the JSON-Schema-ish "type" of an example value node. */
+function typeLabel(node: Node): string {
+  if (isMap(node)) return "object";
+  if (isSeq(node)) return "array";
+  if (isScalar(node)) {
+    const v = node.value;
+    if (v === null) return "null";
+    if (typeof v === "boolean") return "boolean";
+    if (typeof v === "number") return Number.isInteger(v) ? "integer" : "number";
+    if (typeof v === "string") return "string";
+  }
+  return "unknown";
+}
+
+function allowedTypes(schema: Node, version: OpenApiVersion): string[] | undefined {
+  const typeNode = childAt(schema, "type");
+  let types: string[] | undefined;
+  if (isScalar(typeNode) && typeof typeNode.value === "string") {
+    types = [typeNode.value];
+  } else if (isSeq(typeNode)) {
+    const items: string[] = [];
+    for (const item of typeNode.items) {
+      if (isNode(item) && isScalar(item) && typeof item.value === "string") items.push(item.value);
+    }
+    if (items.length > 0) types = items;
+  }
+  if (!types) return undefined;
+
+  if (version === "3.0") {
+    const nullableNode = childAt(schema, "nullable");
+    if (isScalar(nullableNode) && nullableNode.value === true) types = [...types, "null"];
+  }
+  return types;
+}
+
+function typeMatches(expected: string, actual: string): boolean {
+  if (expected === "integer") return actual === "integer";
+  if (expected === "number") return actual === "integer" || actual === "number";
+  return expected === actual;
+}
+
+function withLoc(reason: string, path: string): string {
+  return path === "" ? reason : `${reason} at ${path}`;
+}
+
+function checkType(schema: Node, exampleNode: Node, version: OpenApiVersion, path: string): ExampleFailure[] {
+  const types = allowedTypes(schema, version);
+  if (!types) return [];
+  const actual = typeLabel(exampleNode);
+  if (types.some((t) => typeMatches(t, actual))) return [];
+  const typesStr = types.map((t) => `"${t}"`).join(" or ");
+  const reason = path === "" ? `expected type ${typesStr}, got ${actual}` : `expected type ${typesStr} at ${path}, got ${actual}`;
+  return [{ node: exampleNode, message: reason }];
+}
+
+function checkEnumConst(schema: Node, exampleNode: Node, path: string): ExampleFailure[] {
+  const failures: ExampleFailure[] = [];
+  const value = toPlain(exampleNode);
+
+  const enumNode = childAt(schema, "enum");
+  if (isSeq(enumNode)) {
+    const ok = enumNode.items.some((item) => isNode(item) && deepEqual(toPlain(item), value));
+    if (!ok) failures.push({ node: exampleNode, message: withLoc("value does not match any \"enum\" member", path) });
+  }
+
+  const constNode = childAt(schema, "const");
+  if (constNode && isNode(constNode)) {
+    if (!deepEqual(toPlain(constNode), value)) {
+      failures.push({ node: exampleNode, message: withLoc('value does not match "const"', path) });
+    }
+  }
+
+  return failures;
+}
+
+function checkNumericBounds(schema: Node, value: number, version: OpenApiVersion, path: string): ExampleFailure[] {
+  const failures: ExampleFailure[] = [];
+  const minimum = numberOf(childAt(schema, "minimum"));
+  const maximum = numberOf(childAt(schema, "maximum"));
+  const exclusiveMinNode = childAt(schema, "exclusiveMinimum");
+  const exclusiveMaxNode = childAt(schema, "exclusiveMaximum");
+
+  if (version === "3.0") {
+    const exclusiveMin = isScalar(exclusiveMinNode) && exclusiveMinNode.value === true;
+    const exclusiveMax = isScalar(exclusiveMaxNode) && exclusiveMaxNode.value === true;
+    if (minimum !== undefined && (exclusiveMin ? value <= minimum : value < minimum)) {
+      failures.push({ node: schema, message: withLoc(`value ${value} is below minimum ${minimum}${exclusiveMin ? " (exclusive)" : ""}`, path) });
+    }
+    if (maximum !== undefined && (exclusiveMax ? value >= maximum : value > maximum)) {
+      failures.push({ node: schema, message: withLoc(`value ${value} is above maximum ${maximum}${exclusiveMax ? " (exclusive)" : ""}`, path) });
+    }
+  } else {
+    if (minimum !== undefined && value < minimum) {
+      failures.push({ node: schema, message: withLoc(`value ${value} is below minimum ${minimum}`, path) });
+    }
+    if (maximum !== undefined && value > maximum) {
+      failures.push({ node: schema, message: withLoc(`value ${value} is above maximum ${maximum}`, path) });
+    }
+    const exclusiveMin = numberOf(exclusiveMinNode);
+    const exclusiveMax = numberOf(exclusiveMaxNode);
+    if (exclusiveMin !== undefined && value <= exclusiveMin) {
+      failures.push({ node: schema, message: withLoc(`value ${value} is below exclusiveMinimum ${exclusiveMin}`, path) });
+    }
+    if (exclusiveMax !== undefined && value >= exclusiveMax) {
+      failures.push({ node: schema, message: withLoc(`value ${value} is above exclusiveMaximum ${exclusiveMax}`, path) });
+    }
+  }
+  return failures;
+}
+
+function checkStringConstraints(schema: Node, value: string, path: string): ExampleFailure[] {
+  const failures: ExampleFailure[] = [];
+  const minLength = numberOf(childAt(schema, "minLength"));
+  const maxLength = numberOf(childAt(schema, "maxLength"));
+  if (minLength !== undefined && value.length < minLength) {
+    failures.push({ node: schema, message: withLoc(`string length ${value.length} is below minLength ${minLength}`, path) });
+  }
+  if (maxLength !== undefined && value.length > maxLength) {
+    failures.push({ node: schema, message: withLoc(`string length ${value.length} is above maxLength ${maxLength}`, path) });
+  }
+  const patternNode = childAt(schema, "pattern");
+  if (isScalar(patternNode) && typeof patternNode.value === "string") {
+    try {
+      const re = new RegExp(patternNode.value);
+      if (!re.test(value)) {
+        failures.push({ node: schema, message: withLoc(`string does not match pattern "${patternNode.value}"`, path) });
+      }
+    } catch {
+      // Invalid/unsupported regex syntax: skip rather than false-positive.
+    }
+  }
+  return failures;
+}
+
+function checkScalarConstraints(schema: Node, exampleNode: Node, version: OpenApiVersion, path: string): ExampleFailure[] {
+  if (!isScalar(exampleNode)) return [];
+  const v = exampleNode.value;
+  if (typeof v === "number") return checkNumericBounds(schema, v, version, path);
+  if (typeof v === "string") return checkStringConstraints(schema, v, path);
+  return [];
+}
+
+function checkObject(env: ValidateEnv, doc: OasisDocument, schema: Node, exampleNode: Node, path: string, chain: Set<Node>): ExampleFailure[] {
+  if (!isMap(exampleNode)) return [];
+  const failures: ExampleFailure[] = [];
+  const exampleKeys = new Set(exampleNode.items.map((p) => keyToString(p.key)));
+
+  const requiredNode = childAt(schema, "required");
+  if (isSeq(requiredNode)) {
+    for (const item of requiredNode.items) {
+      if (isNode(item) && isScalar(item) && typeof item.value === "string" && !exampleKeys.has(item.value)) {
+        failures.push({ node: exampleNode, message: withLoc(`missing required property "${item.value}"`, path) });
+      }
+    }
+  }
+
+  const propertiesNode = childAt(schema, "properties");
+  const knownProps = new Set<string>();
+  if (isMap(propertiesNode)) {
+    for (const pair of propertiesNode.items) {
+      const propName = keyToString(pair.key);
+      knownProps.add(propName);
+      if (!isNode(pair.value)) continue;
+      const examplePair = exampleNode.items.find((p) => keyToString(p.key) === propName);
+      if (!examplePair || !isNode(examplePair.value)) continue;
+      failures.push(...checkSchema(env, { doc, node: pair.value }, examplePair.value, chain, `${path}/${propName}`));
+    }
+  }
+
+  const additionalPropertiesNode = childAt(schema, "additionalProperties");
+  if (additionalPropertiesNode) {
+    if (isScalar(additionalPropertiesNode) && additionalPropertiesNode.value === false) {
+      for (const pair of exampleNode.items) {
+        const name = keyToString(pair.key);
+        if (!knownProps.has(name)) {
+          failures.push({
+            node: isNode(pair.key) ? pair.key : exampleNode,
+            message: withLoc(`unexpected property "${name}" (additionalProperties: false)`, path),
+          });
+        }
+      }
+    } else if (isMap(additionalPropertiesNode)) {
+      for (const pair of exampleNode.items) {
+        const name = keyToString(pair.key);
+        if (knownProps.has(name) || !isNode(pair.value)) continue;
+        failures.push(...checkSchema(env, { doc, node: additionalPropertiesNode }, pair.value, chain, `${path}/${name}`));
+      }
+    }
+  }
+
+  return failures;
+}
+
+function checkArray(env: ValidateEnv, doc: OasisDocument, schema: Node, exampleNode: Node, path: string, chain: Set<Node>): ExampleFailure[] {
+  if (!isSeq(exampleNode)) return [];
+  const failures: ExampleFailure[] = [];
+
+  const minItems = numberOf(childAt(schema, "minItems"));
+  const maxItems = numberOf(childAt(schema, "maxItems"));
+  if (minItems !== undefined && exampleNode.items.length < minItems) {
+    failures.push({ node: exampleNode, message: withLoc(`array has ${exampleNode.items.length} items, below minItems ${minItems}`, path) });
+  }
+  if (maxItems !== undefined && exampleNode.items.length > maxItems) {
+    failures.push({ node: exampleNode, message: withLoc(`array has ${exampleNode.items.length} items, above maxItems ${maxItems}`, path) });
+  }
+
+  let startIdx = 0;
+  const prefixItemsNode = env.version === "3.1" ? childAt(schema, "prefixItems") : undefined;
+  if (isSeq(prefixItemsNode)) {
+    for (let i = 0; i < prefixItemsNode.items.length; i++) {
+      const itemExample = exampleNode.items[i];
+      if (!itemExample || !isNode(itemExample)) break;
+      const itemSchema = prefixItemsNode.items[i];
+      if (!isNode(itemSchema)) continue;
+      failures.push(...checkSchema(env, { doc, node: itemSchema }, itemExample, chain, `${path}/${i}`));
+    }
+    startIdx = prefixItemsNode.items.length;
+  }
+
+  const itemsNode = childAt(schema, "items");
+  if (itemsNode && isNode(itemsNode)) {
+    for (let i = startIdx; i < exampleNode.items.length; i++) {
+      const itemExample = exampleNode.items[i];
+      if (!isNode(itemExample)) continue;
+      failures.push(...checkSchema(env, { doc, node: itemsNode }, itemExample, chain, `${path}/${i}`));
+    }
+  }
+
+  return failures;
+}
+
+function checkAllOf(env: ValidateEnv, doc: OasisDocument, schema: Node, exampleNode: Node, path: string, chain: Set<Node>): ExampleFailure[] {
+  const allOfNode = childAt(schema, "allOf");
+  if (!isSeq(allOfNode)) return [];
+  const failures: ExampleFailure[] = [];
+  for (const item of allOfNode.items) {
+    if (!isNode(item)) continue;
+    failures.push(...checkSchema(env, { doc, node: item }, exampleNode, chain, path));
+  }
+  return failures;
+}
+
+function checkOneAnyOf(env: ValidateEnv, doc: OasisDocument, schema: Node, exampleNode: Node, path: string, chain: Set<Node>): ExampleFailure[] {
+  const failures: ExampleFailure[] = [];
+  for (const key of ["oneOf", "anyOf"] as const) {
+    const seq = childAt(schema, key);
+    if (!isSeq(seq) || seq.items.length === 0) continue;
+    const branches = seq.items.filter(isNode);
+    if (branches.length === 0) continue;
+    const anyPass = branches.some((branch) => checkSchema(env, { doc, node: branch }, exampleNode, chain, path).length === 0);
+    if (!anyPass) {
+      failures.push({ node: exampleNode, message: withLoc(`value does not match any "${key}" branch (${branches.length} tried)`, path) });
+    }
+  }
+  return failures;
+}
+
+function checkSchema(env: ValidateEnv, schemaLoc: SchemaLoc, exampleNode: Node, chain: Set<Node>, path: string): ExampleFailure[] {
+  const resolved = resolveSchema(env, schemaLoc);
+  if (resolved === "unresolved") return [];
+  const { doc, node: schema } = resolved;
+
+  if (isScalar(schema)) {
+    // JSON Schema boolean schemas: `true` always passes, `false` never does.
+    if (schema.value === false) return [{ node: exampleNode, message: withLoc("no value satisfies a `false` schema", path) }];
+    return [];
+  }
+  if (!isMap(schema)) return [];
+
+  // Can't confidently evaluate these: skip rather than risk a false positive.
+  if (childAt(schema, "not")) return [];
+  if (childAt(schema, "discriminator")) return [];
+
+  if (chain.has(schema)) return [];
+  chain.add(schema);
+  try {
+    const typeFailures = checkType(schema, exampleNode, env.version, path);
+    if (typeFailures.length > 0) return typeFailures;
+
+    const failures: ExampleFailure[] = [];
+    failures.push(...checkEnumConst(schema, exampleNode, path));
+    failures.push(...checkScalarConstraints(schema, exampleNode, env.version, path));
+    failures.push(...checkObject(env, doc, schema, exampleNode, path, chain));
+    failures.push(...checkArray(env, doc, schema, exampleNode, path, chain));
+    failures.push(...checkAllOf(env, doc, schema, exampleNode, path, chain));
+    failures.push(...checkOneAnyOf(env, doc, schema, exampleNode, path, chain));
+    return failures;
+  } finally {
+    chain.delete(schema);
+  }
+}
+
+/** Validate `exampleNode` against the schema at `schemaLoc` (following `$ref`s as needed). */
+export function validateExample(env: ValidateEnv, schemaLoc: SchemaLoc, exampleNode: Node): ExampleFailure[] {
+  return checkSchema(env, schemaLoc, exampleNode, new Set(), "");
+}

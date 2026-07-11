@@ -88,8 +88,22 @@ Exit code is `1` if any error-severity diagnostic is reported, `0` otherwise, `2
 | `tags-defined` | off | Operation tags are declared in the root `tags` list |
 | `no-unused-tags` | warn | Root `tags` list entries are used by at least one operation |
 | `naming-convention` | off | Configurable casing for operationIds, component names, parameter names, schema property names (see below) |
+| `example-schema-match` | warn | `example`/`examples[].value` values conform to their schema (Schema Object, Media Type Object, Parameter Object), version-aware |
 
 Syntax errors are always reported as errors and cannot be disabled.
+
+##### `example-schema-match` validation subset
+
+This rule hand-rolls a small subset of JSON Schema / OpenAPI Schema Object validation rather than
+pulling in a full validator dependency, to keep the binary lean. It checks `type` (version-aware:
+3.0 `nullable` vs 3.1 type arrays / `"null"`), `enum`, `const` (3.1), `required`/`properties`,
+`additionalProperties: false`, `items` (+ 3.1 `prefixItems`), `minItems`/`maxItems`,
+`minimum`/`maximum`/`exclusiveMinimum`/`exclusiveMaximum` (version-aware boolean vs numeric
+exclusive bounds), `minLength`/`maxLength`/`pattern`, and `allOf` (every branch must pass) /
+`oneOf`/`anyOf` (at least one branch must pass — `oneOf`'s exclusivity is deliberately not
+enforced). Schemas using `not`, `discriminator`, or containing an unresolved `$ref` are skipped
+entirely (no diagnostic) rather than risk a false positive. `externalValue` examples are skipped
+since there's no local value to check.
 
 ##### `naming-convention` options
 
