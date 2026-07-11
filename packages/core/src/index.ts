@@ -21,3 +21,8 @@ export type { WorkspaceGraph } from "./graph.ts";
 export { allDiagnostics, loadWorkspaceGraph } from "./graph.ts";
 
 export { offsetAtPosition, positionAtOffset, rangeFromOffsets, zeroRange } from "./position.ts";
+
+export { childAt, keyToString } from "./walk.ts";
+
+export type { ComponentSection } from "./components.ts";
+export { COMPONENT_SECTIONS } from "./components.ts";

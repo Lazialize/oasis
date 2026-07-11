@@ -16,6 +16,7 @@ import type {
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { URI } from "vscode-uri";
 import { parseDocument } from "@oasis/core";
+import type { Range } from "@oasis/core";
 import { getCodeActions } from "./handlers/code-actions.ts";
 import { getDefinition } from "./handlers/definition.ts";
 import { getHover } from "./handlers/hover.ts";
@@ -47,6 +48,16 @@ function workspaceRootsFromInitialize(params: InitializeParams): string[] {
   }
   if (params.rootUri) return [uriToPath(params.rootUri)];
   return [];
+}
+
+/** Group flat file edits into the LSP `WorkspaceEdit.changes` shape (uri -> TextEdit[]). */
+function groupEditsByUri(edits: { filePath: string; range: Range; newText: string }[]): Record<string, { range: ReturnType<typeof toLspRange>; newText: string }[]> {
+  const changes: Record<string, { range: ReturnType<typeof toLspRange>; newText: string }[]> = {};
+  for (const edit of edits) {
+    const uri = pathToUri(edit.filePath);
+    (changes[uri] ??= []).push({ range: toLspRange(edit.range), newText: edit.newText });
+  }
+  return changes;
 }
 
 const SYMBOL_KIND_MAP: Record<SymbolNodeKind, LspSymbolKind> = {
@@ -318,12 +329,7 @@ export function startServer(): Connection {
     const path = uriToPath(params.textDocument.uri);
     const edits = await renameComponent(ctx, { path, position: params.position, newName: params.newName });
     if (!edits) return null;
-    const changes: Record<string, { range: ReturnType<typeof toLspRange>; newText: string }[]> = {};
-    for (const edit of edits) {
-      const uri = pathToUri(edit.filePath);
-      (changes[uri] ??= []).push({ range: toLspRange(edit.range), newText: edit.newText });
-    }
-    return { changes };
+    return { changes: groupEditsByUri(edits) };
   });
 
   connection.onCodeAction(async (params) => {
@@ -337,20 +343,15 @@ export function startServer(): Connection {
         range: d.range,
       })),
     });
-    return results.map((result): LspCodeAction => {
-      const changes: Record<string, { range: ReturnType<typeof toLspRange>; newText: string }[]> = {};
-      for (const edit of result.edits) {
-        const uri = pathToUri(edit.filePath);
-        (changes[uri] ??= []).push({ range: toLspRange(edit.range), newText: edit.newText });
-      }
-      return {
+    return results.map(
+      (result): LspCodeAction => ({
         title: result.title,
         kind: result.kind,
         diagnostics: result.diagnosticIndex !== undefined ? [params.context.diagnostics[result.diagnosticIndex]!] : undefined,
         isPreferred: result.isPreferred,
-        edit: { changes },
-      };
-    });
+        edit: { changes: groupEditsByUri(result.edits) },
+      }),
+    );
   });
 
   documents.listen(connection);

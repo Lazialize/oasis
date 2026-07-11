@@ -4,7 +4,7 @@ import type { OasisDocument } from "./parse.ts";
 import type { Range } from "./types.ts";
 import { rangeFromOffsets } from "./position.ts";
 import { formatPointer, parsePointer } from "./pointer.ts";
-import { keyToString } from "./walk.ts";
+import { childAt, keyToString } from "./walk.ts";
 
 export interface PointerLookupResult {
   node: Node;
@@ -24,22 +24,6 @@ export function nodeAtPointer(doc: OasisDocument, pointer: string): PointerLooku
     current = next;
   }
   return nodeToResult(current, doc);
-}
-
-function childAt(node: Node, segment: string): Node | undefined {
-  if (isMap(node)) {
-    const pair = node.items.find((p) => keyToString(p.key) === segment);
-    if (!pair || !isNode(pair.value)) return undefined;
-    return pair.value;
-  }
-  if (isSeq(node)) {
-    if (!/^(0|[1-9]\d*)$/.test(segment)) return undefined;
-    const idx = Number(segment);
-    const item = node.items[idx];
-    if (!isNode(item)) return undefined;
-    return item;
-  }
-  return undefined;
 }
 
 function nodeToResult(node: Node, doc: OasisDocument): PointerLookupResult | undefined {

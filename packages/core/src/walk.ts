@@ -7,28 +7,19 @@ export function keyToString(key: unknown): string {
   return String(key);
 }
 
-/**
- * Depth-first walk over a composed yaml AST, visiting every child node (map values and
- * sequence items) along with the JSON Pointer segments leading to it. Does not visit `node`
- * itself, only its descendants.
- */
-export function walkChildren(node: unknown, visit: (child: Node, segments: string[]) => void, segments: string[] = []): void {
+/** Look up a direct child of a YAML map/seq node by key/index, without following $refs. */
+export function childAt(node: Node, segment: string): Node | undefined {
   if (isMap(node)) {
-    for (const pair of node.items) {
-      const value = pair.value;
-      const segs = [...segments, keyToString(pair.key)];
-      if (isNode(value)) {
-        visit(value, segs);
-        walkChildren(value, visit, segs);
-      }
-    }
-  } else if (isSeq(node)) {
-    node.items.forEach((item, idx) => {
-      const segs = [...segments, String(idx)];
-      if (isNode(item)) {
-        visit(item, segs);
-        walkChildren(item, visit, segs);
-      }
-    });
+    const pair = node.items.find((p) => keyToString(p.key) === segment);
+    if (!pair || !isNode(pair.value)) return undefined;
+    return pair.value;
   }
+  if (isSeq(node)) {
+    if (!/^(0|[1-9]\d*)$/.test(segment)) return undefined;
+    const idx = Number(segment);
+    const item = node.items[idx];
+    if (!isNode(item)) return undefined;
+    return item;
+  }
+  return undefined;
 }
