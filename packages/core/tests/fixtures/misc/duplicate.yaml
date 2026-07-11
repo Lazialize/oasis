@@ -1,0 +1,5 @@
+foo: 1
+foo: 2
+nested:
+  bar: 1
+  bar: 2

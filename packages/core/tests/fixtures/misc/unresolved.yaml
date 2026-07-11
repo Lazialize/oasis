@@ -1,0 +1,11 @@
+openapi: 3.0.3
+info:
+  title: Unresolved
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Missing:
+      $ref: './does-not-exist.yaml#/components/schemas/Foo'
+    BadPointer:
+      $ref: '#/components/schemas/NoSuchThing'

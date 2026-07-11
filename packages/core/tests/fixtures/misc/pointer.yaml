@@ -1,0 +1,7 @@
+paths:
+  /users:
+    get:
+      summary: List users
+  /users/{id}:
+    get:
+      summary: Get user
