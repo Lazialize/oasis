@@ -1,0 +1,8 @@
+PetsPath:
+  get:
+    operationId: listPets
+    tags: [pets]
+    description: List pets.
+    responses:
+      '404':
+        description: Not found

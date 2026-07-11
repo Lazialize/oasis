@@ -1,0 +1,12 @@
+openapi: 3.0.3
+info:
+  title: Multi
+  version: "1.0.0"
+paths:
+  /pets:
+    $ref: './paths-pets.yaml#/PetsPath'
+components:
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic

@@ -1,0 +1,15 @@
+openapi: 3.0.3
+info:
+  title: T
+  version: "1.0.0"
+tags:
+  - name: pets
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      tags: [reptiles]
+      description: x
+      responses:
+        '200':
+          description: OK

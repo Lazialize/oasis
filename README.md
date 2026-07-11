@@ -80,8 +80,13 @@ Exit code is `1` if any error-severity diagnostic is reported, `0` otherwise, `2
 | `operation-operationId` | error | `operationId` present and unique across the workspace |
 | `operation-tags` | warn | Operations have at least one tag |
 | `operation-description` | warn | Operations have a `description` or `summary` |
+| `operation-success-response` | warn | Operations have at least one 2xx/3xx response (`default` alone doesn't count) |
 | `path-params-defined` | error | `{param}` templates ↔ `in: path` parameters agree; path params are `required` |
 | `no-unused-components` | warn | Components nothing references |
+| `no-duplicate-paths` | error | Path templates that are equivalent up to parameter names (`/users/{id}` vs `/users/{userId}`) |
+| `security-defined` | error | `security` requirement scheme names exist in `components/securitySchemes` |
+| `tags-defined` | off | Operation tags are declared in the root `tags` list |
+| `no-unused-tags` | warn | Root `tags` list entries are used by at least one operation |
 
 Syntax errors are always reported as errors and cannot be disabled.
 

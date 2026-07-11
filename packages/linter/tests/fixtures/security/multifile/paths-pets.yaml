@@ -1,0 +1,10 @@
+PetsPath:
+  get:
+    operationId: listPets
+    tags: [pets]
+    description: List pets.
+    security:
+      - oauth2: [read]
+    responses:
+      '200':
+        description: OK

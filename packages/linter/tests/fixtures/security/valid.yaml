@@ -1,0 +1,23 @@
+openapi: 3.0.3
+info:
+  title: T
+  version: "1.0.0"
+security:
+  - basicAuth: []
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      tags: [a]
+      description: x
+      security:
+        - basicAuth: []
+        - {}
+      responses:
+        '200':
+          description: OK
+components:
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
