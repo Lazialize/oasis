@@ -5,9 +5,12 @@ import { runLintCommand } from "./commands/lint.ts";
 const HELP = `oasis - OpenAPI toolkit (lint / bundle / lsp)
 
 Usage:
-  oasis lint <entry...> [--config path] [--format pretty|json]
+  oasis lint [entry...] [--config path] [--format pretty|json]
   oasis bundle <entry> [-o|--out path] [--format yaml|json]
   oasis lsp                                            start the LSP server on stdio
+
+With no entry given, \`oasis lint\` discovers \`oasis.config.jsonc\` (upward from the working
+directory, or via --config) and lints every document listed in its "entries".
 
 Options:
   -h, --help    Show this help message

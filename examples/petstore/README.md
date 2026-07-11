@@ -29,6 +29,10 @@ own). Opening `paths/pets.yaml` directly still gets diagnostics, go-to-definitio
 # or from this directory — the config is picked up automatically
 cd examples/petstore
 ../../dist/oasis lint openapi.yaml
+
+# or with no entry at all — discovers oasis.config.jsonc and lints its "entries"
+cd examples/petstore
+../../dist/oasis lint
 ```
 
 Open this folder in VS Code with the Oasis extension to see the same findings as squiggles,

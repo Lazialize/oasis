@@ -6,7 +6,11 @@ export interface ParsedLintArgs {
 
 export type ParseResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
-/** Parse arguments for `oasis lint <entry...> [--config path] [--format pretty|json]`. */
+/**
+ * Parse arguments for `oasis lint [entry...] [--config path] [--format pretty|json]`.
+ * Entries are optional: with none given, the caller falls back to `entries` declared in a
+ * discovered `oasis.config.jsonc` (see `runLintCommand`).
+ */
 export function parseLintArgs(args: string[]): ParseResult<ParsedLintArgs> {
   const entries: string[] = [];
   let configPath: string | undefined;
@@ -29,10 +33,6 @@ export function parseLintArgs(args: string[]): ParseResult<ParsedLintArgs> {
     } else if (arg) {
       entries.push(arg);
     }
-  }
-
-  if (entries.length === 0) {
-    return { ok: false, error: "At least one entry file is required" };
   }
 
   return { ok: true, value: { entries, configPath, format } };

@@ -40,7 +40,7 @@ extension section below for `oasis.server.path`.
 
 ## Commands
 
-### `oasis lint <entry...>`
+### `oasis lint [entry...]`
 
 Lints one or more OpenAPI documents, following `$ref`s across files. Diagnostics in referenced files are attributed to those files.
 
@@ -49,6 +49,19 @@ oasis lint openapi.yaml
 oasis lint openapi.yaml --format json     # machine-readable output
 oasis lint openapi.yaml --config path/to/oasis.config.jsonc
 ```
+
+With no entry given, `oasis lint` discovers `oasis.config.jsonc` (upward from the working
+directory, or via `--config`) and lints every document listed in its `entries`, resolved relative
+to the config file's directory:
+
+```sh
+oasis lint     # discovers oasis.config.jsonc and lints its "entries"
+```
+
+This fails with a usage error (exit `2`) if no entry is given and no config is found, or if a
+config is found but has no (or an empty) `entries` list. An entry listed in `entries` that doesn't
+exist on disk is surfaced as a warning diagnostic in the normal output rather than a crash; the
+other entries still lint. If every declared entry is missing, that's also a usage error.
 
 Exit code is `1` if any error-severity diagnostic is reported, `0` otherwise, `2` on usage/config errors.
 
@@ -91,10 +104,11 @@ Place an `oasis.config.jsonc` at your project root (discovered upward from the w
 Severities: `"error"` | `"warn"` | `"info"` | `"off"`.
 
 `entries` is an optional list of entry-document paths, relative to the directory containing the
-config file. It's consumed by the LSP (see "project mode" below) — `oasis lint`/`oasis bundle`
-still take their entry explicitly on the command line and ignore this field. An entry that doesn't
-exist on disk produces a config warning diagnostic rather than a crash; the field can be omitted
-entirely with no change in behavior.
+config file. It's consumed by the LSP (see "project mode" below) and by `oasis lint` when run with
+no entry arguments (see above); `oasis lint`/`oasis bundle` given an explicit entry on the command
+line ignore this field, and `oasis bundle` never reads it (it always takes exactly one entry). An
+entry that doesn't exist on disk produces a config warning diagnostic rather than a crash; the
+field can be omitted entirely with no change in behavior.
 
 ### `oasis bundle <entry>`
 

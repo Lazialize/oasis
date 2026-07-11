@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const fixturesRoot = `${import.meta.dir}/fixtures`;
 const cliEntry = `${import.meta.dir}/../src/index.ts`;
@@ -9,8 +12,12 @@ interface RunResult {
   stderr: string;
 }
 
-async function runCli(args: string[]): Promise<RunResult> {
-  const proc = Bun.spawn(["bun", "run", cliEntry, ...args], { stdout: "pipe", stderr: "pipe" });
+async function runCli(args: string[], options: { cwd?: string } = {}): Promise<RunResult> {
+  const proc = Bun.spawn(["bun", "run", cliEntry, ...args], {
+    stdout: "pipe",
+    stderr: "pipe",
+    cwd: options.cwd,
+  });
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
@@ -76,5 +83,70 @@ describe("oasis lint CLI", () => {
     const result = await runCli(["--help"]);
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Usage:");
+  });
+});
+
+describe("oasis lint (no args, config entries)", () => {
+  const configLintRoot = `${fixturesRoot}/config-lint`;
+
+  test("lints every entry in the discovered config, exits 1 on findings", async () => {
+    const result = await runCli(["lint"], { cwd: configLintRoot });
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("invalid.yaml");
+    expect(result.stdout).toContain("operation-operationId");
+    expect(result.stdout).toMatch(/\d+ errors?, \d+ warnings?/);
+  });
+
+  test("discovers the config upward from a subdirectory", async () => {
+    const result = await runCli(["lint"], { cwd: `${configLintRoot}/nested` });
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("invalid.yaml");
+  });
+
+  test("--config points at a config elsewhere", async () => {
+    const result = await runCli(["lint", "--config", `${configLintRoot}/oasis.config.jsonc`]);
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("invalid.yaml");
+  });
+
+  test("a missing entry surfaces as a diagnostic warning while the other entry still lints", async () => {
+    const result = await runCli(["lint"], { cwd: configLintRoot });
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("missing.yaml");
+    expect(result.stdout).toContain("not found");
+    expect(result.stdout).toContain("invalid.yaml");
+  });
+
+  test("--format json produces the same shape as multi-entry lint, including the missing-entry warning", async () => {
+    const result = await runCli(["lint", "--format", "json"], { cwd: configLintRoot });
+    expect(result.exitCode).toBe(1);
+    const report = JSON.parse(result.stdout);
+    expect(Array.isArray(report.diagnostics)).toBe(true);
+    expect(report.diagnostics.some((d: { rule: string }) => d.rule === "operation-operationId")).toBe(true);
+    const configWarning = report.diagnostics.find((d: { rule: string }) => d.rule === "config");
+    expect(configWarning).toMatchObject({ severity: "warning" });
+    expect(configWarning.message).toContain("missing.yaml");
+    expect(report.summary).toMatchObject({ errors: 1, warnings: 1 });
+  });
+
+  test("exits 2 with a helpful message when no args are given and no config is found", async () => {
+    const emptyDir = mkdtempSync(join(tmpdir(), "oasis-cli-no-config-"));
+    const result = await runCli(["lint"], { cwd: emptyDir });
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("entry file");
+    expect(result.stderr).toContain("oasis.config.jsonc");
+  });
+
+  test("exits 2 with a helpful message when the config has no entries", async () => {
+    const result = await runCli(["lint", "--config", `${fixturesRoot}/oasis.config.jsonc`]);
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("entries");
+  });
+
+  test("exits 2 when every declared entry is missing", async () => {
+    const result = await runCli(["lint"], { cwd: `${fixturesRoot}/config-lint-all-missing` });
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("missing-a.yaml");
+    expect(result.stderr).toContain("missing-b.yaml");
   });
 });
