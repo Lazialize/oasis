@@ -12,6 +12,6 @@ export type { HttpMethod, OperationInfo, PathItemInfo } from "./openapi-walk.ts"
 export { HTTP_METHODS, iterateOperations, iteratePathItems, PATH_ITEM_NON_METHOD_KEYS } from "./openapi-walk.ts";
 
 export type { ResolvedLocation } from "./util.ts";
-export { childAt, keyToString, nodeAt, resolveMaybeRef } from "./util.ts";
+export { childAt, isRefObject, keyToString, nodeAt, resolveMaybeRef } from "./util.ts";
 
 export { COMPONENT_CATEGORIES } from "./rules/no-unused-components.ts";

@@ -10,7 +10,7 @@ import {
   rangeFromOffsets,
 } from "@oasis/core";
 import type { OasisDocument, Position, Range, WorkspaceGraph } from "@oasis/core";
-import { COMPONENT_CATEGORIES, HTTP_METHODS, childAt, iterateOperations, iteratePathItems, resolveMaybeRef } from "@oasis/linter";
+import { COMPONENT_CATEGORIES, HTTP_METHODS, childAt, isRefObject, iterateOperations, iteratePathItems, resolveMaybeRef } from "@oasis/linter";
 import { relativeRefPath } from "../ref-target-path.ts";
 import { getDocument, getGraph, resolveEntryForPath } from "../workspace.ts";
 import type { ServerContext } from "../workspace.ts";
@@ -355,11 +355,6 @@ function trimTrailingWhitespaceEnd(text: string, start: number, end: number): nu
   return e;
 }
 
-function hasRefKey(node: Node): boolean {
-  if (!isMap(node)) return false;
-  return node.items.some((p) => isScalar(p.key) && p.key.value === "$ref");
-}
-
 /** Re-indent a raw source slice from `oldBaseIndent` (the column its first line started at) to
  * `newBaseIndent`, leaving the first line's own leading whitespace untouched (the caller prepends
  * `newBaseIndent` spaces to it separately, since a block value's first line normally carries none). */
@@ -465,7 +460,7 @@ function buildExtractToComponent(graph: WorkspaceGraph, entryDoc: OasisDocument,
 
   const schemaResult = nodeAtPointer(doc, formatPointer(schemaSegs));
   if (!schemaResult || !isMap(schemaResult.node) || !schemaResult.node.range) return undefined;
-  if (hasRefKey(schemaResult.node)) return undefined;
+  if (isRefObject(schemaResult.node)) return undefined;
 
   // Find the enclosing operation (for naming) by looking for an HTTP-method segment on the way up.
   let operationId: string | undefined;
