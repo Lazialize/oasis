@@ -209,3 +209,21 @@ bun run test:bin    # exercise the compiled binary (lint/bundle/lsp), rebuilding
 ```
 
 The VS Code extension is built separately with npm — see [editors/vscode/README.md](editors/vscode/README.md).
+
+### Releasing
+
+Versioning and changelogs are managed with [Changesets](https://github.com/changesets/changesets).
+All `@oasis/*` packages are versioned together as a fixed group, and `editors/vscode`'s version is
+kept in sync with them.
+
+When you make a user-facing change, add a changeset describing it:
+
+```sh
+bun changeset
+```
+
+This is picked up by CI: pushes to `main` open/update a "Version Packages" PR with the version
+bumps and changelog entries. Merging that PR triggers the workflow again — since there are no
+packages published to npm, it instead creates and pushes a `v<version>` git tag and kicks off
+`release.yml`, which builds the CLI binaries and the `.vsix`, and publishes a GitHub Release. No
+manual tagging is needed; a maintainer only needs to merge the Version Packages PR.

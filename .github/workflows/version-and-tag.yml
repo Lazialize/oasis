@@ -1,0 +1,97 @@
+name: Version and Tag
+
+# Changesets flow:
+#   1. Contributors add changeset files via `bun changeset` on their PRs.
+#   2. On every push to main, this workflow runs `changesets/action@v1`,
+#      which either opens/updates a "Version Packages" PR (running our
+#      custom `bun run version` command, which bumps the fixed
+#      `@oasis/*` group and syncs editors/vscode/package.json) or, if a
+#      Version Packages PR was just merged, finds there are no pending
+#      changesets left.
+#   3. In that second case we don't publish to npm (this repo has no npm
+#      packages) — instead we create+push a `v<version>` git tag ourselves
+#      and immediately invoke release.yml as a reusable workflow, because
+#      tags pushed with the default GITHUB_TOKEN do NOT trigger other
+#      workflows' `on: push: tags` triggers.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  version:
+    name: Version Packages / Tag
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.check_tag.outputs.should_tag }}
+      tag: ${{ steps.check_tag.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Create Version Packages PR
+        id: changesets
+        uses: changesets/action@v1
+        with:
+          version: bun run version
+          title: "chore: version packages"
+          commit: "chore: version packages"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check whether a release tag is needed
+        id: check_tag
+        run: |
+          set -euo pipefail
+
+          if [ "${{ steps.changesets.outputs.hasChangesets }}" = "true" ]; then
+            echo "Pending changesets remain (Version Packages PR open/updated); nothing to tag."
+            echo "should_tag=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          version="$(node -p "require('./packages/cli/package.json').version")"
+          tag="v${version}"
+
+          if git rev-parse "refs/tags/${tag}" >/dev/null 2>&1 || \
+             git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "Tag ${tag} already exists; nothing to do."
+            echo "should_tag=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "No pending changesets and ${tag} doesn't exist yet; will tag."
+            echo "should_tag=true" >> "$GITHUB_OUTPUT"
+            echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create and push release tag
+        if: steps.check_tag.outputs.should_tag == 'true'
+        run: |
+          set -euo pipefail
+          tag="${{ steps.check_tag.outputs.tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$tag"
+          git push origin "$tag"
+
+  release:
+    name: Trigger release
+    needs: version
+    if: needs.version.outputs.should_release == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.version.outputs.tag }}
