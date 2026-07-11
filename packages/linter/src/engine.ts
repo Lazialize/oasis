@@ -1,0 +1,100 @@
+import type { Node } from "yaml";
+import { detectVersion, nodeAtPointer, rangeFromOffsets, zeroRange } from "@oasis/core";
+import type { Range, WorkspaceGraph } from "@oasis/core";
+import { rules } from "./rules/index.ts";
+import type { LintDiagnostic, LintDiagnosticSeverity, ReportLocation, Rule, RuleContext, RuleSeverity } from "./types.ts";
+import type { ResolvedLintConfig } from "./config.ts";
+
+export interface LintOptions {
+  /** Path to the config file actually used, for diagnostics that reference config problems. */
+  configPath?: string;
+}
+
+/** Map a rule/config severity to the severity carried on emitted diagnostics. "off" never reaches here. */
+function toDiagnosticSeverity(severity: RuleSeverity): LintDiagnosticSeverity {
+  if (severity === "warn") return "warning";
+  if (severity === "off") return "info"; // unreachable in practice; kept exhaustive
+  return severity;
+}
+
+function resolveLocation(location: ReportLocation): Range | undefined {
+  if ("filePath" in location) return location;
+  if ("pointer" in location) {
+    return nodeAtPointer(location.doc, location.pointer)?.range ?? zeroRange(location.doc.filePath);
+  }
+  const node: Node = location.node;
+  if (!node.range) return zeroRange(location.doc.filePath);
+  return rangeFromOffsets(location.doc.filePath, location.doc.lineCounter, node.range[0], node.range[1]);
+}
+
+/**
+ * Run the lint rule engine over a workspace graph. Core parse/graph diagnostics (syntax errors,
+ * duplicate keys, unresolved refs, ref cycles) flow through the same pipeline as built-in rules:
+ * syntax errors are always emitted as errors and cannot be disabled; the rest are surfaced by the
+ * `no-duplicate-keys` / `no-unresolved-ref` / `no-ref-cycle` rules and are subject to config.
+ */
+export function lint(graph: WorkspaceGraph, config: ResolvedLintConfig, options: LintOptions = {}): LintDiagnostic[] {
+  const diagnostics: LintDiagnostic[] = [];
+  const entryDoc = graph.documents.get(graph.entryPath);
+  const documents = [...graph.documents.values()];
+  if (entryDoc) {
+    const idx = documents.indexOf(entryDoc);
+    if (idx > 0) {
+      documents.splice(idx, 1);
+      documents.unshift(entryDoc);
+    }
+  }
+
+  // Syntax errors: always errors, never disableable, not part of the rule registry.
+  for (const doc of documents) {
+    for (const d of doc.diagnostics) {
+      if (d.source === "yaml" && d.severity === "error") {
+        diagnostics.push({ rule: "syntax-error", severity: "error", message: d.message, range: d.range });
+      }
+    }
+  }
+
+  // Unknown rule names in config surface as warnings, not crashes.
+  for (const warning of config.configWarnings) {
+    diagnostics.push({
+      rule: "config",
+      severity: "warning",
+      message: warning,
+      range: zeroRange(options.configPath ?? graph.entryPath),
+    });
+  }
+
+  if (!entryDoc) return sortDiagnostics(diagnostics);
+
+  for (const rule of rules as Rule[]) {
+    const severity = config.rules[rule.name] ?? rule.defaultSeverity;
+    if (severity === "off") continue;
+
+    const ctx: RuleContext = {
+      graph,
+      entryDoc,
+      documents,
+      version: detectVersion(entryDoc),
+      report(location, message, opts) {
+        const effectiveSeverity = opts?.severity ?? severity;
+        if (effectiveSeverity === "off") return;
+        const range = resolveLocation(location);
+        if (!range) return;
+        diagnostics.push({ rule: rule.name, severity: toDiagnosticSeverity(effectiveSeverity), message, range });
+      },
+    };
+
+    rule.check(ctx);
+  }
+
+  return sortDiagnostics(diagnostics);
+}
+
+function sortDiagnostics(diagnostics: LintDiagnostic[]): LintDiagnostic[] {
+  return [...diagnostics].sort((a, b) => {
+    if (a.range.filePath !== b.range.filePath) return a.range.filePath < b.range.filePath ? -1 : 1;
+    if (a.range.start.line !== b.range.start.line) return a.range.start.line - b.range.start.line;
+    if (a.range.start.character !== b.range.start.character) return a.range.start.character - b.range.start.character;
+    return a.rule < b.rule ? -1 : a.rule > b.rule ? 1 : 0;
+  });
+}

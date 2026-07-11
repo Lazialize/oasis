@@ -1,0 +1,9 @@
+openapi: 3.0.3
+info:
+  title: Cycle
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    A:
+      $ref: './cycle-b.yaml#/components/schemas/B'

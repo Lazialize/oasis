@@ -1,0 +1,4 @@
+components:
+  schemas:
+    B:
+      $ref: './cycle-a.yaml#/components/schemas/A'

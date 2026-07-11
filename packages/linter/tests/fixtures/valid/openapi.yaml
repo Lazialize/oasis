@@ -1,0 +1,33 @@
+openapi: 3.0.3
+info:
+  title: Valid API
+  version: "1.0.0"
+  description: A valid test API.
+tags:
+  - name: pets
+paths:
+  /pets/{id}:
+    get:
+      operationId: getPet
+      tags: [pets]
+      description: Get a pet by id.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+components:
+  schemas:
+    Pet:
+      type: object
+      properties:
+        name:
+          type: string

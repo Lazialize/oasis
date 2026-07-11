@@ -1,0 +1,7 @@
+PetsPath:
+  get:
+    tags: [pets]
+    description: List pets.
+    responses:
+      '200':
+        description: OK
