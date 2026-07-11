@@ -1,4 +1,5 @@
 import { noDuplicateKeys, noRefCycle, noUnresolvedRef } from "./core-diagnostics.ts";
+import { namingConvention } from "./naming-convention.ts";
 import { noDuplicatePaths } from "./no-duplicate-paths.ts";
 import { noUnusedComponents } from "./no-unused-components.ts";
 import { noUnusedTags } from "./no-unused-tags.ts";
@@ -36,9 +37,11 @@ export const rules: Rule[] = [
   securityDefined,
   tagsDefined,
   noUnusedTags,
+  namingConvention,
 ];
 
 export {
+  namingConvention,
   noDuplicateKeys,
   noDuplicatePaths,
   noRefCycle,

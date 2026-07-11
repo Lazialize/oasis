@@ -87,8 +87,46 @@ Exit code is `1` if any error-severity diagnostic is reported, `0` otherwise, `2
 | `security-defined` | error | `security` requirement scheme names exist in `components/securitySchemes` |
 | `tags-defined` | off | Operation tags are declared in the root `tags` list |
 | `no-unused-tags` | warn | Root `tags` list entries are used by at least one operation |
+| `naming-convention` | off | Configurable casing for operationIds, component names, parameter names, schema property names (see below) |
 
 Syntax errors are always reported as errors and cannot be disabled.
+
+##### `naming-convention` options
+
+Off by default and a no-op until configured — pass an options object naming at least one target and
+the casing style to enforce for it:
+
+```jsonc
+{
+  "lint": {
+    "rules": {
+      "naming-convention": [
+        "warn",
+        {
+          "operationId": "camelCase",
+          "componentName": "PascalCase",
+          "parameterName": "camelCase",
+          "propertyName": "camelCase"
+        }
+      ]
+    }
+  }
+}
+```
+
+- All four keys are optional; only the ones present are checked. Supported styles: `camelCase`,
+  `PascalCase`, `snake_case`, `kebab-case`, `SCREAMING_SNAKE_CASE`.
+- `componentName` checks the keys under every `components/*` group (`schemas`, `responses`,
+  `parameters`, `examples`, `requestBodies`, `headers`, `securitySchemes`, `links`, `callbacks`, and
+  3.1's `pathItems`).
+- `parameterName` checks parameter objects' `name` field, from path items, operations, and
+  `components/parameters`. `in: header` parameters are exempt — HTTP header names are conventionally
+  kebab/mixed case and case-insensitive on the wire, so enforcing a body/query-style casing on them
+  doesn't make sense.
+- `propertyName` checks keys directly under a schema's `properties` map, recursing into nested
+  schemas reachable via `properties`/`items`/`additionalProperties`/`allOf`/`oneOf`/`anyOf` (so a
+  nested object's own `properties` are checked too). 3.1's `patternProperties` is not traversed at
+  all — its keys are regexes, not property names.
 
 #### Inline suppression
 
