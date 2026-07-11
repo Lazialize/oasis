@@ -23,3 +23,15 @@ OpenAPI 3.0/3.1 toolkit: linter, multi-file bundler, LSP server, and a VS Code e
 - Plain functions + types over classes; small files, named exports
 - Tests live in each package's `tests/` dir and use fixture documents (good and bad cases)
 - Conventional commit messages (`feat:`, `fix:`, `refactor:`, ...)
+
+## Versioning & releases (changesets)
+
+- Any user-facing change (features, fixes, CLI/LSP behavior, extension) must include a changeset:
+  run `bun changeset` (non-interactive alternative: write `.changeset/<slug>.md` by hand with the
+  same frontmatter format as existing ones) in the same commit/PR as the change. Internal-only
+  changes (tests, docs, CI) don't need one.
+- All `@oasis/*` packages version together (fixed group); `editors/vscode` is synced by
+  `scripts/sync-extension-version.ts` during `bun run version`.
+- Never bump versions in package.json by hand, never create `v*` tags manually, and never run
+  `changeset version` locally — CI does this: merging to main updates a "Version Packages" PR;
+  merging that PR tags and publishes the GitHub Release (binaries + vsix) automatically.
