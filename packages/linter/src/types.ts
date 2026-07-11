@@ -30,6 +30,11 @@ export interface RuleContext {
   documents: OasisDocument[];
   /** OpenAPI version detected on the entry document, if any. */
   version: OpenApiVersion | undefined;
+  /**
+   * This rule's resolved options (from the config's top-level `lint.rules` entry, or the rule's
+   * own `defaultOptions` if none were given). Rules that don't declare options can ignore this.
+   */
+  options: unknown;
   /** Record a lint diagnostic at the given location. */
   report(location: ReportLocation, message: string, opts?: ReportOptions): void;
 }
@@ -39,5 +44,13 @@ export interface Rule {
   /** One-line description of what the rule checks, used in the rule registry / docs. */
   description: string;
   defaultSeverity: RuleSeverity;
+  /** Options used when a rule is enabled without an explicit options object. */
+  defaultOptions?: unknown;
+  /**
+   * Validate an options object supplied via the array config form (`["error", { ... }]`).
+   * Return an error message describing the problem, or `undefined` if the options are valid.
+   * Rules that don't declare this accept any options object without validation.
+   */
+  validateOptions?(options: unknown): string | undefined;
   check(ctx: RuleContext): void;
 }

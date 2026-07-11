@@ -1,0 +1,22 @@
+{
+  // operation-operationId is off by default here, but re-enabled (as an error) just for files
+  // under paths/**; operation-tags is warn by default, turned off for paths/** by the first
+  // override, then turned back on (as info) for every yaml file by the second override, which
+  // — being declared later — wins for files matched by both.
+  "lint": {
+    "rules": {
+      "operation-description": "off",
+      "operation-operationId": "off",
+    },
+    "overrides": [
+      {
+        "files": ["paths/**/*.yaml"],
+        "rules": { "operation-tags": "off", "operation-operationId": "error" },
+      },
+      {
+        "files": ["**/*.yaml"],
+        "rules": { "operation-tags": "info" },
+      },
+    ],
+  },
+}

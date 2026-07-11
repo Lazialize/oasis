@@ -3,8 +3,18 @@ export type { LintDiagnostic, LintDiagnosticSeverity, ReportLocation, ReportOpti
 export type { LintOptions } from "./engine.ts";
 export { lint } from "./engine.ts";
 
-export type { LintConfigFile, LoadConfigOptions, LoadedConfig, ResolvedEntries, ResolvedLintConfig } from "./config.ts";
-export { CONFIG_FILE_NAME, findConfigUpward, loadConfig, resolveConfig, resolveEntries } from "./config.ts";
+export type {
+  LintConfigFile,
+  LintOverride,
+  LoadConfigOptions,
+  LoadedConfig,
+  ResolvedEntries,
+  ResolvedLintConfig,
+  ResolvedOverride,
+  ResolvedRuleConfig,
+  RuleConfigValue,
+} from "./config.ts";
+export { CONFIG_FILE_NAME, effectiveRuleConfig, findConfigUpward, loadConfig, resolveConfig, resolveEntries } from "./config.ts";
 
 export { rules } from "./rules/index.ts";
 

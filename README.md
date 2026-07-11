@@ -94,14 +94,31 @@ Place an `oasis.config.jsonc` at your project root (discovered upward from the w
   "lint": {
     "rules": {
       "operation-tags": "off",
-      "no-unused-components": "error"
-    }
+      "no-unused-components": "error",
+      "example-rule": ["warn", { "option": "value" }]
+    },
+    "overrides": [
+      {
+        "files": ["paths/**/*.yaml"],
+        "rules": { "operation-tags": "off" }
+      }
+    ]
   },
   "entries": ["openapi.yaml"]
 }
 ```
 
-Severities: `"error"` | `"warn"` | `"info"` | `"off"`.
+Severities: `"error"` | `"warn"` | `"info"` | `"off"`. A rule can also be given as
+`["severity", { ...options }]` to pass it an options object; rules that support options validate
+them and document their shape individually (a config warning is emitted for options an enabled
+rule rejects, or that are given for a rule that doesn't take any).
+
+`lint.overrides` applies rule config (either severity form) to files matching a glob, on top of
+`lint.rules`. Each `files` glob is matched against the diagnostic's file path relative to the
+directory containing the config file — including files reached only via `$ref` from the entry
+document, not just the entry itself. Later overrides win over earlier ones for the same rule, and
+overrides win over `lint.rules` wherever they match (even flipping a globally `"off"` rule back on,
+or vice versa, for just the matching files).
 
 `entries` is an optional list of entry-document paths, relative to the directory containing the
 config file. It's consumed by the LSP (see "project mode" below) and by `oasis lint` when run with

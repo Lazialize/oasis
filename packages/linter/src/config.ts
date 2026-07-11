@@ -1,15 +1,26 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { dirname, join, resolve as pathResolve } from "node:path";
+import { dirname, join, relative as pathRelative, resolve as pathResolve } from "node:path";
 import { parse as parseJsonc, type ParseError } from "jsonc-parser";
 import { rules } from "./rules/index.ts";
-import type { RuleSeverity } from "./types.ts";
+import type { Rule, RuleSeverity } from "./types.ts";
 
 export const CONFIG_FILE_NAME = "oasis.config.jsonc";
 
+/** A rule's config value: a plain severity, or `[severity, options]` for rules that take options. */
+export type RuleConfigValue = RuleSeverity | [RuleSeverity, Record<string, unknown>];
+
+export interface LintOverride {
+  /** Globs matched against the diagnostic's file path, relative to the config file's directory. */
+  files: string[];
+  rules: Record<string, RuleConfigValue>;
+}
+
 export interface LintConfigFile {
   lint?: {
-    rules?: Record<string, RuleSeverity>;
+    rules?: Record<string, RuleConfigValue>;
+    /** Per-glob rule overrides, applied in order (later entries win) on top of `lint.rules`. */
+    overrides?: LintOverride[];
   };
   /**
    * Project entry documents, as paths relative to the directory containing this config file.
@@ -70,37 +81,135 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Loade
   return { configFile: parsed ?? {}, path };
 }
 
+/** A rule's resolved severity and options, ready to hand to the engine / rule context. */
+export interface ResolvedRuleConfig {
+  severity: RuleSeverity;
+  options: unknown;
+}
+
+/** A `lint.overrides` entry after validation: globs plus the rule config values that apply when they match. */
+export interface ResolvedOverride {
+  files: string[];
+  rules: Record<string, ResolvedRuleConfig>;
+}
+
 export interface ResolvedLintConfig {
-  /** Effective severity for every known rule (defaults merged with config overrides). */
-  rules: Record<string, RuleSeverity>;
+  /** Effective top-level severity/options for every known rule (defaults merged with config overrides). */
+  rules: Record<string, ResolvedRuleConfig>;
+  /** Validated per-glob overrides, in declaration order. */
+  overrides: ResolvedOverride[];
   /** Human-readable warnings about the config itself (e.g. unknown rule names), not tied to any rule. */
   configWarnings: string[];
 }
 
-/** Merge built-in rule defaults with overrides from a loaded config file. */
-export function resolveConfig(configFile: LintConfigFile | undefined): ResolvedLintConfig {
-  const resolvedRules: Record<string, RuleSeverity> = {};
-  for (const rule of rules) resolvedRules[rule.name] = rule.defaultSeverity;
-
-  const configWarnings: string[] = [];
-  const overrides = configFile?.lint?.rules ?? {};
-  for (const [name, severity] of Object.entries(overrides)) {
-    if (!(name in resolvedRules)) {
-      configWarnings.push(`Unknown rule "${name}" in config; ignoring.`);
-      continue;
-    }
-    if (!isRuleSeverity(severity)) {
-      configWarnings.push(`Invalid severity "${String(severity)}" for rule "${name}" in config; ignoring.`);
-      continue;
-    }
-    resolvedRules[name] = severity;
+/**
+ * Parse and validate a single rule config value (plain severity or `[severity, options]`) against
+ * the given rule registry. Returns `undefined` and pushes a warning for anything invalid: unknown
+ * rule name, malformed severity/array shape, or options that fail the rule's own `validateOptions`.
+ */
+function resolveRuleConfigValue(
+  ruleName: string,
+  value: unknown,
+  ruleByName: Map<string, Rule>,
+  configWarnings: string[],
+): ResolvedRuleConfig | undefined {
+  const rule = ruleByName.get(ruleName);
+  if (!rule) {
+    configWarnings.push(`Unknown rule "${ruleName}" in config; ignoring.`);
+    return undefined;
   }
 
-  return { rules: resolvedRules, configWarnings };
+  let severity: RuleSeverity;
+  let options: unknown;
+  if (Array.isArray(value)) {
+    const [sev, opts] = value;
+    if (value.length !== 2 || !isRuleSeverity(sev) || typeof opts !== "object" || opts === null || Array.isArray(opts)) {
+      configWarnings.push(`Invalid rule config for "${ruleName}" in config; expected ["severity", { ...options }]; ignoring.`);
+      return undefined;
+    }
+    severity = sev;
+    options = opts;
+  } else if (isRuleSeverity(value)) {
+    severity = value;
+    options = undefined;
+  } else {
+    configWarnings.push(`Invalid severity "${String(value)}" for rule "${ruleName}" in config; ignoring.`);
+    return undefined;
+  }
+
+  if (options !== undefined && rule.validateOptions) {
+    const error = rule.validateOptions(options);
+    if (error) {
+      configWarnings.push(`Invalid options for rule "${ruleName}" in config: ${error}; ignoring.`);
+      return undefined;
+    }
+  }
+
+  return { severity, options: options ?? rule.defaultOptions };
+}
+
+/**
+ * Merge built-in rule defaults with overrides from a loaded config file. `ruleList` defaults to
+ * the built-in rule registry; tests may pass a custom list to exercise config validation against
+ * a fake rule without registering it for real.
+ */
+export function resolveConfig(configFile: LintConfigFile | undefined, ruleList: Rule[] = rules): ResolvedLintConfig {
+  const configWarnings: string[] = [];
+  const ruleByName = new Map<string, Rule>(ruleList.map((rule) => [rule.name, rule]));
+
+  const resolvedRules: Record<string, ResolvedRuleConfig> = {};
+  for (const rule of ruleList) resolvedRules[rule.name] = { severity: rule.defaultSeverity, options: rule.defaultOptions };
+
+  for (const [name, value] of Object.entries(configFile?.lint?.rules ?? {})) {
+    const resolved = resolveRuleConfigValue(name, value, ruleByName, configWarnings);
+    if (resolved) resolvedRules[name] = resolved;
+  }
+
+  const overrides: ResolvedOverride[] = [];
+  for (const [i, override] of (configFile?.lint?.overrides ?? []).entries()) {
+    if (!Array.isArray(override?.files) || !override.files.every((f) => typeof f === "string")) {
+      configWarnings.push(`Invalid "files" in lint.overrides[${i}] in config; expected an array of glob strings; ignoring override.`);
+      continue;
+    }
+    const overrideRules: Record<string, ResolvedRuleConfig> = {};
+    for (const [name, value] of Object.entries(override.rules ?? {})) {
+      const resolved = resolveRuleConfigValue(name, value, ruleByName, configWarnings);
+      if (resolved) overrideRules[name] = resolved;
+    }
+    overrides.push({ files: override.files, rules: overrideRules });
+  }
+
+  return { rules: resolvedRules, overrides, configWarnings };
 }
 
 function isRuleSeverity(value: unknown): value is RuleSeverity {
   return value === "error" || value === "warn" || value === "info" || value === "off";
+}
+
+/**
+ * Resolve the effective severity/options for `ruleName` at `filePath`: start from the top-level
+ * `lint.rules` entry, then apply matching `lint.overrides` in declaration order (later wins).
+ * `configDir` is the directory containing the config file; overrides are skipped entirely when
+ * it's undefined (no config file was loaded, so there's nothing to resolve globs against).
+ */
+export function effectiveRuleConfig(
+  config: ResolvedLintConfig,
+  ruleName: string,
+  filePath: string,
+  configDir: string | undefined,
+): ResolvedRuleConfig {
+  let effective = config.rules[ruleName] ?? { severity: "off" as RuleSeverity, options: undefined };
+  if (!configDir) return effective;
+
+  const relativePath = pathRelative(configDir, filePath);
+  for (const override of config.overrides) {
+    const overrideRule = override.rules[ruleName];
+    if (!overrideRule) continue;
+    if (override.files.some((pattern) => new Bun.Glob(pattern).match(relativePath))) {
+      effective = overrideRule;
+    }
+  }
+  return effective;
 }
 
 export interface ResolvedEntries {
