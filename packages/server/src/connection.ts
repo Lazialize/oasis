@@ -7,6 +7,7 @@ import {
   SymbolKind as LspSymbolKind,
 } from "vscode-languageserver";
 import type {
+  CodeAction as LspCodeAction,
   Connection,
   DocumentSymbol,
   CompletionItem as LspCompletionItem,
@@ -15,6 +16,7 @@ import type {
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { URI } from "vscode-uri";
 import { parseDocument } from "@oasis/core";
+import { getCodeActions } from "./handlers/code-actions.ts";
 import { getDefinition } from "./handlers/definition.ts";
 import { getHover } from "./handlers/hover.ts";
 import { getCompletions } from "./handlers/completion.ts";
@@ -221,6 +223,7 @@ export function startServer(): Connection {
         documentSymbolProvider: true,
         referencesProvider: true,
         renameProvider: { prepareProvider: true },
+        codeActionProvider: { codeActionKinds: ["quickfix", "refactor.extract"] },
       },
     };
   });
@@ -321,6 +324,33 @@ export function startServer(): Connection {
       (changes[uri] ??= []).push({ range: toLspRange(edit.range), newText: edit.newText });
     }
     return { changes };
+  });
+
+  connection.onCodeAction(async (params) => {
+    const path = uriToPath(params.textDocument.uri);
+    const results = await getCodeActions(ctx, {
+      path,
+      position: params.range.start,
+      diagnostics: params.context.diagnostics.map((d) => ({
+        code: typeof d.code === "string" ? d.code : undefined,
+        message: d.message,
+        range: d.range,
+      })),
+    });
+    return results.map((result): LspCodeAction => {
+      const changes: Record<string, { range: ReturnType<typeof toLspRange>; newText: string }[]> = {};
+      for (const edit of result.edits) {
+        const uri = pathToUri(edit.filePath);
+        (changes[uri] ??= []).push({ range: toLspRange(edit.range), newText: edit.newText });
+      }
+      return {
+        title: result.title,
+        kind: result.kind,
+        diagnostics: result.diagnosticIndex !== undefined ? [params.context.diagnostics[result.diagnosticIndex]!] : undefined,
+        isPreferred: result.isPreferred,
+        edit: { changes },
+      };
+    });
   });
 
   documents.listen(connection);

@@ -3,7 +3,7 @@ import { findRefs, resolveRef } from "@oasis/core";
 import { childAt, keyToString } from "../util.ts";
 import type { Rule } from "../types.ts";
 
-const COMPONENT_CATEGORIES = [
+export const COMPONENT_CATEGORIES = [
   "schemas",
   "parameters",
   "responses",
