@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -236,6 +236,60 @@ paths:
       expect(Array.isArray(publish.params.diagnostics)).toBe(true);
       expect(publish.params.diagnostics.length).toBeGreaterThan(0);
       expect(publish.params.diagnostics.some((d: { code?: string }) => d.code === "no-unresolved-ref")).toBe(true);
+    }, 20000);
+
+    test("completion: mid-typing `$ref` in a project-mode fragment file offers targets from the owning graph", async () => {
+      const projectRoot = join(repoRoot, "examples", "petstore");
+      const fragmentPath = join(projectRoot, "paths", "pets.yaml");
+      const fragmentText = readFileSync(fragmentPath, "utf-8");
+      // Same edit shape as scenario 6: an in-flight, unclosed relative `$ref` value.
+      const partialText = fragmentText.replace(
+        "$ref: '../openapi.yaml#/components/schemas/Error'",
+        "$ref: '../",
+      );
+      expect(partialText).not.toBe(fragmentText);
+
+      const projectClient = new LspClient();
+      try {
+        const initResult = await projectClient.request("initialize", {
+          processId: null,
+          rootUri: pathToFileURL(projectRoot).toString(),
+          capabilities: {},
+        });
+        expect(initResult.error).toBeUndefined();
+        projectClient.notify("initialized", {});
+
+        const uri = pathToFileURL(fragmentPath).toString();
+        projectClient.notify("textDocument/didOpen", {
+          textDocument: { uri, languageId: "yaml", version: 1, text: partialText },
+        });
+
+        // Let the project config load and the fragment be routed as a project member before
+        // asking for completions.
+        await projectClient.waitFor(
+          (msg) => msg.method === "textDocument/publishDiagnostics" && msg.params?.uri === uri,
+          15000,
+        );
+
+        const lines = partialText.split("\n");
+        const lineIdx = lines.findIndex((l) => l.includes("$ref: '../"));
+        const position = { line: lineIdx, character: lines[lineIdx]!.length };
+
+        const completion = await projectClient.request("textDocument/completion", {
+          textDocument: { uri },
+          position,
+        });
+
+        expect(completion.error).toBeUndefined();
+        const items: any[] = completion.result ?? [];
+        expect(items.length).toBeGreaterThan(0);
+        const errorItem = items.find((i) => typeof i.label === "string" && i.label.includes("openapi.yaml#/components/schemas/Error"));
+        expect(errorItem).toBeDefined();
+        expect(errorItem.textEdit).toBeDefined();
+        expect(errorItem.textEdit.newText).toContain("openapi.yaml#/components/schemas/Error");
+      } finally {
+        projectClient.kill();
+      }
     }, 20000);
   });
 });

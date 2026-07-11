@@ -167,7 +167,7 @@ export function startServer(): Connection {
         textDocumentSync: TextDocumentSyncKind.Incremental,
         definitionProvider: true,
         hoverProvider: true,
-        completionProvider: { triggerCharacters: ['"', ":", "/", "#"] },
+        completionProvider: { triggerCharacters: ['"', ":", "/", "#", "'", "$"] },
         documentSymbolProvider: true,
       },
     };
@@ -226,6 +226,11 @@ export function startServer(): Connection {
       (item): LspCompletionItem => ({
         label: item.label,
         kind: item.kind === "ref" ? LspCompletionItemKind.Reference : LspCompletionItemKind.Property,
+        insertText: item.insertText,
+        filterText: item.filterText,
+        textEdit: item.textEdit
+          ? { range: { start: item.textEdit.range.start, end: item.textEdit.range.end }, newText: item.textEdit.newText }
+          : undefined,
       }),
     );
   });

@@ -106,6 +106,44 @@ describe("project mode", () => {
     expect(items.some((i) => i.kind === "ref" && i.label.includes("Pet"))).toBe(true);
   });
 
+  test("fragment file: partially typed key on a new line uses the indentation fallback", async () => {
+    const ctx = createServerContext(new InMemoryFileSystem(projectFiles()));
+    await loadProjectConfig(ctx, [ROOT]);
+
+    const partial = FRAGMENT_TEXT.replace("tags: [pets]", "tags: [pets]\n  sum");
+    const files = { ...projectFiles(), [FRAGMENT_PATH]: partial };
+    const ctx2 = createServerContext(new InMemoryFileSystem(files));
+    await loadProjectConfig(ctx2, [ROOT]);
+
+    const start = positionOf(partial, "sum");
+    const position = { line: start.line, character: start.character + "sum".length };
+    const items = await getCompletions(ctx2, { path: FRAGMENT_PATH, position });
+
+    const summary = items.find((i) => i.label === "summary");
+    expect(summary).toBeDefined();
+    expect(summary?.textEdit?.newText).toBe("summary: ");
+  });
+
+  test("fragment file: `$ref` mid-typing offers a replacing TextEdit against the owning graph", async () => {
+    const partial = FRAGMENT_TEXT.replace(
+      "$ref: '../openapi.yaml#/components/schemas/Pet'",
+      "$ref: '../openapi",
+    );
+    const files = { ...projectFiles(), [FRAGMENT_PATH]: partial };
+    const ctx = createServerContext(new InMemoryFileSystem(files));
+    await loadProjectConfig(ctx, [ROOT]);
+
+    const position = positionOf(partial, "$ref: '../openapi");
+    const line = partial.split("\n")[position.line]!;
+    const cursor = { line: position.line, character: line.length };
+    const items = await getCompletions(ctx, { path: FRAGMENT_PATH, position: cursor });
+
+    const petItem = items.find((i) => i.label.includes("Pet"));
+    expect(petItem).toBeDefined();
+    expect(petItem?.filterText).toBe(petItem?.label);
+    expect(petItem?.textEdit).toBeDefined();
+  });
+
   test("routeDocument: non-member file with no openapi key is ignored", async () => {
     const ctx = createServerContext(new InMemoryFileSystem(projectFiles()));
     await loadProjectConfig(ctx, [ROOT]);
