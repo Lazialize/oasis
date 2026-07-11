@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bun test:*)",
+      "Bash(bun run typecheck)",
+      "Bash(bun run test:bin)",
+      "Bash(bun run oasis:*)",
+      "Bash(bun install)",
+      "Bash(bun run build:bin)"
+    ]
+  }
+}
