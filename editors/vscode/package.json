@@ -2,7 +2,7 @@
   "name": "oasis-vscode",
   "displayName": "Oasis OpenAPI",
   "description": "Lint, navigate, and get IntelliSense for OpenAPI documents via the Oasis language server.",
-  "version": "0.0.1",
+  "version": "0.2.0",
   "publisher": "lazialize",
   "private": true,
   "license": "MIT",
@@ -14,7 +14,10 @@
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Programming Languages", "Linters"],
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
   "activationEvents": [
     "onLanguage:yaml",
     "onLanguage:json",
@@ -33,14 +36,22 @@
         },
         "oasis.server.args": {
           "type": "array",
-          "items": { "type": "string" },
-          "default": ["lsp"],
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "lsp"
+          ],
           "description": "Arguments passed to the command in `oasis.server.path` to start the language server."
         },
         "oasis.trace.server": {
           "scope": "window",
           "type": "string",
-          "enum": ["off", "messages", "verbose"],
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
           "default": "off",
           "description": "Traces the communication between VS Code and the Oasis language server."
         }
