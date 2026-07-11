@@ -4,7 +4,7 @@ import { classifyPointer } from "../keywords.ts";
 import type { ObjectKind } from "../keywords.ts";
 import { findRefAtPosition } from "../refs.ts";
 import { getChildNode, getChildScalar, mapKeys } from "../yaml-helpers.ts";
-import { getDocument, getGraph } from "../workspace.ts";
+import { getDocument, getGraph, resolveEntryForPath } from "../workspace.ts";
 import type { ServerContext } from "../workspace.ts";
 
 export interface HoverParams {
@@ -35,7 +35,8 @@ const MAX_PROPERTIES_SHOWN = 10;
 
 /** Cursor on a `$ref` -> a short summary of the resolved target. */
 export async function getHover(ctx: ServerContext, params: HoverParams): Promise<HoverResult | undefined> {
-  const graph = await getGraph(ctx, params.path);
+  const entryPath = await resolveEntryForPath(ctx, params.path);
+  const graph = await getGraph(ctx, entryPath);
   const doc = getDocument(graph, params.path);
   if (!doc) return undefined;
 

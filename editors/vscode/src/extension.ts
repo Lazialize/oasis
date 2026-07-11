@@ -1,35 +1,58 @@
 import * as vscode from "vscode";
 import {
+  DidChangeWatchedFilesNotification,
+  FileChangeType,
   LanguageClient,
   type LanguageClientOptions,
   type ServerOptions,
   TransportKind,
 } from "vscode-languageclient/node";
 
-// The oasis language server (`oasis lsp`) does not gate on languageId or inspect any
-// initialization options — it treats *every* document it's asked to open as the entry point of
-// its own OpenAPI workspace graph and lints it accordingly (see packages/server/src/connection.ts
-// and packages/server/src/diagnostics.ts). A plain YAML/JSON file with no `openapi` key would
-// still be parsed and linted, and would immediately fail the `structure-required-fields` /
-// `structure-openapi-version` rules with a "Missing required field \"openapi\"" diagnostic. So the
-// server itself will not no-op on non-OpenAPI files.
+const CONFIG_FILE_NAME = "oasis.config.jsonc";
+
+// The oasis language server (`oasis lsp`) does not gate on languageId. Without project mode, it
+// treats every document it's asked to open as the entry point of its own OpenAPI workspace graph
+// and lints it accordingly (see packages/server/src/connection.ts and
+// packages/server/src/diagnostics.ts). A plain YAML/JSON file with no `openapi` key would still be
+// parsed and linted, and would immediately fail the `structure-required-fields` /
+// `structure-openapi-version` rules with a "Missing required field \"openapi\"" diagnostic.
 //
 // To honor DESIGN.md's "activates on YAML/JSON files that look like OpenAPI" behavior, the guard
-// lives on the client: the document selector matches yaml/json/jsonc broadly (so the client can
-// activate and inspect content), but a `documentSelector` `pattern`-less approach isn't enough by
-// itself, so we additionally filter with middleware that only lets requests through — and only
+// normally lives on the client: the document selector matches yaml/json/jsonc broadly (so the
+// client can activate and inspect content), but middleware only lets requests through — and only
 // calls `didOpen`/`didChange` — for documents whose text looks like an OpenAPI document.
+//
+// "Project mode" changes this: when the workspace contains an `oasis.config.jsonc`, the server
+// itself resolves project-entry graphs and decides membership for every synced document (see
+// `findOwningEntry`/`routeDocument` in packages/server/src), silently ignoring files that are
+// neither a project member nor look like OpenAPI on their own. In that case the client relaxes
+// its guard and syncs every yaml/json/jsonc document (including fragment files like a Path Item
+// file with no `openapi:` key, which previously got no LSP features at all when opened directly).
 const OPENAPI_YAML_KEY = /^\s*(['"]?)openapi\1\s*:/m;
 const OPENAPI_JSON_KEY = /"openapi"\s*:/;
 
-function looksLikeOpenApi(document: vscode.TextDocument): boolean {
-  if (!["yaml", "json", "jsonc"].includes(document.languageId)) return false;
-  const text = document.getText();
+function looksLikeOpenApiText(text: string): boolean {
   return OPENAPI_YAML_KEY.test(text) || OPENAPI_JSON_KEY.test(text);
+}
+
+/** Whether this document should be synced to the server at all, per the current guard mode. */
+function shouldSync(document: vscode.TextDocument): boolean {
+  if (!["yaml", "json", "jsonc"].includes(document.languageId)) return false;
+  if (projectModeActive) return true; // server decides membership; sync everything.
+  return looksLikeOpenApiText(document.getText());
 }
 
 let client: LanguageClient | undefined;
 let outputChannel: vscode.OutputChannel | undefined;
+let configWatcher: vscode.FileSystemWatcher | undefined;
+
+/** Set once at activation if any workspace folder contains `oasis.config.jsonc`. */
+let projectModeActive = false;
+
+async function detectProjectMode(): Promise<boolean> {
+  const found = await vscode.workspace.findFiles(`**/${CONFIG_FILE_NAME}`, "**/node_modules/**", 1);
+  return found.length > 0;
+}
 
 // Tracks which documents we've actually forwarded a didOpen for, so that a document which starts
 // out not looking like OpenAPI (e.g. a brand-new empty YAML file) still gets synced once the user
@@ -52,13 +75,13 @@ function buildClientOptions(): LanguageClientOptions {
     outputChannel,
     middleware: {
       didOpen: async (document, next) => {
-        if (!looksLikeOpenApi(document)) return;
+        if (!shouldSync(document)) return;
         syncedDocuments.add(document.uri.toString());
         await next(document);
       },
       didChange: async (event, next) => {
         const key = event.document.uri.toString();
-        if (!looksLikeOpenApi(event.document)) return;
+        if (!shouldSync(event.document)) return;
         // Document started out not looking like OpenAPI (so didOpen was suppressed) but now does
         // — sync it in via a synthetic didOpen before forwarding the change.
         if (!syncedDocuments.has(key)) {
@@ -85,19 +108,19 @@ function buildClientOptions(): LanguageClientOptions {
         await next(document);
       },
       provideCompletionItem: async (document, position, context, token, next) => {
-        if (!looksLikeOpenApi(document)) return undefined;
+        if (!shouldSync(document)) return undefined;
         return next(document, position, context, token);
       },
       provideHover: async (document, position, token, next) => {
-        if (!looksLikeOpenApi(document)) return undefined;
+        if (!shouldSync(document)) return undefined;
         return next(document, position, token);
       },
       provideDefinition: async (document, position, token, next) => {
-        if (!looksLikeOpenApi(document)) return undefined;
+        if (!shouldSync(document)) return undefined;
         return next(document, position, token);
       },
       provideDocumentSymbols: async (document, token, next) => {
-        if (!looksLikeOpenApi(document)) return undefined;
+        if (!shouldSync(document)) return undefined;
         return next(document, token);
       },
     },
@@ -137,9 +160,44 @@ async function restartClient(): Promise<void> {
   await startClient();
 }
 
+/**
+ * Notify the server about `oasis.config.jsonc` edits/creation/deletion via
+ * `workspace/didChangeWatchedFiles`, since the server needs to reload project entries and re-lint
+ * when the config changes (see `loadProjectConfig`/`isConfigFilePath` in packages/server/src). The
+ * server doesn't dynamically register file watchers, so this watcher — and forwarding it —
+ * belongs to the client.
+ */
+function registerConfigWatcher(context: vscode.ExtensionContext): void {
+  configWatcher = vscode.workspace.createFileSystemWatcher(`**/${CONFIG_FILE_NAME}`);
+  context.subscriptions.push(configWatcher);
+
+  const notify = (uri: vscode.Uri, type: FileChangeType): void => {
+    void client?.sendNotification(DidChangeWatchedFilesNotification.type, {
+      changes: [{ uri: uri.toString(), type }],
+    });
+  };
+
+  context.subscriptions.push(
+    configWatcher.onDidChange((uri) => notify(uri, FileChangeType.Changed)),
+    configWatcher.onDidCreate((uri) => {
+      projectModeActive = true;
+      notify(uri, FileChangeType.Created);
+    }),
+    configWatcher.onDidDelete((uri) => {
+      notify(uri, FileChangeType.Deleted);
+      void detectProjectMode().then((active) => {
+        projectModeActive = active;
+      });
+    }),
+  );
+}
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   outputChannel = vscode.window.createOutputChannel("Oasis Language Server");
   context.subscriptions.push(outputChannel);
+
+  projectModeActive = await detectProjectMode();
+  registerConfigWatcher(context);
 
   context.subscriptions.push(
     vscode.commands.registerCommand("oasis.restartServer", async () => {

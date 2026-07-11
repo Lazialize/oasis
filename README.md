@@ -83,11 +83,18 @@ Place an `oasis.config.jsonc` at your project root (discovered upward from the w
       "operation-tags": "off",
       "no-unused-components": "error"
     }
-  }
+  },
+  "entries": ["openapi.yaml"]
 }
 ```
 
 Severities: `"error"` | `"warn"` | `"info"` | `"off"`.
+
+`entries` is an optional list of entry-document paths, relative to the directory containing the
+config file. It's consumed by the LSP (see "project mode" below) — `oasis lint`/`oasis bundle`
+still take their entry explicitly on the command line and ignore this field. An entry that doesn't
+exist on disk produces a config warning diagnostic rather than a crash; the field can be omitted
+entirely with no change in behavior.
 
 ### `oasis bundle <entry>`
 
@@ -113,9 +120,23 @@ Starts the language server on stdio. Normally launched by an editor, not by hand
 - **Completion** — keys valid at the cursor position (version-aware: 3.0 `nullable` vs 3.1 `const`/`webhooks`…), and `$ref` target suggestions from the whole workspace
 - **Document Symbols** — outline of paths/operations/components
 
+**Project mode:** if an `oasis.config.jsonc` with an `entries` field is found at the root of a
+workspace folder, the server builds a workspace graph per entry at startup and publishes
+diagnostics for every file in those graphs immediately — no file needs to be open. Files
+transitively `$ref`'d from an entry (e.g. a Path Item file like `paths/pets.yaml` with no
+top-level `openapi:` key of its own) are treated as members of the owning entry's graph rather
+than broken standalone documents: their diagnostics, go-to-definition, hover, and `$ref`
+completion all resolve against that graph. Editing the config file reloads project entries and
+re-lints. Files outside any project graph keep the original entry-per-open-document behavior.
+
 ## VS Code extension
 
-A thin LSP client lives in [`editors/vscode`](editors/vscode/). It activates on YAML/JSON files that declare a top-level `openapi` key and leaves everything else alone. See [its README](editors/vscode/README.md) for setup (development host, packaging a `.vsix`, and pointing it at this repo's CLI without a global install).
+A thin LSP client lives in [`editors/vscode`](editors/vscode/). Without a config file, it
+activates on YAML/JSON files that declare a top-level `openapi` key and leaves everything else
+alone; if the workspace contains an `oasis.config.jsonc`, it syncs every YAML/JSON/JSONC document
+instead and lets the server (in project mode, see above) decide what to do with each one. See
+[its README](editors/vscode/README.md) for setup (development host, packaging a `.vsix`, and
+pointing it at this repo's CLI without a global install).
 
 The extension launches the server via the `oasis.server.path` / `oasis.server.args` settings
 (default: the globally installed `oasis` binary running `lsp`). Instead of installing globally or

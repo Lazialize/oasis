@@ -14,6 +14,13 @@ It contains **three deliberate lint findings** (marked with comments in the sour
 are intentional. It is discovered automatically when you run from this directory (or pass
 `--config`).
 
+`oasis.config.jsonc` also declares `"entries": ["openapi.yaml"]`, which turns on LSP **project
+mode**: opening this folder in an editor lints every file in `openapi.yaml`'s workspace graph
+immediately, with nothing open, and treats `paths/*.yaml`/`schemas/*.yaml` as members of that
+graph rather than as broken standalone documents (they have no top-level `openapi:` key of their
+own). Opening `paths/pets.yaml` directly still gets diagnostics, go-to-definition, hover, and
+`$ref` completion against the shared `openapi.yaml` components.
+
 ```sh
 # from the repo root (after `bun run build:bin`)
 ./dist/oasis lint examples/petstore/openapi.yaml --config examples/petstore/oasis.config.jsonc

@@ -11,6 +11,13 @@ export interface LintConfigFile {
   lint?: {
     rules?: Record<string, RuleSeverity>;
   };
+  /**
+   * Project entry documents, as paths relative to the directory containing this config file.
+   * When present, LSP "project mode" builds a workspace graph per entry at startup and publishes
+   * diagnostics for every file in those graphs without requiring anything to be open. Absent ->
+   * no project mode; behavior is unchanged from entry-per-open-document.
+   */
+  entries?: string[];
 }
 
 export interface LoadConfigOptions {
@@ -94,4 +101,30 @@ export function resolveConfig(configFile: LintConfigFile | undefined): ResolvedL
 
 function isRuleSeverity(value: unknown): value is RuleSeverity {
   return value === "error" || value === "warn" || value === "info" || value === "off";
+}
+
+export interface ResolvedEntries {
+  /** Absolute paths of entries that exist on disk, in the order declared in the config. */
+  entries: string[];
+  /** Warnings for entries that were declared but could not be found. */
+  warnings: string[];
+}
+
+/**
+ * Resolve `configFile.entries` (paths relative to `configDir`, the directory containing the
+ * config file) into absolute paths. Missing files produce a warning rather than throwing; an
+ * absent/empty `entries` field resolves to an empty list with no warnings.
+ */
+export function resolveEntries(configFile: LintConfigFile | undefined, configDir: string): ResolvedEntries {
+  const entries: string[] = [];
+  const warnings: string[] = [];
+  for (const raw of configFile?.entries ?? []) {
+    const abs = pathResolve(configDir, raw);
+    if (!existsSync(abs)) {
+      warnings.push(`Entry "${raw}" in config not found (resolved to "${abs}"); skipping.`);
+      continue;
+    }
+    entries.push(abs);
+  }
+  return { entries, warnings };
 }

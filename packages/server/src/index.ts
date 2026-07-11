@@ -1,13 +1,20 @@
 export { runLspServer } from "./server.ts";
 export { startServer } from "./connection.ts";
 
-export type { ServerContext } from "./workspace.ts";
-export { createServerContext, getGraph, getDocument, invalidateGraph } from "./workspace.ts";
+export type { ProjectState, ServerContext } from "./workspace.ts";
+export { createServerContext, findOwningEntry, getGraph, getDocument, invalidateGraph, resolveEntryForPath } from "./workspace.ts";
 
 export { OverlayFileSystem } from "./overlay-fs.ts";
 
+export { looksLikeOpenApi } from "./openapi-guard.ts";
+
+export { isConfigFilePath, loadProjectConfig } from "./project.ts";
+
+export type { DocumentRoute } from "./document-routing.ts";
+export { routeDocument } from "./document-routing.ts";
+
 export type { ObjectKind } from "./keywords.ts";
-export { allowedKeys, classifyPointer, KIND_TO_COMPONENT_SECTION } from "./keywords.ts";
+export { allowedKeys, classifyPointer, inferRootKind, KIND_TO_COMPONENT_SECTION } from "./keywords.ts";
 
 export type { RefAtPosition } from "./refs.ts";
 export { findRefAtPosition, parentPointer } from "./refs.ts";

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { loadWorkspaceGraph, NodeFileSystem } from "@oasis/core";
 import { lint } from "../src/engine.ts";
-import { findConfigUpward, loadConfig, resolveConfig } from "../src/config.ts";
+import { findConfigUpward, loadConfig, resolveConfig, resolveEntries } from "../src/config.ts";
 import { rules } from "../src/rules/index.ts";
 
 const fixturesRoot = `${import.meta.dir}/fixtures`;
@@ -71,5 +71,35 @@ describe("end-to-end config application", () => {
 describe("findConfigUpward", () => {
   test("returns undefined when no config file exists above cwd", () => {
     expect(findConfigUpward(`${fixturesRoot}/valid`)).toBeUndefined();
+  });
+});
+
+describe("resolveEntries", () => {
+  test("resolves relative entry paths against the config directory", () => {
+    const { entries, warnings } = resolveEntries({ entries: ["target.yaml"] }, `${fixturesRoot}/config`);
+    expect(entries).toEqual([`${fixturesRoot}/config/target.yaml`]);
+    expect(warnings).toEqual([]);
+  });
+
+  test("warns (does not throw) on a missing entry file", () => {
+    const { entries, warnings } = resolveEntries({ entries: ["does-not-exist.yaml"] }, `${fixturesRoot}/config`);
+    expect(entries).toEqual([]);
+    expect(warnings.length).toBe(1);
+    expect(warnings[0]).toContain("does-not-exist.yaml");
+  });
+
+  test("absent entries field resolves to an empty list with no warnings", () => {
+    const { entries, warnings } = resolveEntries({}, `${fixturesRoot}/config`);
+    expect(entries).toEqual([]);
+    expect(warnings).toEqual([]);
+  });
+
+  test("preserves declaration order and skips missing entries in place", () => {
+    const { entries, warnings } = resolveEntries(
+      { entries: ["target.yaml", "missing.yaml", "nested/subdir"] },
+      `${fixturesRoot}/config`,
+    );
+    expect(entries).toEqual([`${fixturesRoot}/config/target.yaml`, `${fixturesRoot}/config/nested/subdir`]);
+    expect(warnings.length).toBe(1);
   });
 });

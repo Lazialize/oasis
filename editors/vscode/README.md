@@ -13,18 +13,29 @@ OpenAPI 3.0/3.1 YAML and JSON documents:
 
 ## Activation and OpenAPI detection
 
-The `oasis` language server does not gate on `languageId` and does not read any
-`initializationOptions` — it treats *every* document it is asked to open as the entry point of its
-own OpenAPI workspace graph and lints it accordingly. That means if the extension synced every
-YAML/JSON file in a workspace unconditionally, opening an unrelated YAML/JSON file would
-immediately produce a `Missing required field "openapi"` diagnostic.
+The extension activates on `yaml`/`json`/`jsonc` documents (`onLanguage:*`) and also on
+`workspaceContains:oasis.config.jsonc`, so it starts up as soon as a workspace with a config file
+is opened, even before any matching document is opened.
 
-To avoid that, this extension activates on `yaml`/`json`/`jsonc` documents but adds a **client-side
-content guard**: a document is only opened/synced with the server if its text matches
+Without an `oasis.config.jsonc` in the workspace, the `oasis` language server treats *every*
+document it is asked to open as the entry point of its own OpenAPI workspace graph and lints it
+accordingly. That means if the extension synced every YAML/JSON file in a workspace
+unconditionally, opening an unrelated YAML/JSON file would immediately produce a `Missing required
+field "openapi"` diagnostic. To avoid that, this extension adds a **client-side content guard** in
+that case: a document is only opened/synced with the server if its text matches
 `/^\s*(['"]?)openapi\1\s*:/m` (YAML) or `/"openapi"\s*:/` (JSON) — i.e. it looks like it declares a
 top-level `openapi:` key. Files that don't match are left alone (no diagnostics, no LSP features).
 If a file starts out not matching (e.g. a brand-new empty file) but gains an `openapi:` key later,
 it is synced in at that point.
+
+**With an `oasis.config.jsonc` present anywhere in the workspace**, the client guard relaxes: every
+`yaml`/`json`/`jsonc` document is synced (including `oasis.config.jsonc` itself), and the server
+decides what to do with each one — see "project mode" in the [root README](../../README.md#oasis-lsp).
+In short: files reachable from a configured `entries` document (like a Path Item fragment file
+with no `openapi:` key of its own) get full LSP features via the owning entry's graph; other files
+with an `openapi:` key still lint as their own standalone entry; everything else is silently
+ignored. The extension also watches `oasis.config.jsonc` for changes and notifies the server via
+`workspace/didChangeWatchedFiles` so edits to the config reload project entries.
 
 ## Settings
 

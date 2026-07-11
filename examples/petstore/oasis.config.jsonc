@@ -5,5 +5,9 @@
       // (for the shared Error schema) — that file-level cycle is fine here.
       "no-ref-cycle": "off"
     }
-  }
+  },
+  // LSP "project mode": the server builds this entry's workspace graph at startup and publishes
+  // diagnostics for every file in it (including paths/*.yaml and schemas/*.yaml) without needing
+  // anything open, and treats those files as members of this graph rather than standalone entries.
+  "entries": ["openapi.yaml"]
 }

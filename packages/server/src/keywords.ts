@@ -1,5 +1,7 @@
+import { isMap } from "yaml";
 import { parsePointer } from "@oasis/core";
-import type { OpenApiVersion } from "@oasis/core";
+import type { OasisDocument, OpenApiVersion } from "@oasis/core";
+import { mapKeys } from "./yaml-helpers.ts";
 
 /**
  * The declarative set of "object kinds" the completion/hover logic understands. Deliberately not
@@ -145,15 +147,32 @@ export function allowedKeys(kind: ObjectKind, version: OpenApiVersion): string[]
   return [...base.filter((k) => !removeSet.has(k)), ...add];
 }
 
+/**
+ * Heuristic root object kind for `doc`, for pointer classification: a full OpenAPI document
+ * (`"root"`) declares an `openapi` key; a Path Item fragment file (`paths: { /pets: { $ref:
+ * './pets.yaml' } }`) doesn't, and its own top-level map contains HTTP method keys directly.
+ * Anything else defaults to `"root"`, matching pre-project-mode behavior.
+ */
+export function inferRootKind(doc: OasisDocument): ObjectKind {
+  const root = doc.yamlDoc.contents;
+  const keys = mapKeys(isMap(root) ? root : undefined);
+  if (keys.includes("openapi")) return "root";
+  if (keys.some((k) => HTTP_METHODS.includes(k))) return "pathItem";
+  return "root";
+}
+
 type WalkState = ObjectKind | "paths" | "parameterList" | "contentMap" | "responsesMap" | "headerMap" | "schemaPropMap" | "schemaList" | "componentSchemaMap" | "componentParameterMap" | "componentRequestBodyMap" | "componentResponseMap" | "componentSecuritySchemeMap" | "unknown";
 
 /**
- * Classify the object kind that lives at `pointer`, by walking the JSON Pointer segments from the
- * document root through a small state machine mirroring the OpenAPI object model.
+ * Classify the object kind that lives at `pointer`, by walking the JSON Pointer segments from
+ * `rootKind` (the kind of object the document itself is rooted at) through a small state machine
+ * mirroring the OpenAPI object model. `rootKind` defaults to `"root"` (a full OpenAPI document);
+ * pass `"pathItem"` for a Path Item fragment file (e.g. `paths: { /pets: { $ref: './pets.yaml' }
+ * }`), whose own document root *is* a path item rather than the full document.
  */
-export function classifyPointer(pointer: string): ObjectKind | undefined {
+export function classifyPointer(pointer: string, rootKind: ObjectKind = "root"): ObjectKind | undefined {
   const segments = parsePointer(pointer);
-  let state: WalkState = "root";
+  let state: WalkState = rootKind;
 
   for (const seg of segments) {
     state = step(state, seg);
