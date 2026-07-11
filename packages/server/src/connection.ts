@@ -19,6 +19,8 @@ import { getDefinition } from "./handlers/definition.ts";
 import { getHover } from "./handlers/hover.ts";
 import { getCompletions } from "./handlers/completion.ts";
 import { getDocumentSymbols } from "./handlers/document-symbol.ts";
+import { getReferences } from "./handlers/references.ts";
+import { prepareRename, renameComponent } from "./handlers/rename.ts";
 import type { SymbolNodeKind, SymbolResult } from "./handlers/document-symbol.ts";
 import { getDiagnosticsByFile, toLspRange } from "./diagnostics.ts";
 import { routeDocument } from "./document-routing.ts";
@@ -217,6 +219,8 @@ export function startServer(): Connection {
         hoverProvider: true,
         completionProvider: { triggerCharacters: ['"', ":", "/", "#", "'", "$"] },
         documentSymbolProvider: true,
+        referencesProvider: true,
+        renameProvider: { prepareProvider: true },
       },
     };
   });
@@ -288,6 +292,35 @@ export function startServer(): Connection {
     const doc = open ? parseDocument(open.getText(), path) : undefined;
     if (!doc) return [];
     return getDocumentSymbols(doc).map(toLspSymbol);
+  });
+
+  connection.onReferences(async (params) => {
+    const path = uriToPath(params.textDocument.uri);
+    const results = await getReferences(ctx, {
+      path,
+      position: params.position,
+      includeDeclaration: params.context.includeDeclaration,
+    });
+    return results.map((result) => ({ uri: pathToUri(result.filePath), range: toLspRange(result.range) }));
+  });
+
+  connection.onPrepareRename(async (params) => {
+    const path = uriToPath(params.textDocument.uri);
+    const result = await prepareRename(ctx, { path, position: params.position });
+    if (!result) return null;
+    return { range: toLspRange(result.range), placeholder: result.placeholder };
+  });
+
+  connection.onRenameRequest(async (params) => {
+    const path = uriToPath(params.textDocument.uri);
+    const edits = await renameComponent(ctx, { path, position: params.position, newName: params.newName });
+    if (!edits) return null;
+    const changes: Record<string, { range: ReturnType<typeof toLspRange>; newText: string }[]> = {};
+    for (const edit of edits) {
+      const uri = pathToUri(edit.filePath);
+      (changes[uri] ??= []).push({ range: toLspRange(edit.range), newText: edit.newText });
+    }
+    return { changes };
   });
 
   documents.listen(connection);

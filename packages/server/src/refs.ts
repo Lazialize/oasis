@@ -1,12 +1,14 @@
 import { isScalar } from "yaml";
 import { nodeAtPosition, offsetAtPosition } from "@oasis/core";
-import type { OasisDocument, Position } from "@oasis/core";
+import type { OasisDocument, Position, Range } from "@oasis/core";
 
 export interface RefAtPosition {
   /** JSON Pointer of the `$ref` (or ref-like) scalar node itself. */
   pointer: string;
   /** The raw `$ref` string value, e.g. "./other.yaml#/components/schemas/Foo" or "#/components/schemas/Foo". */
   refString: string;
+  /** Source range of the scalar node (includes surrounding quotes, if any). */
+  range: Range;
 }
 
 /**
@@ -26,7 +28,7 @@ export function findRefAtPosition(doc: OasisDocument, position: Position): RefAt
   const looksLikeRef = isRefKey || value.includes("#/") || /^\.{1,2}\//.test(value);
   if (!looksLikeRef) return undefined;
 
-  return { pointer: found.pointer, refString: value };
+  return { pointer: found.pointer, refString: value, range: found.range };
 }
 
 /** Drop the last segment of a JSON Pointer, e.g. "/a/b/$ref" -> "/a/b". */
