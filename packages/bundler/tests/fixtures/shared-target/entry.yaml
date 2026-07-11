@@ -1,0 +1,29 @@
+openapi: 3.0.3
+info:
+  title: Shared Target
+  version: "1.0.0"
+paths:
+  /a:
+    get:
+      operationId: getA
+      tags: [x]
+      description: Get A.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: './shared.yaml#/components/schemas/Pet'
+  /b:
+    get:
+      operationId: getB
+      tags: [x]
+      description: Get B.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: './shared.yaml#/components/schemas/Pet'

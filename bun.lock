@@ -9,6 +9,17 @@
         "typescript": "^5.7.2",
       },
     },
+    "packages/bundler": {
+      "name": "@oasis/bundler",
+      "version": "0.1.0",
+      "dependencies": {
+        "@oasis/core": "workspace:*",
+        "yaml": "^2.6.1",
+      },
+      "devDependencies": {
+        "@oasis/linter": "workspace:*",
+      },
+    },
     "packages/cli": {
       "name": "@oasis/cli",
       "version": "0.1.0",
@@ -16,6 +27,7 @@
         "oasis": "./src/index.ts",
       },
       "dependencies": {
+        "@oasis/bundler": "workspace:*",
         "@oasis/core": "workspace:*",
         "@oasis/linter": "workspace:*",
       },
@@ -38,6 +50,8 @@
     },
   },
   "packages": {
+    "@oasis/bundler": ["@oasis/bundler@workspace:packages/bundler"],
+
     "@oasis/cli": ["@oasis/cli@workspace:packages/cli"],
 
     "@oasis/core": ["@oasis/core@workspace:packages/core"],

@@ -1,0 +1,17 @@
+openapi: 3.0.3
+info:
+  title: Unresolved
+  version: "1.0.0"
+paths:
+  /x:
+    get:
+      operationId: getX
+      tags: [x]
+      description: Get X.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: './missing.yaml#/components/schemas/Foo'

@@ -1,0 +1,20 @@
+openapi: 3.0.3
+info:
+  title: Multi 3.0
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      tags: [pets]
+      description: List pets.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: './shared.yaml#/components/schemas/Pet'
+components: {}

@@ -1,0 +1,8 @@
+OrdersPath:
+  get:
+    operationId: listOrders
+    tags: [orders]
+    description: List orders.
+    responses:
+      '200':
+        description: OK

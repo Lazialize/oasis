@@ -1,0 +1,17 @@
+openapi: 3.0.3
+info:
+  title: Whole File Ref
+  version: "1.0.0"
+paths:
+  /user:
+    get:
+      operationId: getUser
+      tags: [user]
+      description: Get user.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: './user.yaml'

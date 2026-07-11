@@ -69,6 +69,7 @@ The single most important design constraint: **every value in a parsed document 
 - Input: entry document + workspace graph. Output: single document (YAML or JSON, `--format`).
 - External `$ref`s are lifted into `components/*` of the output; internal refs rewritten to point there. Name conflicts resolved deterministically (suffix with a counter or path-derived name); collisions where two different targets want the same name must not silently merge.
 - Preserve key order where practical; output must be a valid document of the same OpenAPI version.
+- **Path Item `$ref`s** (a `$ref` directly under a `paths/<path>` key, e.g. `paths: { /users: { $ref: './paths/users.yaml' } }`, whole-file or fragment) are **inlined in place** rather than lifted into `components/*` — OpenAPI 3.0 has no `components/pathItems` section, so lifting isn't an option there, and inlining is used for 3.1 too for consistency (a Redocly-like, uniform strategy). `$ref`s found *inside* the inlined path item (schemas, parameters, responses, ...) are still lifted the normal way. Chained path-item refs are followed with a depth guard.
 
 ### packages/server (LSP)
 

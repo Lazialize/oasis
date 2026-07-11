@@ -1,0 +1,17 @@
+openapi: 3.0.3
+info:
+  title: Cycle
+  version: "1.0.0"
+paths:
+  /nodes:
+    get:
+      operationId: listNodes
+      tags: [nodes]
+      description: List nodes.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: './b.yaml#/components/schemas/Node'

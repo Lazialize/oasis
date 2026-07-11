@@ -1,0 +1,99 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, test } from "bun:test";
+
+const fixturesRoot = `${import.meta.dir}/fixtures`;
+const cliEntry = `${import.meta.dir}/../src/index.ts`;
+
+interface RunResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+}
+
+async function runCli(args: string[]): Promise<RunResult> {
+  const proc = Bun.spawn(["bun", "run", cliEntry, ...args], { stdout: "pipe", stderr: "pipe" });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  return { exitCode, stdout, stderr };
+}
+
+describe("oasis bundle CLI", () => {
+  test("stdout mode: prints a self-contained YAML document with lifted refs", async () => {
+    const result = await runCli(["bundle", `${fixturesRoot}/bundle/entry.yaml`]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("openapi: 3.0.3");
+    expect(result.stdout).toContain("#/components/schemas/Pet");
+    expect(result.stdout).not.toContain("shared.yaml");
+  });
+
+  test("--format json produces JSON on stdout", async () => {
+    const result = await runCli(["bundle", `${fixturesRoot}/bundle/entry.yaml`, "--format", "json"]);
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.openapi).toBe("3.0.3");
+    expect(parsed.components.schemas.Pet).toBeDefined();
+  });
+
+  test("-o writes to a file instead of stdout", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "oasis-bundle-"));
+    const outPath = join(dir, "out.yaml");
+    try {
+      const result = await runCli(["bundle", `${fixturesRoot}/bundle/entry.yaml`, "-o", outPath]);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toBe("");
+      const content = await readFile(outPath, "utf-8");
+      expect(content).toContain("#/components/schemas/Pet");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("format is inferred from the -o extension (.json)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "oasis-bundle-"));
+    const outPath = join(dir, "out.json");
+    try {
+      const result = await runCli(["bundle", `${fixturesRoot}/bundle/entry.yaml`, "-o", outPath]);
+      expect(result.exitCode).toBe(0);
+      const content = await readFile(outPath, "utf-8");
+      expect(() => JSON.parse(content)).not.toThrow();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("--format overrides extension inference", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "oasis-bundle-"));
+    const outPath = join(dir, "out.json");
+    try {
+      const result = await runCli(["bundle", `${fixturesRoot}/bundle/entry.yaml`, "-o", outPath, "--format", "yaml"]);
+      expect(result.exitCode).toBe(0);
+      const content = await readFile(outPath, "utf-8");
+      expect(() => JSON.parse(content)).toThrow();
+      expect(content).toContain("openapi: 3.0.3");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("exits 2 on usage error (no entry given)", async () => {
+    const result = await runCli(["bundle"]);
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("entry file");
+  });
+
+  test("exits 2 on a bad --format value", async () => {
+    const result = await runCli(["bundle", `${fixturesRoot}/bundle/entry.yaml`, "--format", "xml"]);
+    expect(result.exitCode).toBe(2);
+  });
+
+  test("exits 2 when the entry document fails to load/parse", async () => {
+    const result = await runCli(["bundle", `${fixturesRoot}/does-not-exist.yaml`]);
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("failed to parse");
+  });
+});

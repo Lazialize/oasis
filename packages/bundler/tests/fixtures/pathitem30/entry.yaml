@@ -1,0 +1,9 @@
+openapi: 3.0.3
+info:
+  title: Path Items 3.0
+  version: "1.0.0"
+paths:
+  /users:
+    $ref: './paths/users.yaml'
+  /orders:
+    $ref: './paths.yaml#/OrdersPath'

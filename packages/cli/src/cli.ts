@@ -1,10 +1,11 @@
+import { runBundleCommand } from "./commands/bundle.ts";
 import { runLintCommand } from "./commands/lint.ts";
 
 const HELP = `oasis - OpenAPI toolkit (lint / bundle / lsp)
 
 Usage:
   oasis lint <entry...> [--config path] [--format pretty|json]
-  oasis bundle <entry> [-o out] [--format yaml|json]   (not yet implemented)
+  oasis bundle <entry> [-o|--out path] [--format yaml|json]
   oasis lsp                                            (not yet implemented)
 
 Options:
@@ -28,12 +29,13 @@ export async function runCli(argv: string[], io: CliIo = defaultIo): Promise<num
   switch (command) {
     case "lint":
       return runLintCommand(rest, io);
+    case "bundle":
+      return runBundleCommand(rest, io);
     case undefined:
     case "-h":
     case "--help":
       io.stdout(HELP);
       return 0;
-    case "bundle":
     case "lsp":
       io.stderr(`oasis: "${command}" is not implemented yet.\n`);
       return 2;
