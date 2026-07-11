@@ -56,9 +56,25 @@ launch a new VS Code window with the extension loaded. It runs `npm run watch` a
 task, so edits to `src/extension.ts` are picked up on reload (`Cmd+R` / `Ctrl+R` in the dev host).
 
 The extension defaults to launching a globally installed `oasis` binary, which won't exist in this
-repo unless you've `npm link`ed or installed the CLI. To point the dev host at this repo's CLI
-without installing anything, open the dev host's settings (or add to
-`editors/vscode/.vscode/settings.json` for the extension's own workspace) and set:
+repo unless you've `npm link`ed or installed the CLI. There are two ways to point the dev host at
+this repo's `oasis` without a global install — open the dev host's settings (or add to
+`editors/vscode/.vscode/settings.json` for the extension's own workspace):
+
+**Simplest: use the compiled binary.** From the repo root, run `bun run build:bin` to produce
+`dist/oasis` (see the [root README](../../README.md#install--build-from-source)), then set:
+
+```jsonc
+{
+  "oasis.server.path": "<absolute path to repo>/dist/oasis",
+  "oasis.server.args": ["lsp"]
+}
+```
+
+This avoids needing `bun` on the launched process's PATH and starts faster than running from
+source. Re-run `bun run build:bin` after pulling server/CLI changes and restart the language server
+(**Oasis: Restart Language Server**) to pick them up.
+
+**Alternative: run from source.**
 
 ```jsonc
 {

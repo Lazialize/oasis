@@ -25,6 +25,19 @@ bun run packages/cli/src/index.ts <command>
 bunx oasis <command>
 ```
 
+### Install / Build from source
+
+To get a single self-contained `oasis` binary (no `bun`/Node required to run it), compile it with
+`bun build --compile`:
+
+```sh
+bun run build:bin       # -> dist/oasis
+./dist/oasis <command>
+```
+
+This is also the simplest way to point an editor at a working `oasis lsp` — see the VS Code
+extension section below for `oasis.server.path`.
+
 ## Commands
 
 ### `oasis lint <entry...>`
@@ -104,6 +117,18 @@ Starts the language server on stdio. Normally launched by an editor, not by hand
 
 A thin LSP client lives in [`editors/vscode`](editors/vscode/). It activates on YAML/JSON files that declare a top-level `openapi` key and leaves everything else alone. See [its README](editors/vscode/README.md) for setup (development host, packaging a `.vsix`, and pointing it at this repo's CLI without a global install).
 
+The extension launches the server via the `oasis.server.path` / `oasis.server.args` settings
+(default: the globally installed `oasis` binary running `lsp`). Instead of installing globally or
+running from source, you can point `oasis.server.path` directly at a compiled binary from this
+repo (see [Install / Build from source](#install--build-from-source)):
+
+```jsonc
+{
+  "oasis.server.path": "/absolute/path/to/oasis/dist/oasis",
+  "oasis.server.args": ["lsp"]
+}
+```
+
 ## Project structure
 
 ```
@@ -124,6 +149,8 @@ Design notes and the reasoning behind the architecture live in [DESIGN.md](DESIG
 ```sh
 bun test            # all package tests
 bunx tsc --noEmit   # typecheck (packages only; the extension has its own tsconfig)
+bun run build:bin   # compile the self-contained dist/oasis binary
+bun run test:bin    # exercise the compiled binary (lint/bundle/lsp), rebuilding it if missing
 ```
 
 The VS Code extension is built separately with npm — see [editors/vscode/README.md](editors/vscode/README.md).
