@@ -1,3 +1,4 @@
+import { runLspServer } from "@oasis/server";
 import { runBundleCommand } from "./commands/bundle.ts";
 import { runLintCommand } from "./commands/lint.ts";
 
@@ -6,7 +7,7 @@ const HELP = `oasis - OpenAPI toolkit (lint / bundle / lsp)
 Usage:
   oasis lint <entry...> [--config path] [--format pretty|json]
   oasis bundle <entry> [-o|--out path] [--format yaml|json]
-  oasis lsp                                            (not yet implemented)
+  oasis lsp                                            start the LSP server on stdio
 
 Options:
   -h, --help    Show this help message
@@ -37,8 +38,10 @@ export async function runCli(argv: string[], io: CliIo = defaultIo): Promise<num
       io.stdout(HELP);
       return 0;
     case "lsp":
-      io.stderr(`oasis: "${command}" is not implemented yet.\n`);
-      return 2;
+      runLspServer();
+      // The server lives for the lifetime of the stdio connection; keep the process running
+      // until the client sends `exit` (handled inside runLspServer, which calls process.exit).
+      return new Promise<number>(() => {});
     default:
       io.stderr(`oasis: unknown command "${command}"\n\n`);
       io.stdout(HELP);

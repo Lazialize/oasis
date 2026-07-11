@@ -10,6 +10,7 @@
   "dependencies": {
     "@oasis/bundler": "workspace:*",
     "@oasis/core": "workspace:*",
-    "@oasis/linter": "workspace:*"
+    "@oasis/linter": "workspace:*",
+    "@oasis/server": "workspace:*"
   }
 }
