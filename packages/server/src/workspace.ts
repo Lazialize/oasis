@@ -24,15 +24,37 @@ export interface ProjectState {
  * document is treated as its own entry; the graph is rebuilt lazily and cached until a file it
  * contains changes. In project mode, entries declared in `oasis.config.jsonc` are additionally
  * loaded eagerly (see `packages/server/src/connection.ts`).
+ *
+ * Multiple projects can be loaded at once — one per discovered `oasis.config.jsonc` with a
+ * non-empty `entries` field — keyed by that config file's resolved absolute path. A project can be
+ * discovered either eagerly (root-of-workspace-folder scan, or `initializationOptions.configFiles`
+ * from the client) or lazily (walking upward from an opened/changed document's directory; see
+ * `discoverProjectUpward` in `packages/server/src/project.ts`).
  */
 export interface ServerContext {
   fileSystem: FileSystem;
   graphCache: Map<string, WorkspaceGraph>;
-  project: ProjectState | undefined;
+  /** Loaded projects, keyed by the resolved absolute path of their `oasis.config.jsonc`. */
+  projects: Map<string, ProjectState>;
+  /** Workspace folder roots reported at initialize; bounds upward config discovery. */
+  workspaceRoots: string[];
+  /**
+   * Directories already walked upward with no `oasis.config.jsonc` found (up to their workspace
+   * boundary at the time), so repeated `didChange` events on a document outside any project don't
+   * re-walk the filesystem on every keystroke. Cleared whenever a project is loaded or unloaded,
+   * since that can change the answer for previously-missed directories.
+   */
+  upwardMissCache: Set<string>;
 }
 
 export function createServerContext(fileSystem: FileSystem): ServerContext {
-  return { fileSystem, graphCache: new Map(), project: undefined };
+  return {
+    fileSystem,
+    graphCache: new Map(),
+    projects: new Map(),
+    workspaceRoots: [],
+    upwardMissCache: new Set(),
+  };
 }
 
 /** Load (or reuse a cached) workspace graph rooted at `entryPath`. */
@@ -61,16 +83,21 @@ export function getDocument(graph: WorkspaceGraph, path: string): OasisDocument 
 }
 
 /**
- * If `path` is a member of a project entry's graph, return that entry's absolute path (loading
- * the entry's graph, from cache if possible, to check membership). Entries are checked in
- * declaration order; the first graph containing `path` wins when a file belongs to more than one.
- * Returns undefined outside of project mode, or when `path` belongs to no project graph.
+ * If `path` is a member of any loaded project's entry graph, return that entry's absolute path
+ * (loading the entry's graph, from cache if possible, to check membership). Projects are checked
+ * in a deterministic order (by config path); within a project, entries are checked in declaration
+ * order. The first graph containing `path` wins when a file belongs to more than one. Returns
+ * undefined when no project is loaded, or when `path` belongs to no project graph.
  */
 export async function findOwningEntry(ctx: ServerContext, path: string): Promise<string | undefined> {
-  if (!ctx.project) return undefined;
-  for (const entryPath of ctx.project.entryPaths) {
-    const graph = await getGraph(ctx, entryPath);
-    if (graph.documents.has(path)) return entryPath;
+  const configPaths = [...ctx.projects.keys()].sort();
+  for (const configPath of configPaths) {
+    const project = ctx.projects.get(configPath);
+    if (!project) continue;
+    for (const entryPath of project.entryPaths) {
+      const graph = await getGraph(ctx, entryPath);
+      if (graph.documents.has(path)) return entryPath;
+    }
   }
   return undefined;
 }

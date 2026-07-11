@@ -291,5 +291,82 @@ paths:
         projectClient.kill();
       }
     }, 20000);
+
+    test("initializationOptions.configFiles eagerly loads a subdirectory project (repo root as rootUri) and publishes diagnostics with nothing open", async () => {
+      const petstoreConfigPath = join(repoRoot, "examples", "petstore", "oasis.config.jsonc");
+      const petstoreOpenApiPath = join(repoRoot, "examples", "petstore", "openapi.yaml");
+
+      const rootClient = new LspClient();
+      try {
+        const initResult = await rootClient.request("initialize", {
+          processId: null,
+          rootUri: pathToFileURL(repoRoot).toString(),
+          capabilities: {},
+          initializationOptions: { configFiles: [petstoreConfigPath] },
+        });
+        expect(initResult.error).toBeUndefined();
+        rootClient.notify("initialized", {});
+
+        // Nothing is ever opened: the server should eagerly build the petstore project's graph
+        // from `initializationOptions.configFiles` (a subdirectory config the root-of-workspace
+        // scan alone would miss) and publish diagnostics for its files unprompted.
+        const uri = pathToFileURL(petstoreOpenApiPath).toString();
+        const publish = await rootClient.waitFor(
+          (msg) => msg.method === "textDocument/publishDiagnostics" && msg.params?.uri === uri,
+          15000,
+        );
+        expect(Array.isArray(publish.params.diagnostics)).toBe(true);
+      } finally {
+        rootClient.kill();
+      }
+    }, 20000);
+
+    test("no configFiles: opening a subdirectory project's fragment file from the repo root triggers upward discovery", async () => {
+      const fragmentPath = join(repoRoot, "examples", "petstore", "paths", "pets.yaml");
+      const fragmentText = readFileSync(fragmentPath, "utf-8");
+
+      const rootClient = new LspClient();
+      try {
+        const initResult = await rootClient.request("initialize", {
+          processId: null,
+          rootUri: pathToFileURL(repoRoot).toString(),
+          capabilities: {},
+        });
+        expect(initResult.error).toBeUndefined();
+        rootClient.notify("initialized", {});
+
+        const uri = pathToFileURL(fragmentPath).toString();
+        rootClient.notify("textDocument/didOpen", {
+          textDocument: { uri, languageId: "yaml", version: 1, text: fragmentText },
+        });
+
+        // The fragment has no top-level `openapi:` key; if upward discovery of
+        // examples/petstore/oasis.config.jsonc didn't kick in, the server would either ignore it
+        // (project-mode-style) or lint it as a broken standalone entry. Diagnostics arriving with
+        // no "Missing required field \"openapi\"" noise confirms it was routed as a project member.
+        const publish = await rootClient.waitFor(
+          (msg) => msg.method === "textDocument/publishDiagnostics" && msg.params?.uri === uri,
+          15000,
+        );
+        expect(Array.isArray(publish.params.diagnostics)).toBe(true);
+        expect(
+          publish.params.diagnostics.some((d: { message?: string }) => d.message?.includes('Missing required field "openapi"')),
+        ).toBe(false);
+
+        const lines = fragmentText.split("\n");
+        const lineIdx = lines.findIndex((l) => l.includes("$ref: '../openapi.yaml#/components/schemas/Error'"));
+        const position = { line: lineIdx, character: lines[lineIdx]!.indexOf("'../openapi") + 1 };
+
+        const completion = await rootClient.request("textDocument/completion", {
+          textDocument: { uri },
+          position,
+        });
+        expect(completion.error).toBeUndefined();
+        const items: any[] = completion.result ?? [];
+        expect(items.some((i) => typeof i.label === "string" && i.label.includes("Error"))).toBe(true);
+      } finally {
+        rootClient.kill();
+      }
+    }, 20000);
   });
 });

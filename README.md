@@ -120,14 +120,33 @@ Starts the language server on stdio. Normally launched by an editor, not by hand
 - **Completion** — keys valid at the cursor position (version-aware: 3.0 `nullable` vs 3.1 `const`/`webhooks`…), and `$ref` target suggestions from the whole workspace
 - **Document Symbols** — outline of paths/operations/components
 
-**Project mode:** if an `oasis.config.jsonc` with an `entries` field is found at the root of a
-workspace folder, the server builds a workspace graph per entry at startup and publishes
-diagnostics for every file in those graphs immediately — no file needs to be open. Files
-transitively `$ref`'d from an entry (e.g. a Path Item file like `paths/pets.yaml` with no
-top-level `openapi:` key of its own) are treated as members of the owning entry's graph rather
-than broken standalone documents: their diagnostics, go-to-definition, hover, and `$ref`
-completion all resolve against that graph. Editing the config file reloads project entries and
-re-lints. Files outside any project graph keep the original entry-per-open-document behavior.
+**Project mode:** an `oasis.config.jsonc` with an `entries` field defines a project — the server
+builds a workspace graph per entry and publishes diagnostics for every file in it immediately, no
+file needs to be open. More than one project can be loaded at once (e.g. multiple
+`oasis.config.jsonc` files in different subdirectories of a monorepo); each is independent, keyed
+by its config file's path. Files transitively `$ref`'d from an entry (e.g. a Path Item file like
+`paths/pets.yaml` with no top-level `openapi:` key of its own) are treated as members of the owning
+entry's graph rather than broken standalone documents: their diagnostics, go-to-definition, hover,
+and `$ref` completion all resolve against that graph. Editing a config file reloads that project's
+entries and re-lints; deleting one unloads it. Files outside any project graph keep the original
+entry-per-open-document behavior.
+
+Configs are discovered two ways, so this works regardless of the file layout or the client's
+capabilities:
+
+- **Eagerly at startup**: the server scans each workspace folder root for `oasis.config.jsonc`, and
+  additionally loads any config paths the client passes as `initializationOptions.configFiles`
+  (the VSCode extension deep-scans the workspace for these — see below — so a config that lives in
+  a subdirectory, like `examples/petstore/oasis.config.jsonc`, is found even though it isn't at a
+  workspace folder root).
+- **Lazily on open/change**: if an opened or edited document doesn't belong to any already-loaded
+  project, the server walks upward from its directory (stopping at the enclosing workspace folder,
+  or the filesystem root if none) looking for `oasis.config.jsonc` — the same upward-discovery
+  semantics as `oasis lint`/`oasis bundle`. This means project mode also works with LSP clients
+  that don't do their own deep workspace scan.
+
+Both mechanisms dedupe by the config file's resolved absolute path, so a config found by both never
+loads twice.
 
 ## VS Code extension
 

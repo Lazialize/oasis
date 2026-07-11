@@ -46,11 +46,23 @@ let client: LanguageClient | undefined;
 let outputChannel: vscode.OutputChannel | undefined;
 let configWatcher: vscode.FileSystemWatcher | undefined;
 
-/** Set once at activation if any workspace folder contains `oasis.config.jsonc`. */
+/** Set once at activation if any workspace folder contains `oasis.config.jsonc` (deep scan). */
 let projectModeActive = false;
 
+/**
+ * Absolute paths of every `oasis.config.jsonc` found by the deep scan, passed to the server as
+ * `initializationOptions.configFiles` so it can eagerly load projects that live in a subdirectory
+ * rather than at a workspace folder root — the server's own root-of-workspace-folder scan alone
+ * would miss those (see `scanWorkspaceRootsForProjects` in packages/server/src/project.ts). Capped
+ * to keep initialize fast/bounded in pathological workspaces; the server's independent upward
+ * discovery (walking up from an opened document) is the fallback for anything beyond the cap.
+ */
+const MAX_CONFIG_FILES = 20;
+let discoveredConfigFiles: string[] = [];
+
 async function detectProjectMode(): Promise<boolean> {
-  const found = await vscode.workspace.findFiles(`**/${CONFIG_FILE_NAME}`, "**/node_modules/**", 1);
+  const found = await vscode.workspace.findFiles(`**/${CONFIG_FILE_NAME}`, "**/node_modules/**", MAX_CONFIG_FILES);
+  discoveredConfigFiles = found.map((uri) => uri.fsPath);
   return found.length > 0;
 }
 
@@ -73,6 +85,7 @@ function buildClientOptions(): LanguageClientOptions {
   return {
     documentSelector: ["yaml", "json", "jsonc"],
     outputChannel,
+    initializationOptions: { configFiles: discoveredConfigFiles },
     middleware: {
       didOpen: async (document, next) => {
         if (!shouldSync(document)) return;
@@ -181,10 +194,12 @@ function registerConfigWatcher(context: vscode.ExtensionContext): void {
     configWatcher.onDidChange((uri) => notify(uri, FileChangeType.Changed)),
     configWatcher.onDidCreate((uri) => {
       projectModeActive = true;
+      if (!discoveredConfigFiles.includes(uri.fsPath)) discoveredConfigFiles.push(uri.fsPath);
       notify(uri, FileChangeType.Created);
     }),
     configWatcher.onDidDelete((uri) => {
       notify(uri, FileChangeType.Deleted);
+      discoveredConfigFiles = discoveredConfigFiles.filter((path) => path !== uri.fsPath);
       void detectProjectMode().then((active) => {
         projectModeActive = active;
       });

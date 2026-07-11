@@ -35,7 +35,17 @@ In short: files reachable from a configured `entries` document (like a Path Item
 with no `openapi:` key of its own) get full LSP features via the owning entry's graph; other files
 with an `openapi:` key still lint as their own standalone entry; everything else is silently
 ignored. The extension also watches `oasis.config.jsonc` for changes and notifies the server via
-`workspace/didChangeWatchedFiles` so edits to the config reload project entries.
+`workspace/didChangeWatchedFiles` so edits to (or deletion of) a config reload (or unload) that
+project.
+
+Detection (`vscode.workspace.findFiles('**/oasis.config.jsonc', ...)`) is a **deep scan**, not
+limited to workspace folder roots, so a config nested in a subdirectory of a larger workspace (e.g.
+`examples/petstore/oasis.config.jsonc` when the workspace root is the repo root) is still found.
+The resulting config paths (capped at 20, `node_modules` excluded) are passed to the server as
+`initializationOptions.configFiles` at startup so it can load those projects eagerly, even before
+any of their files are opened. The server also has its own independent upward-discovery fallback
+(walking up from an opened document's directory) for clients that don't deep-scan, so this works
+even beyond the cap or with editors other than VS Code.
 
 ## Settings
 

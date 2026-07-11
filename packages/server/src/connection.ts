@@ -23,7 +23,7 @@ import type { SymbolNodeKind, SymbolResult } from "./handlers/document-symbol.ts
 import { getDiagnosticsByFile, toLspRange } from "./diagnostics.ts";
 import { routeDocument } from "./document-routing.ts";
 import { OverlayFileSystem } from "./overlay-fs.ts";
-import { isConfigFilePath, loadProjectConfig } from "./project.ts";
+import { isConfigFilePath, loadConfigFilesFromInit, loadProjectAtPath, scanWorkspaceRootsForProjects } from "./project.ts";
 import { createServerContext, invalidateGraph } from "./workspace.ts";
 
 const DEBOUNCE_MS = 250;
@@ -78,6 +78,7 @@ export function startServer(): Connection {
   const ctx = createServerContext(fileSystem);
 
   let workspaceRoots: string[] = [];
+  let initConfigFiles: unknown;
 
   const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const lastPublishedFiles = new Map<string, Set<string>>();
@@ -96,6 +97,17 @@ export function startServer(): Connection {
     lastPublishedFiles.set(entryPath, new Set(byFile.keys()));
   }
 
+  /** Clear previously-published diagnostics for an entry whose project was unloaded (config
+   * deleted, or the entry dropped from `entries`), so stale diagnostics don't linger. */
+  function clearPublishedFor(entryPath: string): void {
+    const prev = lastPublishedFiles.get(entryPath);
+    if (!prev) return;
+    for (const file of prev) {
+      connection.sendDiagnostics({ uri: pathToUri(file), diagnostics: [] });
+    }
+    lastPublishedFiles.delete(entryPath);
+  }
+
   function scheduleValidate(entryPath: string): void {
     const existing = debounceTimers.get(entryPath);
     if (existing) clearTimeout(existing);
@@ -108,41 +120,75 @@ export function startServer(): Connection {
     );
   }
 
-  /** Build (or rebuild) every project entry's graph and publish diagnostics immediately, with
-   * nothing needing to be open. */
-  async function publishProjectEntries(): Promise<void> {
-    if (!ctx.project) return;
-    for (const entryPath of ctx.project.entryPaths) {
-      await validate(entryPath);
-    }
-  }
-
-  async function reloadProjectConfig(): Promise<void> {
-    await loadProjectConfig(ctx, workspaceRoots);
-    // Always publish (possibly empty) so a previously-reported missing-entry warning clears once
-    // the config is fixed.
-    const configDiagnostics = (ctx.project?.warnings ?? []).map((message) => ({
+  function publishConfigWarnings(configPath: string, warnings: string[]): void {
+    const configDiagnostics = warnings.map((message) => ({
       message,
       severity: DiagnosticSeverity.Warning,
       source: "oasis",
       code: "config",
       range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
     }));
-    if (ctx.project) {
-      connection.sendDiagnostics({ uri: pathToUri(ctx.project.configPath), diagnostics: configDiagnostics });
-    }
-    await publishProjectEntries();
+    connection.sendDiagnostics({ uri: pathToUri(configPath), diagnostics: configDiagnostics });
   }
 
-  /** Route a document open/change to the right place: project-config reload, the owning project
-   * entry's re-lint, a standalone OpenAPI entry's re-lint, or silent ignore for anything else. */
+  /** Build (or rebuild) every loaded project's entry graphs and publish diagnostics immediately,
+   * with nothing needing to be open. */
+  async function publishAllProjects(): Promise<void> {
+    for (const project of ctx.projects.values()) {
+      for (const entryPath of project.entryPaths) {
+        await validate(entryPath);
+      }
+    }
+  }
+
+  /** Discover and eagerly load every project reachable at startup: a root-of-workspace-folder
+   * scan (works for any client) plus any config paths the client discovered itself via a deep scan
+   * (`initializationOptions.configFiles`, e.g. VSCode's `findFiles`). Both dedupe naturally since
+   * projects are keyed by resolved config path. */
+  async function initializeProjects(): Promise<void> {
+    await scanWorkspaceRootsForProjects(ctx, workspaceRoots);
+    await loadConfigFilesFromInit(ctx, initConfigFiles);
+    for (const project of ctx.projects.values()) {
+      publishConfigWarnings(project.configPath, project.warnings);
+    }
+    await publishAllProjects();
+  }
+
+  /** Reload (or unload) the single project whose config file is `configPath` — used for
+   * `didChangeWatchedFiles`/didOpen/didChange on that specific config file, so editing one
+   * project's config never disturbs another's state. */
+  async function reloadProjectAtConfigPath(configPath: string): Promise<void> {
+    const before = ctx.projects.get(configPath);
+    const after = await loadProjectAtPath(ctx, configPath);
+
+    // Clear diagnostics for entries that dropped out of this project (including all of them, if
+    // the project was unloaded entirely) so stale diagnostics don't linger.
+    const afterEntries = new Set(after?.entryPaths ?? []);
+    for (const entryPath of before?.entryPaths ?? []) {
+      if (!afterEntries.has(entryPath)) clearPublishedFor(entryPath);
+    }
+
+    // Always publish (possibly empty) so a previously-reported missing-entry warning clears once
+    // the config is fixed, and so a deleted config's warnings are cleared too.
+    publishConfigWarnings(configPath, after?.warnings ?? []);
+
+    if (after) {
+      for (const entryPath of after.entryPaths) {
+        await validate(entryPath);
+      }
+    }
+  }
+
+  /** Route a document open/change to the right place: a specific project-config reload, the
+   * owning project entry's re-lint, a standalone OpenAPI entry's re-lint, or silent ignore for
+   * anything else. */
   async function handleDocumentEvent(path: string, text: string): Promise<void> {
     invalidateGraph(ctx, path);
 
     const route = await routeDocument(ctx, path, text);
     switch (route.kind) {
       case "config":
-        await reloadProjectConfig();
+        await reloadProjectAtConfigPath(path);
         return;
       case "project-member":
       case "standalone":
@@ -162,6 +208,8 @@ export function startServer(): Connection {
 
   connection.onInitialize((params) => {
     workspaceRoots = workspaceRootsFromInitialize(params);
+    const options = params.initializationOptions as { configFiles?: unknown } | undefined;
+    initConfigFiles = options?.configFiles;
     return {
       capabilities: {
         textDocumentSync: TextDocumentSyncKind.Incremental,
@@ -174,15 +222,14 @@ export function startServer(): Connection {
   });
 
   connection.onInitialized(() => {
-    void reloadProjectConfig();
+    void initializeProjects();
   });
 
   connection.onDidChangeWatchedFiles((params) => {
     for (const change of params.changes) {
       const path = uriToPath(change.uri);
       if (isConfigFilePath(path)) {
-        void reloadProjectConfig();
-        return;
+        void reloadProjectAtConfigPath(path);
       }
     }
   });

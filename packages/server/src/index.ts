@@ -8,7 +8,13 @@ export { OverlayFileSystem } from "./overlay-fs.ts";
 
 export { looksLikeOpenApi } from "./openapi-guard.ts";
 
-export { isConfigFilePath, loadProjectConfig } from "./project.ts";
+export {
+  discoverProjectUpward,
+  isConfigFilePath,
+  loadConfigFilesFromInit,
+  loadProjectAtPath,
+  scanWorkspaceRootsForProjects,
+} from "./project.ts";
 
 export type { DocumentRoute } from "./document-routing.ts";
 export { routeDocument } from "./document-routing.ts";

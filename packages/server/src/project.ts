@@ -1,8 +1,8 @@
-import { dirname, join } from "node:path";
+import { dirname, join, resolve as pathResolve, sep } from "node:path";
 import { parse as parseJsonc, type ParseError } from "jsonc-parser";
 import { CONFIG_FILE_NAME } from "@oasis/linter";
 import type { LintConfigFile } from "@oasis/linter";
-import type { ServerContext } from "./workspace.ts";
+import type { ProjectState, ServerContext } from "./workspace.ts";
 
 // Reads through `ctx.fileSystem` (the overlay FS) rather than node:fs directly, so this works
 // uniformly against real disk and against InMemoryFileSystem in tests, and so unsaved edits to
@@ -49,26 +49,127 @@ async function resolveProjectEntries(
   return { entries, warnings };
 }
 
-/**
- * Search each workspace folder root (no deep scan) for `oasis.config.jsonc`. The first folder
- * whose config declares a non-empty `entries` list wins and becomes the project; sets
- * `ctx.project` to that state, or clears it (undefined) if no folder has one.
- */
-export async function loadProjectConfig(ctx: ServerContext, workspaceRoots: string[]): Promise<void> {
-  for (const root of workspaceRoots) {
-    const candidate = join(root, CONFIG_FILE_NAME);
-    const configFile = await readConfigFile(ctx, candidate);
-    if (!configFile) continue;
-
-    const { entries, warnings } = await resolveProjectEntries(ctx, candidate, configFile);
-    if (entries.length === 0) continue;
-
-    ctx.project = { configPath: candidate, configDir: dirname(candidate), entryPaths: entries, warnings };
-    // Drop cached graphs so a reload (e.g. the config file itself changed) picks up new entries.
+function unloadProject(ctx: ServerContext, configPath: string): void {
+  if (ctx.projects.delete(configPath)) {
+    // Drop cached graphs and the upward-discovery negative cache: removing a project can change
+    // membership/discovery answers for files that were previously resolved against it.
     ctx.graphCache.clear();
-    return;
+    ctx.upwardMissCache.clear();
   }
-  ctx.project = undefined;
+}
+
+/**
+ * Load (or reload) the project defined by the `oasis.config.jsonc` at `rawConfigPath`. If the
+ * file is missing/unreadable/unparsable, or its `entries` field is empty or absent, any
+ * previously-loaded project at this config path is unloaded (removed from `ctx.projects`).
+ * Returns the resulting `ProjectState`, or undefined if no project is loaded at this path.
+ *
+ * Safe to call for a path that was never a project (e.g. probing during upward discovery, or a
+ * root-of-workspace scan where no config exists there): it's then a no-op.
+ */
+export async function loadProjectAtPath(ctx: ServerContext, rawConfigPath: string): Promise<ProjectState | undefined> {
+  const configPath = pathResolve(rawConfigPath);
+  const configFile = await readConfigFile(ctx, configPath);
+  if (!configFile) {
+    unloadProject(ctx, configPath);
+    return undefined;
+  }
+
+  const { entries, warnings } = await resolveProjectEntries(ctx, configPath, configFile);
+  if (entries.length === 0) {
+    unloadProject(ctx, configPath);
+    return undefined;
+  }
+
+  const state: ProjectState = { configPath, configDir: dirname(configPath), entryPaths: entries, warnings };
+  ctx.projects.set(configPath, state);
+  // Drop cached graphs so a reload (e.g. the config file itself changed) picks up new entries, and
+  // the upward-discovery cache so directories under this project are no longer treated as misses.
+  ctx.graphCache.clear();
+  ctx.upwardMissCache.clear();
+  return state;
+}
+
+/**
+ * Search each workspace folder root (no deep scan) for `oasis.config.jsonc` and load it as a
+ * project if it declares a non-empty `entries` list. This is one of two eager-discovery
+ * mechanisms (the other being `initializationOptions.configFiles`, see `loadConfigFilesFromInit`);
+ * both dedupe naturally since projects are keyed by resolved config path. Also records
+ * `workspaceRoots` on the context so upward discovery (`discoverProjectUpward`) knows where to
+ * stop walking.
+ */
+export async function scanWorkspaceRootsForProjects(ctx: ServerContext, workspaceRoots: string[]): Promise<void> {
+  ctx.workspaceRoots = workspaceRoots;
+  for (const root of workspaceRoots) {
+    await loadProjectAtPath(ctx, join(root, CONFIG_FILE_NAME));
+  }
+}
+
+/**
+ * Eagerly load projects for config file paths the client discovered via a deep workspace scan
+ * (passed as `initializationOptions.configFiles`). Non-string entries are ignored; entries
+ * containing `node_modules` are skipped; the list is capped to avoid pathological workspaces.
+ */
+export async function loadConfigFilesFromInit(ctx: ServerContext, configFiles: unknown): Promise<void> {
+  if (!Array.isArray(configFiles)) return;
+  const MAX_CONFIG_FILES = 20;
+  const candidates = configFiles
+    .filter((p): p is string => typeof p === "string" && !p.includes("node_modules"))
+    .slice(0, MAX_CONFIG_FILES);
+  for (const raw of candidates) {
+    await loadProjectAtPath(ctx, raw);
+  }
+}
+
+/** Whether `dir` is at or under `root`. */
+function isUnder(dir: string, root: string): boolean {
+  return dir === root || dir.startsWith(root + sep);
+}
+
+/** The innermost workspace root that contains `path`, if any. */
+function enclosingWorkspaceRoot(ctx: ServerContext, path: string): string | undefined {
+  let best: string | undefined;
+  for (const root of ctx.workspaceRoots) {
+    const normRoot = pathResolve(root);
+    if (isUnder(path, normRoot) && (!best || normRoot.length > best.length)) best = normRoot;
+  }
+  return best;
+}
+
+/**
+ * Walk upward from the directory containing `docPath`, looking for `oasis.config.jsonc`, stopping
+ * at the enclosing workspace folder root (or the filesystem root if `docPath` isn't under any
+ * workspace root). If a config with a non-empty `entries` field is found and isn't already loaded,
+ * load it as a new project. This mirrors the CLI's upward config discovery (`findConfigUpward` in
+ * `packages/linter/src/config.ts`) so project mode works for any LSP client, not just VSCode's
+ * deep `findFiles` scan (see `loadConfigFilesFromInit`).
+ *
+ * Returns true if a *new* project was loaded as a result of this call.
+ */
+export async function discoverProjectUpward(ctx: ServerContext, docPath: string): Promise<boolean> {
+  const boundary = enclosingWorkspaceRoot(ctx, docPath);
+  let dir = dirname(pathResolve(docPath));
+
+  for (;;) {
+    if (ctx.upwardMissCache.has(dir)) return false;
+
+    const candidate = join(dir, CONFIG_FILE_NAME);
+    if (!ctx.projects.has(candidate)) {
+      const configFile = await readConfigFile(ctx, candidate);
+      if (configFile) {
+        const state = await loadProjectAtPath(ctx, candidate);
+        if (state) return true;
+      }
+    }
+
+    if (boundary && dir === boundary) break;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+
+  ctx.upwardMissCache.add(dirname(pathResolve(docPath)));
+  return false;
 }
 
 /** Whether `path` is (the name of) an `oasis.config.jsonc` file. */

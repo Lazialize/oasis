@@ -42,6 +42,10 @@ export class InMemoryFileSystem implements FileSystem {
     this.files.set(pathResolve(path), content);
   }
 
+  deleteFile(path: string): void {
+    this.files.delete(pathResolve(path));
+  }
+
   has(path: string): boolean {
     return this.files.has(pathResolve(path));
   }
