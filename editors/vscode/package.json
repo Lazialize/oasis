@@ -1,0 +1,66 @@
+{
+  "name": "oasis-vscode",
+  "displayName": "Oasis OpenAPI",
+  "description": "Lint, navigate, and get IntelliSense for OpenAPI documents via the Oasis language server.",
+  "version": "0.0.1",
+  "publisher": "lazialize",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Programming Languages", "Linters"],
+  "activationEvents": [
+    "onLanguage:yaml",
+    "onLanguage:json",
+    "onLanguage:jsonc"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Oasis",
+      "properties": {
+        "oasis.server.path": {
+          "type": "string",
+          "default": "oasis",
+          "description": "Command used to launch the Oasis language server. Defaults to the globally installed `oasis` binary; point this at a different executable (e.g. `bun`) if `oasis` isn't on your PATH."
+        },
+        "oasis.server.args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["lsp"],
+          "description": "Arguments passed to the command in `oasis.server.path` to start the language server."
+        },
+        "oasis.trace.server": {
+          "scope": "window",
+          "type": "string",
+          "enum": ["off", "messages", "verbose"],
+          "default": "off",
+          "description": "Traces the communication between VS Code and the Oasis language server."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "oasis.restartServer",
+        "title": "Oasis: Restart Language Server"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "node esbuild.config.mjs",
+    "watch": "node esbuild.config.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "package": "npm run build && vsce package --no-dependencies"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^2.32.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.2"
+  }
+}
