@@ -1,7 +1,7 @@
 import { dirname } from "node:path";
 import type { Node } from "yaml";
-import { detectVersion, nodeAtPointer, rangeFromOffsets, zeroRange } from "@oasis/core";
-import type { Range, WorkspaceGraph } from "@oasis/core";
+import { detectVersion, extractSuppressions, isSuppressed, nodeAtPointer, rangeFromOffsets, zeroRange } from "@oasis/core";
+import type { FileSuppressions, Range, WorkspaceGraph } from "@oasis/core";
 import { rules } from "./rules/index.ts";
 import type { LintDiagnostic, LintDiagnosticSeverity, ReportLocation, Rule, RuleContext, RuleSeverity } from "./types.ts";
 import { effectiveRuleConfig } from "./config.ts";
@@ -75,6 +75,11 @@ export function lint(
 
   const configDir = options.configPath ? dirname(options.configPath) : undefined;
 
+  // Inline `# oasis-disable-*` comment directives, per file. Syntax-error diagnostics above are
+  // pushed directly (not through `report()`) and are therefore never subject to suppression.
+  const suppressionsByFile = new Map<string, FileSuppressions>();
+  for (const doc of documents) suppressionsByFile.set(doc.filePath, extractSuppressions(doc.text));
+
   for (const rule of ruleList) {
     const base = config.rules[rule.name] ?? { severity: rule.defaultSeverity, options: rule.defaultOptions };
     // An override can enable a globally-off rule (or vice versa) for specific files, so only skip
@@ -94,6 +99,8 @@ export function lint(
         const effective = effectiveRuleConfig(config, rule.name, range.filePath, configDir);
         const effectiveSeverity = opts?.severity ?? effective.severity;
         if (effectiveSeverity === "off") return;
+        const suppressions = suppressionsByFile.get(range.filePath);
+        if (suppressions && isSuppressed(suppressions, rule.name, range.start.line)) return;
         diagnostics.push({ rule: rule.name, severity: toDiagnosticSeverity(effectiveSeverity), message, range });
       },
     };

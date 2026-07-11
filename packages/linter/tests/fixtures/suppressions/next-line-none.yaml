@@ -1,0 +1,16 @@
+openapi: 3.0.3
+info:
+  title: Suppressions
+  version: "1.0.0"
+paths:
+  /suppressed:
+    get:
+      # oasis-disable-next-line
+      responses:
+        '200':
+          description: OK
+  /not-suppressed:
+    get:
+      responses:
+        '200':
+          description: OK

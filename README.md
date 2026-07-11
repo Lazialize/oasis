@@ -85,6 +85,35 @@ Exit code is `1` if any error-severity diagnostic is reported, `0` otherwise, `2
 
 Syntax errors are always reported as errors and cannot be disabled.
 
+#### Inline suppression
+
+Individual diagnostics can be suppressed with comments in the YAML source, similar to
+`eslint-disable`:
+
+```yaml
+paths:
+  /pets:
+    get:
+      # oasis-disable-next-line operation-tags
+      operationId: listPets
+      responses:
+        '200':
+          description: OK
+```
+
+- `# oasis-disable-next-line <rule> [<rule>...]` suppresses the listed rules for any diagnostic
+  whose range starts on the line immediately following the comment. With no rule names, it
+  suppresses every rule on that line.
+- `# oasis-disable-file <rule> [<rule>...]` suppresses the listed rules (or every rule, with no
+  names given) for the whole file. It can be placed anywhere in the file; convention is to put it
+  at the top.
+
+Rule names are separated by whitespace and/or commas. Unknown rule names are ignored rather than
+treated as errors. Suppression is per-file: a directive in a file reached only via `$ref` only
+suppresses diagnostics attributed to that file. Syntax errors are never suppressible. JSON
+documents don't support comments, so inline suppression isn't available for them — use
+`lint.rules`/`lint.overrides` in `oasis.config.jsonc` instead.
+
 #### Configuration
 
 Place an `oasis.config.jsonc` at your project root (discovered upward from the working directory, or passed via `--config`):

@@ -21,3 +21,6 @@ export type { WorkspaceGraph } from "./graph.ts";
 export { allDiagnostics, loadWorkspaceGraph } from "./graph.ts";
 
 export { offsetAtPosition, positionAtOffset, rangeFromOffsets, zeroRange } from "./position.ts";
+
+export type { FileSuppressions, SuppressedRules } from "./suppressions.ts";
+export { extractSuppressions, isSuppressed } from "./suppressions.ts";
