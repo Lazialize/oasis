@@ -1,5 +1,55 @@
 # @oasis/linter
 
+## 0.4.0
+
+### Minor Changes
+
+- [#6](https://github.com/Lazialize/oasis/pull/6) [`e5667b7`](https://github.com/Lazialize/oasis/commit/e5667b76d865caa63b7d1767c14c1780d1d9844b) Thanks [@Lazialize](https://github.com/Lazialize)! - Three new `structure/*` rules cover more of the OpenAPI object model: `structure/discriminator`
+  (Discriminator Object: required `propertyName`, `mapping` targets resolve in-workspace, a
+  discriminator requires `oneOf`/`anyOf`/`allOf` on the same schema, and `propertyName` must be a
+  property of — and, in OpenAPI 3.0, required by — each resolvable `oneOf`/`anyOf` branch schema),
+  `structure/callbacks` (Callback Object: expression keys look like runtime expressions or URLs,
+  mapped Path Item Objects have valid keys, and their operations declare `responses`), and
+  `structure/links` (Link Object: exactly one of `operationRef`/`operationId` is set, `operationId`
+  matches an operationId in the workspace, and local `#/paths/...`/`#/webhooks/...` `operationRef`
+  pointers resolve). All default to `error` severity.
+
+- [#6](https://github.com/Lazialize/oasis/pull/6) [`06f9367`](https://github.com/Lazialize/oasis/commit/06f9367ceb75f747fdb4e11f21adb70c5077c104) Thanks [@Lazialize](https://github.com/Lazialize)! - New `structure/schema-keywords` rule validates Schema Object keywords against the document's
+  dialect: JSON Schema 2020-12 keywords only valid in OpenAPI 3.1 (`const`, `prefixItems`,
+  `contentMediaType`, `contentEncoding`, `patternProperties`, `propertyNames`,
+  `unevaluatedProperties`, `unevaluatedItems`, `dependentRequired`, `dependentSchemas`,
+  `if`/`then`/`else`, `$defs`, `examples`) are flagged on 3.0, and `exclusiveMinimum`/
+  `exclusiveMaximum` must be boolean on 3.0 vs numeric on 3.1. It also checks value types (`type`,
+  numeric bounds, `pattern`, `required`, `enum`, `items`, `properties`, `additionalProperties`,
+  `format`), internal consistency (min/max contradictions, `required` properties excluded by
+  `additionalProperties: false`), and `$ref` sibling keys (ignored — and flagged — in 3.0, legal in
+  3.1). Defaults to `error` severity. `nullable` and 3.0 `type` array/`null` handling remain the
+  responsibility of the existing `structure/schema-nullable` rule to avoid double-reporting.
+
+- [#6](https://github.com/Lazialize/oasis/pull/6) [`e5715fa`](https://github.com/Lazialize/oasis/commit/e5715fa7c5233ab6270dab7466bcf5271d5fffc4) Thanks [@Lazialize](https://github.com/Lazialize)! - Five new `structure/*` rules extend structural validation to object types the linter didn't
+  previously check: `structure/security-schemes` (Security Scheme Object: valid `type` and
+  per-type required fields, including 3.1's `mutualTLS`), `structure/server-variables` (Server
+  Object `variables` agree with `{var}` templates in `url`), `structure/encoding` (Media Type
+  Object `encoding` keys and field shapes), `structure/xml` (Schema Object `xml` field), and
+  `structure/examples` (Example Object `value`/`externalValue` exclusivity and allowed keys, in
+  both `components/examples` and inline `examples` maps). All default to `error` severity except
+  the unused-server-variable diagnostic, which is a `warn`.
+
+- [#6](https://github.com/Lazialize/oasis/pull/6) [`3dd4215`](https://github.com/Lazialize/oasis/commit/3dd4215685da82dff206aa2905014af5aa5405e5) Thanks [@Lazialize](https://github.com/Lazialize)! - Broader lint traversal: operation-level rules (`operation-*`, `security-defined`, `tags-defined`,
+  `naming-convention`, `example-schema-match`) now also cover operations under the root `webhooks`
+  map on 3.1 documents (`operationId` uniqueness spans paths and webhooks; `no-unused-components`
+  counts webhook `$ref`s). Path-shaped rules (`path-params-defined`, `no-duplicate-paths`) stay
+  `paths`-only since webhook keys are arbitrary names, not URL templates. Schema rules
+  (`structure/schema-nullable`, `naming-convention` property names, `example-schema-match`) now
+  check every schema site — inline request/response media-type, parameter and header schemas
+  (operation- and components-level) in addition to `components/schemas` — via a shared walker that
+  resolves `$ref`s through the workspace and visits each shared schema once.
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @oasis/core@0.4.0
+
 ## 0.3.0
 
 ### Minor Changes
