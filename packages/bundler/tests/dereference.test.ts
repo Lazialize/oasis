@@ -116,7 +116,7 @@ describe("bundle --dereference", () => {
 
     const bundledFs = new InMemoryFileSystem({ "/virtual/bundled.yaml": result.output });
     const bundledGraph = await loadWorkspaceGraph(bundledFs, "/virtual/bundled.yaml");
-    const lintDiagnostics = lint(bundledGraph, resolveConfig({ lint: { rules: { "no-unused-components": "off" } } }));
+    const lintDiagnostics = lint(bundledGraph, resolveConfig({ lint: { rules: { "components/no-unused": "off" } } }));
     const structureErrors = lintDiagnostics.filter((d) => d.rule.startsWith("structure/") && d.severity === "error");
     expect(structureErrors).toEqual([]);
   });
