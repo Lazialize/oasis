@@ -330,8 +330,16 @@ by its config file's path. Files transitively `$ref`'d from an entry (e.g. a Pat
 `paths/pets.yaml` with no top-level `openapi:` key of its own) are treated as members of the owning
 entry's graph rather than broken standalone documents: their diagnostics, go-to-definition, hover,
 and `$ref` completion all resolve against that graph. Editing a config file reloads that project's
-entries and re-lints; deleting one unloads it. Files outside any project graph keep the original
+entries and re-lints; deleting one unloads it. Editing a config file to invalid JSONC (e.g.
+mid-keystroke) keeps the last-good project loaded rather than dropping it, and reports the parse
+error as a diagnostic on the config file. Files outside any project graph keep the original
 entry-per-open-document behavior.
+
+Inline suppression comments (`# oasis-disable-next-line`, `# oasis-disable-file`) and
+`lint.rules`/`lint.overrides` apply identically in the editor as on the command line, including
+against unsaved buffers: the server re-scans and re-resolves them from the in-editor content on
+every edit, whether that's the linted document itself or the `oasis.config.jsonc` that governs it —
+no save required.
 
 Configs are discovered two ways, so this works regardless of the file layout or the client's
 capabilities:

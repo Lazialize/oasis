@@ -1,5 +1,6 @@
 import { loadWorkspaceGraph } from "@oasis/core";
 import type { FileSystem, OasisDocument, WorkspaceGraph } from "@oasis/core";
+import type { LintConfigFile } from "@oasis/linter";
 
 /**
  * "Project mode" state: an `oasis.config.jsonc` with an `entries` field was found for the
@@ -14,6 +15,14 @@ export interface ProjectState {
   configDir: string;
   /** Absolute entry paths, in declaration order (first match wins for multi-graph membership). */
   entryPaths: string[];
+  /**
+   * The last successfully parsed config file content (`lint.rules`/`lint.overrides` included), so
+   * `getDiagnosticsByFile` can resolve severities/overrides through the overlay without a second,
+   * disk-only config read. Kept from the last *successful* parse: if the file is later edited into
+   * invalid JSONC, this (and `entryPaths`) intentionally stay as the last-good values rather than
+   * resetting, so an in-progress edit doesn't blank out a working project (see `loadProjectAtPath`).
+   */
+  configFile: LintConfigFile;
   /** Human-readable warnings about `entries` (e.g. an entry that doesn't exist on disk). */
   warnings: string[];
 }
@@ -98,6 +107,19 @@ export async function findOwningEntry(ctx: ServerContext, path: string): Promise
       const graph = await getGraph(ctx, entryPath);
       if (graph.documents.has(path)) return entryPath;
     }
+  }
+  return undefined;
+}
+
+/**
+ * The loaded `ProjectState` that declares `entryPath` as one of its own `entries` (not merely a
+ * transitively-`$ref`'d member — see `findOwningEntry` for that), if any. Used to resolve the
+ * `lint.rules`/`lint.overrides` that should apply when linting this entry's graph, straight from
+ * already-loaded, overlay-aware project state rather than a second, disk-only config read.
+ */
+export function findProjectForEntry(ctx: ServerContext, entryPath: string): ProjectState | undefined {
+  for (const project of ctx.projects.values()) {
+    if (project.entryPaths.includes(entryPath)) return project;
   }
   return undefined;
 }
