@@ -1,0 +1,55 @@
+openapi: 3.1.0
+info:
+  title: T
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+components:
+  schemas:
+    BooleanExclusive:
+      type: number
+      minimum: 0
+      exclusiveMinimum: true
+
+    InvalidTypeInArray:
+      type: [string, potato]
+
+    DuplicateTypeArray:
+      type: [string, string]
+
+    TypeNotStringOrArray:
+      type: 42
+
+    ItemsArrayIn31:
+      type: array
+      items:
+        - type: string
+
+    MinItemsGreaterThanMax:
+      type: array
+      minItems: 5
+      maxItems: 2
+
+    PropertiesNotObject:
+      type: object
+      properties: nope
+
+    FormatNotString:
+      type: string
+      format: 123
+
+    WithRefSiblingOk:
+      type: object
+      properties:
+        child:
+          $ref: '#/components/schemas/DuplicateTypeArray'
+          description: siblings alongside $ref are legal in 3.1

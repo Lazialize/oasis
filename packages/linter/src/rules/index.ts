@@ -19,6 +19,7 @@ import { structureHttpMethods } from "./structure-http-methods.ts";
 import { structureLinks } from "./structure-links.ts";
 import { structureOpenapiVersion } from "./structure-openapi-version.ts";
 import { structureRequiredFields } from "./structure-required-fields.ts";
+import { structureSchemaKeywords } from "./structure-schema-keywords.ts";
 import { structureSchemaNullable } from "./structure-schema-nullable.ts";
 import { structureSecuritySchemes } from "./structure-security-schemes.ts";
 import { structureServerVariables } from "./structure-server-variables.ts";
@@ -33,6 +34,7 @@ export const rules: Rule[] = [
   structureFieldTypes,
   structureHttpMethods,
   structureSchemaNullable,
+  structureSchemaKeywords,
   structureSecuritySchemes,
   structureServerVariables,
   structureEncoding,
@@ -82,6 +84,7 @@ export {
   structureLinks,
   structureOpenapiVersion,
   structureRequiredFields,
+  structureSchemaKeywords,
   structureSchemaNullable,
   structureSecuritySchemes,
   structureServerVariables,

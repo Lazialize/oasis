@@ -74,6 +74,7 @@ Exit code is `1` if any error-severity diagnostic is reported, `0` otherwise, `2
 | `structure/field-types` | error | Common objects have the right shapes (paths, operations, parameters, responses, components…) |
 | `structure/http-methods` | error | Only valid HTTP verbs / metadata keys under a path item |
 | `structure/schema-nullable` | error | 3.0: no `type` arrays / `null` type; 3.1: no `nullable` — in every schema, including inline ones |
+| `structure/schema-keywords` | error | Schema Object keywords match the document's dialect (3.1-only keywords like `const`/`prefixItems`/`patternProperties`/`if`-`then`-`else`/`$defs` flagged on 3.0; numeric vs boolean `exclusiveMinimum`/`exclusiveMaximum` per version), value types (`type`, numeric bounds, `pattern`, `required`, `enum`, `items`, `properties`, `additionalProperties`, `format`), internal consistency (min/max contradictions, `required` properties excluded by `additionalProperties: false`), and `$ref` sibling keys (ignored — and flagged — in 3.0, legal in 3.1) |
 | `structure/security-schemes` | error | `components/securitySchemes` entries have a recognized `type` (apiKey/http/oauth2/openIdConnect, plus 3.1 `mutualTLS`) and that type's required fields |
 | `structure/server-variables` | error | Server Object `variables`: every `{var}` in `url` is declared with a `default`; `enum` (if present) is a non-empty string array containing `default`; warns about unused declared variables |
 | `structure/encoding` | error | Media Type Object `encoding` keys match schema properties (when resolvable to an inline object); `contentType`/`style`/`explode`/`allowReserved` have the right shapes |
@@ -102,8 +103,9 @@ Operation-level rules (`operation-*`, `security-defined`, `tags-defined`, `namin
 `example-schema-match`) also cover operations under the root `webhooks` map on 3.1 documents.
 Path-shaped rules (`path-params-defined`, `no-duplicate-paths`) apply to `paths` only — webhook
 keys are arbitrary names, not URL templates. Schema rules (`structure/schema-nullable`,
-`naming-convention` property names, `example-schema-match`) check every schema site: `components`
-entries plus inline request/response media types, parameters and headers.
+`structure/schema-keywords`, `naming-convention` property names, `example-schema-match`) check
+every schema site: `components` entries plus inline request/response media types, parameters and
+headers.
 
 Syntax errors are always reported as errors and cannot be disabled.
 

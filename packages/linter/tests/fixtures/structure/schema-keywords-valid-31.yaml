@@ -1,0 +1,44 @@
+openapi: 3.1.0
+info:
+  title: T
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+components:
+  schemas:
+    Pet:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        age:
+          type: integer
+          minimum: 0
+          exclusiveMaximum: 150
+        tag:
+          $ref: '#/components/schemas/Tag'
+          description: an override description alongside $ref, legal in 3.1
+        kind:
+          type:
+            - string
+            - "null"
+        id:
+          const: "pet"
+      additionalProperties: false
+
+    Tag:
+      type: string
+      pattern: '^[a-z]+$'

@@ -1,0 +1,116 @@
+openapi: 3.0.3
+info:
+  title: T
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+components:
+  schemas:
+    AllOnly31Keywords:
+      type: object
+      const: 5
+      prefixItems: []
+      contentMediaType: application/json
+      contentEncoding: base64
+      patternProperties:
+        "^x-":
+          type: string
+      propertyNames: {}
+      unevaluatedProperties: false
+      unevaluatedItems: false
+      dependentRequired: {}
+      dependentSchemas: {}
+      if: {}
+      then: {}
+      else: {}
+      $defs: {}
+      examples: []
+
+    NumericExclusive:
+      type: number
+      minimum: 0
+      exclusiveMinimum: 5
+
+    BadTypeName:
+      type: file
+
+    BadTypeShape:
+      type: 123
+
+    NegativeMinLength:
+      type: string
+      minLength: -1
+
+    NonIntegerMaxItems:
+      type: array
+      maxItems: 1.5
+
+    MultipleOfZero:
+      type: number
+      multipleOf: 0
+
+    MinGreaterThanMax:
+      type: integer
+      minimum: 10
+      maximum: 5
+
+    BadPattern:
+      type: string
+      pattern: '['
+
+    EmptyRequired:
+      type: object
+      required: []
+
+    DuplicateRequired:
+      type: object
+      required: [a, a]
+      properties:
+        a:
+          type: string
+
+    EmptyEnum:
+      type: string
+      enum: []
+
+    ItemsArray:
+      type: array
+      items:
+        - type: string
+        - type: number
+
+    PropertiesNotObject:
+      type: object
+      properties: nope
+
+    AdditionalPropertiesBadType:
+      type: object
+      additionalProperties: yes-please
+
+    RequiredNotInProperties:
+      type: object
+      properties:
+        a:
+          type: string
+      required: [a, b]
+      additionalProperties: false
+
+    FormatNotString:
+      type: string
+      format: 123
+
+    WithRefSibling:
+      type: object
+      properties:
+        child:
+          $ref: '#/components/schemas/BadTypeName'
+          description: extra sibling keys are ignored in 3.0

@@ -93,6 +93,211 @@ describe("structure/schema-nullable", () => {
   });
 });
 
+describe("structure/schema-keywords", () => {
+  const only31Keywords = [
+    "const",
+    "prefixItems",
+    "contentMediaType",
+    "contentEncoding",
+    "patternProperties",
+    "propertyNames",
+    "unevaluatedProperties",
+    "unevaluatedItems",
+    "dependentRequired",
+    "dependentSchemas",
+    "if",
+    "then",
+    "else",
+    "$defs",
+    "examples",
+  ];
+
+  test("flags every 3.1-only keyword when used in an OpenAPI 3.0 document", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-30-bad.yaml");
+    for (const keyword of only31Keywords) {
+      const d = diagnostics.find(
+        (d) => d.rule === "structure/schema-keywords" && d.message.includes(`"${keyword}"`) && d.message.includes("not supported in OpenAPI 3.0"),
+      );
+      expect(d, `expected a diagnostic for "${keyword}"`).toBeDefined();
+    }
+  });
+
+  test("does not flag structure/schema-nullable's territory (nullable, type arrays, type: null)", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-30-bad.yaml");
+    const keywordDiagnostics = diagnostics.filter((d) => d.rule === "structure/schema-keywords");
+    expect(keywordDiagnostics.some((d) => d.message.includes('"nullable"'))).toBe(false);
+  });
+
+  test("flags numeric exclusiveMinimum on OpenAPI 3.0 (boolean form required)", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-30-bad.yaml");
+    const d = diagnostics.find((d) => d.rule === "structure/schema-keywords" && d.message.includes('"exclusiveMinimum" must be a boolean'));
+    expect(d).toBeDefined();
+  });
+
+  test("flags an unrecognized type name in OpenAPI 3.0", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-30-bad.yaml");
+    const d = diagnostics.find((d) => d.rule === "structure/schema-keywords" && d.message.includes('"type: file"'));
+    expect(d).toBeDefined();
+  });
+
+  test("flags a non-string type value in OpenAPI 3.0", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-30-bad.yaml");
+    const d = diagnostics.find((d) => d.rule === "structure/schema-keywords" && d.message.includes('"type" must be a string in OpenAPI 3.0'));
+    expect(d).toBeDefined();
+  });
+
+  test("flags a negative minLength", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-30-bad.yaml");
+    const d = diagnostics.find((d) => d.rule === "structure/schema-keywords" && d.message.includes('"minLength" must be a non-negative integer'));
+    expect(d).toBeDefined();
+  });
+
+  test("flags a non-integer maxItems", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-30-bad.yaml");
+    const d = diagnostics.find((d) => d.rule === "structure/schema-keywords" && d.message.includes('"maxItems" must be a non-negative integer'));
+    expect(d).toBeDefined();
+  });
+
+  test("flags multipleOf: 0", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-30-bad.yaml");
+    const d = diagnostics.find((d) => d.rule === "structure/schema-keywords" && d.message.includes('"multipleOf" must be greater than 0'));
+    expect(d).toBeDefined();
+  });
+
+  test("flags minimum > maximum", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-30-bad.yaml");
+    const d = diagnostics.find((d) => d.rule === "structure/schema-keywords" && d.message.includes('"minimum" (10) is greater than "maximum" (5)'));
+    expect(d).toBeDefined();
+  });
+
+  test("flags an invalid regex pattern", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-30-bad.yaml");
+    const d = diagnostics.find((d) => d.rule === "structure/schema-keywords" && d.message.includes('"pattern" is not a valid regular expression'));
+    expect(d).toBeDefined();
+  });
+
+  test("flags an empty required array", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-30-bad.yaml");
+    const d = diagnostics.find((d) => d.rule === "structure/schema-keywords" && d.message.includes('"required" must be a non-empty array'));
+    expect(d).toBeDefined();
+  });
+
+  test("flags a duplicate required entry", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-30-bad.yaml");
+    const d = diagnostics.find((d) => d.rule === "structure/schema-keywords" && d.message.includes('"required" contains duplicate entry "a"'));
+    expect(d).toBeDefined();
+  });
+
+  test("flags an empty enum array", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-30-bad.yaml");
+    const d = diagnostics.find((d) => d.rule === "structure/schema-keywords" && d.message.includes('"enum" must be a non-empty array'));
+    expect(d).toBeDefined();
+  });
+
+  test("flags a tuple-form items array in OpenAPI 3.0", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-30-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/schema-keywords" && d.message.includes('"items" must be a single schema object in OpenAPI 3.0'),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags a non-object properties value", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-30-bad.yaml");
+    const d = diagnostics.find((d) => d.rule === "structure/schema-keywords" && d.message.includes('"properties" must be an object'));
+    expect(d).toBeDefined();
+  });
+
+  test("flags an additionalProperties value that is neither boolean nor a schema", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-30-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/schema-keywords" && d.message.includes('"additionalProperties" must be a boolean or a schema object'),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags required listing a property excluded by additionalProperties: false", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-30-bad.yaml");
+    const d = diagnostics.find(
+      (d) =>
+        d.rule === "structure/schema-keywords" &&
+        d.message.includes('"required" lists "b"') &&
+        d.message.includes("can never be satisfied"),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags a non-string format", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-30-bad.yaml");
+    const d = diagnostics.find((d) => d.rule === "structure/schema-keywords" && d.message.includes('"format" must be a string'));
+    expect(d).toBeDefined();
+  });
+
+  test("flags sibling keys alongside $ref in OpenAPI 3.0", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-30-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/schema-keywords" && d.message.includes("Sibling keys alongside") && d.message.includes('"description"'),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags boolean exclusiveMinimum on OpenAPI 3.1 (numeric form required)", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-31-bad.yaml");
+    const d = diagnostics.find((d) => d.rule === "structure/schema-keywords" && d.message.includes('"exclusiveMinimum" must be a number'));
+    expect(d).toBeDefined();
+  });
+
+  test("flags an unrecognized type name inside a 3.1 type array", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-31-bad.yaml");
+    const d = diagnostics.find((d) => d.rule === "structure/schema-keywords" && d.message.includes('"type: potato"'));
+    expect(d).toBeDefined();
+  });
+
+  test("flags a duplicate entry in a 3.1 type array", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-31-bad.yaml");
+    const d = diagnostics.find((d) => d.rule === "structure/schema-keywords" && d.message.includes('"type" array contains duplicate entry "string"'));
+    expect(d).toBeDefined();
+  });
+
+  test("flags a non-string/array type value in OpenAPI 3.1", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-31-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/schema-keywords" && d.message.includes('"type" must be a string or array of strings in OpenAPI 3.1'),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags a tuple-form items array in OpenAPI 3.1, suggesting prefixItems", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-31-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/schema-keywords" && d.message.includes('"items" must be a single schema object in OpenAPI 3.1') && d.message.includes("prefixItems"),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags minItems > maxItems", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-31-bad.yaml");
+    const d = diagnostics.find((d) => d.rule === "structure/schema-keywords" && d.message.includes('"minItems" (5) is greater than "maxItems" (2)'));
+    expect(d).toBeDefined();
+  });
+
+  test("does not flag sibling keys alongside $ref in OpenAPI 3.1 (legal there)", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-31-bad.yaml");
+    const d = diagnostics.find((d) => d.rule === "structure/schema-keywords" && d.message.includes("Sibling keys alongside"));
+    expect(d).toBeUndefined();
+  });
+
+  test("valid 3.0 fixture passes", async () => {
+    const diagnostics = await lintFixture("valid/openapi.yaml");
+    expect(diagnostics.some((d) => d.rule === "structure/schema-keywords")).toBe(false);
+  });
+
+  test("valid 3.1 fixture passes", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-valid-31.yaml");
+    expect(diagnostics.some((d) => d.rule === "structure/schema-keywords")).toBe(false);
+  });
+});
+
 describe("structure/security-schemes", () => {
   test("flags a missing type", async () => {
     const diagnostics = await lintFixture("structure/security-schemes-bad.yaml");
