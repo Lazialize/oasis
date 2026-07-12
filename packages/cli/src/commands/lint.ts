@@ -12,11 +12,23 @@ export interface RunLintOptions {
   stderr: (text: string) => void;
 }
 
+const LINT_HELP = `oasis lint [entry...] [--config path] [--format pretty|json|sarif]
+
+Lint one or more OpenAPI entry documents. With no entry given, discovers \`oasis.config.jsonc\`
+(upward from the working directory, or via --config) and lints every document listed in its
+"entries".
+
+Options:
+  --config path            Path to an oasis.config.jsonc (skips upward discovery)
+  --format pretty|json|sarif  Output format (default: pretty)
+  -h, --help                Show this help message
+`;
+
 /** Turn a `resolveEntries` "entry not found" warning into a diagnostic attached to the config file. */
 function warningDiagnostic(message: string, configPath: string): LintDiagnostic {
   return {
-    rule: "config",
-    severity: "warning",
+    rule: "oasis/config",
+    severity: "warn",
     message,
     range: {
       filePath: configPath,
@@ -29,6 +41,10 @@ function warningDiagnostic(message: string, configPath: string): LintDiagnostic 
 }
 
 export async function runLintCommand(args: string[], io: RunLintOptions): Promise<number> {
+  if (args.includes("-h") || args.includes("--help")) {
+    io.stdout(LINT_HELP);
+    return 0;
+  }
   const parsed = parseLintArgs(args);
   if (!parsed.ok) {
     io.stderr(`oasis lint: ${parsed.error}\n`);

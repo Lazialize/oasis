@@ -5,7 +5,7 @@ import { iterateOperations, iteratePathItems, iterateSchemas } from "../openapi-
 import { childAt, keyToString, resolveMaybeRef } from "../util.ts";
 import type { Rule, RuleContext } from "../types.ts";
 
-/** Supported casing styles for the `naming-convention` rule's options. */
+/** Supported casing styles for the `style/naming-convention` rule's options. */
 export const CASING_STYLES = ["camelCase", "PascalCase", "snake_case", "kebab-case", "SCREAMING_SNAKE_CASE"] as const;
 export type CasingStyle = (typeof CASING_STYLES)[number];
 
@@ -219,7 +219,7 @@ function checkPropertyNames(ctx: RuleContext, style: CasingStyle): void {
 }
 
 export const namingConvention: Rule = {
-  name: "naming-convention",
+  name: "style/naming-convention",
   description:
     'Configurable casing checks (operationId, component names, parameter names, schema property names). Off by default: does nothing unless configured with an options object naming at least one target.',
   defaultSeverity: "off",

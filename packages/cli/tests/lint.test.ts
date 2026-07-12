@@ -37,7 +37,7 @@ describe("oasis lint CLI", () => {
     const result = await runCli(["lint", `${fixturesRoot}/invalid.yaml`]);
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain("invalid.yaml");
-    expect(result.stdout).toContain("operation-operationId");
+    expect(result.stdout).toContain("operation/operation-id");
     expect(result.stdout).toMatch(/\d+ errors?, \d+ warnings?/);
   });
 
@@ -48,7 +48,7 @@ describe("oasis lint CLI", () => {
     expect(Array.isArray(report.diagnostics)).toBe(true);
     expect(report.diagnostics.length).toBeGreaterThanOrEqual(1);
     expect(report.diagnostics[0]).toMatchObject({
-      rule: "operation-operationId",
+      rule: "operation/operation-id",
       severity: "error",
     });
     expect(report.summary).toMatchObject({ errors: 1 });
@@ -65,7 +65,7 @@ describe("oasis lint CLI", () => {
     ]);
     expect(result.exitCode).toBe(0);
     const report = JSON.parse(result.stdout);
-    expect(report.diagnostics.some((d: { rule: string }) => d.rule === "operation-operationId")).toBe(false);
+    expect(report.diagnostics.some((d: { rule: string }) => d.rule === "operation/operation-id")).toBe(false);
   });
 
   test("exits 2 on usage error (no entry given)", async () => {
@@ -93,7 +93,7 @@ describe("oasis lint (no args, config entries)", () => {
     const result = await runCli(["lint"], { cwd: configLintRoot });
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain("invalid.yaml");
-    expect(result.stdout).toContain("operation-operationId");
+    expect(result.stdout).toContain("operation/operation-id");
     expect(result.stdout).toMatch(/\d+ errors?, \d+ warnings?/);
   });
 
@@ -122,9 +122,9 @@ describe("oasis lint (no args, config entries)", () => {
     expect(result.exitCode).toBe(1);
     const report = JSON.parse(result.stdout);
     expect(Array.isArray(report.diagnostics)).toBe(true);
-    expect(report.diagnostics.some((d: { rule: string }) => d.rule === "operation-operationId")).toBe(true);
-    const configWarning = report.diagnostics.find((d: { rule: string }) => d.rule === "config");
-    expect(configWarning).toMatchObject({ severity: "warning" });
+    expect(report.diagnostics.some((d: { rule: string }) => d.rule === "operation/operation-id")).toBe(true);
+    const configWarning = report.diagnostics.find((d: { rule: string }) => d.rule === "oasis/config");
+    expect(configWarning).toMatchObject({ severity: "warn" });
     expect(configWarning.message).toContain("missing.yaml");
     expect(report.summary).toMatchObject({ errors: 1, warnings: 1 });
   });
@@ -156,8 +156,8 @@ describe("oasis lint (no args, config entries)", () => {
     const result = await runCli(["lint", "--format", "json"], { cwd: `${fixturesRoot}/config-lint-glob` });
     expect(result.exitCode).toBe(1);
     const report = JSON.parse(result.stdout);
-    expect(report.diagnostics.some((d: { rule: string }) => d.rule === "operation-operationId")).toBe(true);
-    expect(report.diagnostics.some((d: { rule: string }) => d.rule === "config")).toBe(false); // no zero-match warning
+    expect(report.diagnostics.some((d: { rule: string }) => d.rule === "operation/operation-id")).toBe(true);
+    expect(report.diagnostics.some((d: { rule: string }) => d.rule === "oasis/config")).toBe(false); // no zero-match warning
     expect(result.stdout).toContain("one.yaml");
   });
 });

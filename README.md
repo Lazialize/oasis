@@ -82,6 +82,35 @@ nothing, that's also a usage error.
 
 Exit code is `1` if any error-severity diagnostic is reported, `0` otherwise, `2` on usage/config errors.
 
+#### `--format json` output shape
+
+```jsonc
+{
+  "diagnostics": [
+    {
+      "rule": "operation/operation-id",
+      "severity": "error",       // "error" | "warn" | "info"
+      "message": "operationId \"listPets\" is not unique",
+      "file": "paths/pets.yaml", // relative to process.cwd() when inside it, absolute otherwise
+      "range": {
+        "start": { "line": 4, "character": 6 },  // 0-based, unlike SARIF's 1-based lines/columns
+        "end": { "line": 4, "character": 15 }
+      }
+    }
+  ],
+  "summary": { "errors": 1, "warnings": 0, "infos": 0 }
+}
+```
+
+`rule` is either a built-in rule name (see the table below) or `oasis/config` — a reserved id for
+diagnostics about the configuration or invocation itself (an unknown rule name in
+`oasis.config.jsonc`, a declared `entries` path that doesn't exist, …) rather than about the linted
+document. `oasis/config` isn't a real rule: it can't be configured or suppressed, and doesn't
+appear in the "Built-in rules" table.
+
+Pretty output (the default, no `--format` given) uses the same cwd-relative `file` paths and
+`error`/`warn`/`info` severity tokens.
+
 #### GitHub Code Scanning / Actions
 
 `--format sarif` emits a [SARIF 2.1.0](https://sarifweb.azurewebsites.net/) log on stdout, suitable
@@ -132,33 +161,33 @@ separate step afterwards that re-runs `oasis lint` (or checks its exit code) to 
 | `structure/discriminator` | error | Discriminator Objects: required `propertyName`, `mapping` targets resolve in-workspace, a discriminator requires `oneOf`/`anyOf`/`allOf`, and `propertyName` is a property of (and, in 3.0, required by) each resolvable `oneOf`/`anyOf` branch schema |
 | `structure/callbacks` | error | Callback Objects (operation-level `callbacks` and `components/callbacks`): expression keys look like runtime expressions or URLs, mapped Path Item Objects have valid keys, and their operations declare `responses` |
 | `structure/links` | error | Link Objects (Response Object `links` and `components/links`): exactly one of `operationRef`/`operationId`, `operationId` matches a workspace operationId, local `operationRef` pointers resolve |
-| `no-duplicate-keys` | error | Duplicate mapping keys in YAML/JSON |
-| `no-unresolved-ref` | error | Every `$ref` resolves (missing files *and* missing pointers) |
-| `no-ref-cycle` | warn | Cross-file reference cycles |
-| `operation-operationId` | error | `operationId` present and unique across the workspace (including 3.1 `webhooks`) |
-| `operation-tags` | warn | Operations have at least one tag |
-| `operation-description` | warn | Operations have a `description` or `summary` |
-| `operation-success-response` | warn | Operations have at least one 2xx/3xx response (`default` alone doesn't count) |
-| `path-params-defined` | error | `{param}` templates ↔ `in: path` parameters agree; path params are `required` |
-| `no-unused-components` | warn | Components nothing references, by `$ref` or by name (`security` requirement scheme names, `discriminator.mapping` values) |
-| `no-duplicate-paths` | error | Path templates that are equivalent up to parameter names (`/users/{id}` vs `/users/{userId}`) |
-| `security-defined` | error | `security` requirement scheme names exist in `components/securitySchemes` |
-| `tags-defined` | off | Operation tags are declared in the root `tags` list |
-| `no-unused-tags` | warn | Root `tags` list entries are used by at least one operation |
-| `naming-convention` | off | Configurable casing for operationIds, component names, parameter names, schema property names (see below) |
-| `example-schema-match` | warn | `example`/`examples[].value` values conform to their schema (Schema Object, Media Type Object, Parameter Object), version-aware |
+| `syntax/no-duplicate-keys` | error | Duplicate mapping keys in YAML/JSON |
+| `refs/no-unresolved` | error | Every `$ref` resolves (missing files *and* missing pointers) |
+| `refs/no-cycle` | warn | Cross-file reference cycles |
+| `operation/operation-id` | error | `operationId` present and unique across the workspace (including 3.1 `webhooks`) |
+| `operation/tags` | warn | Operations have at least one tag |
+| `operation/description` | warn | Operations have a `description` or `summary` |
+| `operation/success-response` | warn | Operations have at least one 2xx/3xx response (`default` alone doesn't count) |
+| `paths/params-defined` | error | `{param}` templates ↔ `in: path` parameters agree; path params are `required` |
+| `components/no-unused` | warn | Components nothing references, by `$ref` or by name (`security` requirement scheme names, `discriminator.mapping` values) |
+| `paths/no-duplicates` | error | Path templates that are equivalent up to parameter names (`/users/{id}` vs `/users/{userId}`) |
+| `security/defined` | error | `security` requirement scheme names exist in `components/securitySchemes` |
+| `tags/defined` | off | Operation tags are declared in the root `tags` list |
+| `tags/no-unused` | warn | Root `tags` list entries are used by at least one operation |
+| `style/naming-convention` | off | Configurable casing for operationIds, component names, parameter names, schema property names (see below) |
+| `examples/schema-match` | warn | `example`/`examples[].value` values conform to their schema (Schema Object, Media Type Object, Parameter Object), version-aware |
 
-Operation-level rules (`operation-*`, `security-defined`, `tags-defined`, `naming-convention`,
-`example-schema-match`) also cover operations under the root `webhooks` map on 3.1 documents.
-Path-shaped rules (`path-params-defined`, `no-duplicate-paths`) apply to `paths` only — webhook
+Operation-level rules (`operation-*`, `security/defined`, `tags/defined`, `style/naming-convention`,
+`examples/schema-match`) also cover operations under the root `webhooks` map on 3.1 documents.
+Path-shaped rules (`paths/params-defined`, `paths/no-duplicates`) apply to `paths` only — webhook
 keys are arbitrary names, not URL templates. Schema rules (`structure/schema-nullable`,
-`structure/schema-keywords`, `naming-convention` property names, `example-schema-match`) check
+`structure/schema-keywords`, `style/naming-convention` property names, `examples/schema-match`) check
 every schema site: `components` entries plus inline request/response media types, parameters and
 headers.
 
 Syntax errors are always reported as errors and cannot be disabled.
 
-##### `example-schema-match` validation subset
+##### `examples/schema-match` validation subset
 
 This rule hand-rolls a small subset of JSON Schema / OpenAPI Schema Object validation rather than
 pulling in a full validator dependency, to keep the binary lean. It checks `type` (version-aware:
@@ -171,7 +200,7 @@ enforced). Schemas using `not`, `discriminator`, or containing an unresolved `$r
 entirely (no diagnostic) rather than risk a false positive. `externalValue` examples are skipped
 since there's no local value to check.
 
-##### `naming-convention` options
+##### `style/naming-convention` options
 
 Off by default and a no-op until configured — pass an options object naming at least one target and
 the casing style to enforce for it:
@@ -180,7 +209,7 @@ the casing style to enforce for it:
 {
   "lint": {
     "rules": {
-      "naming-convention": [
+      "style/naming-convention": [
         "warn",
         {
           "operationId": "camelCase",
@@ -217,7 +246,7 @@ Individual diagnostics can be suppressed with comments in the YAML source, simil
 paths:
   /pets:
     get:
-      # oasis-disable-next-line operation-tags
+      # oasis-disable-next-line operation/tags
       operationId: listPets
       responses:
         '200':
@@ -245,14 +274,14 @@ Place an `oasis.config.jsonc` at your project root (discovered upward from the w
 {
   "lint": {
     "rules": {
-      "operation-tags": "off",
-      "no-unused-components": "error",
+      "operation/tags": "off",
+      "components/no-unused": "error",
       "example-rule": ["warn", { "option": "value" }]
     },
     "overrides": [
       {
         "files": ["paths/**/*.yaml"],
-        "rules": { "operation-tags": "off" }
+        "rules": { "operation/tags": "off" }
       }
     ]
   },

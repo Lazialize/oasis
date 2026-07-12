@@ -5,7 +5,7 @@ import type { OasisDocument, OpenApiVersion, Range, WorkspaceGraph } from "@oasi
 export type RuleSeverity = "error" | "warn" | "info" | "off";
 
 /** Severity carried by an emitted diagnostic (never "off"). */
-export type LintDiagnosticSeverity = "error" | "warning" | "info";
+export type LintDiagnosticSeverity = "error" | "warn" | "info";
 
 export interface LintDiagnostic {
   rule: string;

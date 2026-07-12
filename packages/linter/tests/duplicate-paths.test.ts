@@ -13,10 +13,10 @@ async function lintFixture(relativePath: string) {
   return lint(graph, config);
 }
 
-describe("no-duplicate-paths", () => {
+describe("paths/no-duplicates", () => {
   test("flags two path templates that differ only in parameter name", async () => {
     const diagnostics = await lintFixture("duplicate-paths/conflict.yaml");
-    const d = diagnostics.find((d) => d.rule === "no-duplicate-paths");
+    const d = diagnostics.find((d) => d.rule === "paths/no-duplicates");
     expect(d).toBeDefined();
     expect(d?.severity).toBe("error");
     expect(d?.message).toContain("/users/{userId}");
@@ -25,11 +25,11 @@ describe("no-duplicate-paths", () => {
 
   test("does not flag paths that only share a static prefix", async () => {
     const diagnostics = await lintFixture("duplicate-paths/no-conflict.yaml");
-    expect(diagnostics.some((d) => d.rule === "no-duplicate-paths")).toBe(false);
+    expect(diagnostics.some((d) => d.rule === "paths/no-duplicates")).toBe(false);
   });
 
   test("valid fixture passes", async () => {
     const diagnostics = await lintFixture("valid/openapi.yaml");
-    expect(diagnostics.some((d) => d.rule === "no-duplicate-paths")).toBe(false);
+    expect(diagnostics.some((d) => d.rule === "paths/no-duplicates")).toBe(false);
   });
 });

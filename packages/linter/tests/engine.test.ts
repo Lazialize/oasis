@@ -20,20 +20,20 @@ describe("valid fixture", () => {
   });
 });
 
-describe("no-duplicate-keys", () => {
+describe("syntax/no-duplicate-keys", () => {
   test("flags a duplicate key at its exact location", async () => {
     const diagnostics = await lintFixture("core-diagnostics/duplicate-keys.yaml");
-    const d = diagnostics.find((d) => d.rule === "no-duplicate-keys");
+    const d = diagnostics.find((d) => d.rule === "syntax/no-duplicate-keys");
     expect(d).toBeDefined();
     expect(d?.severity).toBe("error");
     expect(d?.range.start.line).toBe(4);
   });
 });
 
-describe("no-unresolved-ref", () => {
+describe("refs/no-unresolved", () => {
   test("flags a $ref that resolves to nothing", async () => {
     const diagnostics = await lintFixture("core-diagnostics/unresolved-ref.yaml");
-    const d = diagnostics.find((d) => d.rule === "no-unresolved-ref");
+    const d = diagnostics.find((d) => d.rule === "refs/no-unresolved");
     expect(d).toBeDefined();
     expect(d?.severity).toBe("error");
     expect(d?.range.start.line).toBe(16);
@@ -41,21 +41,21 @@ describe("no-unresolved-ref", () => {
 
   test("passing fixture has no unresolved refs", async () => {
     const diagnostics = await lintFixture("valid/openapi.yaml");
-    expect(diagnostics.some((d) => d.rule === "no-unresolved-ref")).toBe(false);
+    expect(diagnostics.some((d) => d.rule === "refs/no-unresolved")).toBe(false);
   });
 });
 
-describe("no-ref-cycle", () => {
+describe("refs/no-cycle", () => {
   test("flags a circular $ref chain", async () => {
     const diagnostics = await lintFixture("core-diagnostics/cycle-a.yaml");
-    const d = diagnostics.find((d) => d.rule === "no-ref-cycle");
+    const d = diagnostics.find((d) => d.rule === "refs/no-cycle");
     expect(d).toBeDefined();
-    expect(d?.severity).toBe("warning");
+    expect(d?.severity).toBe("warn");
   });
 
   test("passing fixture has no cycles", async () => {
     const diagnostics = await lintFixture("valid/openapi.yaml");
-    expect(diagnostics.some((d) => d.rule === "no-ref-cycle")).toBe(false);
+    expect(diagnostics.some((d) => d.rule === "refs/no-cycle")).toBe(false);
   });
 });
 

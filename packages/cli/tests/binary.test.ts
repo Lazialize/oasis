@@ -161,7 +161,7 @@ describe("compiled oasis binary", () => {
     test("exits 1 on an invalid document", async () => {
       const result = await runBinary(["lint", `${fixturesRoot}/invalid.yaml`]);
       expect(result.exitCode).toBe(1);
-      expect(result.stdout).toContain("operation-operationId");
+      expect(result.stdout).toContain("operation/operation-id");
     });
   });
 
@@ -235,7 +235,7 @@ paths:
 
       expect(Array.isArray(publish.params.diagnostics)).toBe(true);
       expect(publish.params.diagnostics.length).toBeGreaterThan(0);
-      expect(publish.params.diagnostics.some((d: { code?: string }) => d.code === "no-unresolved-ref")).toBe(true);
+      expect(publish.params.diagnostics.some((d: { code?: string }) => d.code === "refs/no-unresolved")).toBe(true);
     }, 20000);
 
     test("completion: mid-typing `$ref` in a project-mode fragment file offers targets from the owning graph", async () => {

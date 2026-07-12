@@ -46,7 +46,7 @@ paths:
     const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: TEXT }));
     const byFile = await diagnosticsFor(ctx, ENTRY_PATH);
     const diagnostics = byFile.get(ENTRY_PATH) ?? [];
-    expect(diagnostics.some((d) => d.code === "operation-operationId")).toBe(true);
+    expect(diagnostics.some((d) => d.code === "operation/operation-id")).toBe(true);
 
     const position = positionOf(TEXT, "get:");
     const results = await getCodeActions(ctx, { path: ENTRY_PATH, position, diagnostics });
@@ -62,7 +62,7 @@ paths:
 
     const ctx2 = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: newText }));
     const diags2 = (await diagnosticsFor(ctx2, ENTRY_PATH)).get(ENTRY_PATH) ?? [];
-    expect(diags2.some((d) => d.code === "operation-operationId")).toBe(false);
+    expect(diags2.some((d) => d.code === "operation/operation-id")).toBe(false);
     expect(diags2.some((d) => d.code === "syntax-error")).toBe(false);
   });
 
@@ -98,7 +98,7 @@ paths:
   test("inserts description: TODO as the first key", async () => {
     const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: TEXT }));
     const diagnostics = (await diagnosticsFor(ctx, ENTRY_PATH)).get(ENTRY_PATH) ?? [];
-    expect(diagnostics.some((d) => d.code === "operation-description")).toBe(true);
+    expect(diagnostics.some((d) => d.code === "operation/description")).toBe(true);
 
     const position = positionOf(TEXT, "get:");
     const results = await getCodeActions(ctx, { path: ENTRY_PATH, position, diagnostics });
@@ -110,7 +110,7 @@ paths:
     expect(newText).toContain("get:\n      description: TODO\n      operationId: listPets");
 
     const diags2 = (await diagnosticsFor(createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: newText })), ENTRY_PATH)).get(ENTRY_PATH) ?? [];
-    expect(diags2.some((d) => d.code === "operation-description")).toBe(false);
+    expect(diags2.some((d) => d.code === "operation/description")).toBe(false);
     expect(diags2.some((d) => d.code === "syntax-error")).toBe(false);
   });
 });
@@ -164,7 +164,7 @@ components:
     const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: TEXT }));
     const diagnostics = (await diagnosticsFor(ctx, ENTRY_PATH)).get(ENTRY_PATH) ?? [];
     const missingPetId = diagnostics.filter(
-      (d) => d.code === "path-params-defined" && d.message.includes('parameter "{petId}" has no matching'),
+      (d) => d.code === "paths/params-defined" && d.message.includes('parameter "{petId}" has no matching'),
     );
     expect(missingPetId.length).toBeGreaterThan(0);
 
@@ -182,7 +182,7 @@ components:
     );
 
     const diags2 = (await diagnosticsFor(createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: newText })), ENTRY_PATH)).get(ENTRY_PATH) ?? [];
-    expect(diags2.some((d) => d.code === "path-params-defined" && d.message.includes('"{petId}"'))).toBe(false);
+    expect(diags2.some((d) => d.code === "paths/params-defined" && d.message.includes('"{petId}"'))).toBe(false);
     expect(diags2.some((d) => d.code === "syntax-error")).toBe(false);
   });
 
@@ -190,7 +190,7 @@ components:
     const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: TEXT }));
     const diagnostics = (await diagnosticsFor(ctx, ENTRY_PATH)).get(ENTRY_PATH) ?? [];
     const missingWidgetId = diagnostics.filter(
-      (d) => d.code === "path-params-defined" && d.message.includes('parameter "{widgetId}" has no matching'),
+      (d) => d.code === "paths/params-defined" && d.message.includes('parameter "{widgetId}" has no matching'),
     );
     expect(missingWidgetId.length).toBeGreaterThan(0);
 
@@ -208,7 +208,7 @@ components:
     );
 
     const diags2 = (await diagnosticsFor(createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: newText })), ENTRY_PATH)).get(ENTRY_PATH) ?? [];
-    expect(diags2.some((d) => d.code === "path-params-defined" && d.message.includes('"{widgetId}"'))).toBe(false);
+    expect(diags2.some((d) => d.code === "paths/params-defined" && d.message.includes('"{widgetId}"'))).toBe(false);
     expect(diags2.some((d) => d.code === "syntax-error")).toBe(false);
   });
 });
@@ -250,7 +250,7 @@ components:
   test("deletes the unused component's key+value, leaving neighbors intact", async () => {
     const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: TEXT }));
     const diagnostics = (await diagnosticsFor(ctx, ENTRY_PATH)).get(ENTRY_PATH) ?? [];
-    expect(diagnostics.some((d) => d.code === "no-unused-components")).toBe(true);
+    expect(diagnostics.some((d) => d.code === "components/no-unused")).toBe(true);
 
     const position = positionOf(TEXT, "Unused:");
     const results = await getCodeActions(ctx, { path: ENTRY_PATH, position, diagnostics });
@@ -268,10 +268,10 @@ components:
 
     const ctx2 = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: newText }));
     const diags2 = (await diagnosticsFor(ctx2, ENTRY_PATH)).get(ENTRY_PATH) ?? [];
-    expect(diags2.some((d) => d.code === "no-unused-components")).toBe(false);
+    expect(diags2.some((d) => d.code === "components/no-unused")).toBe(false);
     expect(diags2.some((d) => d.code === "syntax-error")).toBe(false);
     // Pet is still resolvable ($ref intact) and used.
-    expect(diags2.some((d) => d.code === "no-unresolved-ref")).toBe(false);
+    expect(diags2.some((d) => d.code === "refs/no-unresolved")).toBe(false);
   });
 
   test("removing the last entry of a section also removes the now-empty section key", async () => {
@@ -303,7 +303,7 @@ components:
 `;
     const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: TEXT }));
     const diagnostics = (await diagnosticsFor(ctx, ENTRY_PATH)).get(ENTRY_PATH) ?? [];
-    expect(diagnostics.some((d) => d.code === "no-unused-components")).toBe(true);
+    expect(diagnostics.some((d) => d.code === "components/no-unused")).toBe(true);
 
     const position = positionOf(TEXT, "Unused:");
     const results = await getCodeActions(ctx, { path: ENTRY_PATH, position, diagnostics });
@@ -319,7 +319,7 @@ components:
 
     const ctx2 = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: newText }));
     const diags2 = (await diagnosticsFor(ctx2, ENTRY_PATH)).get(ENTRY_PATH) ?? [];
-    expect(diags2.some((d) => d.code === "no-unused-components")).toBe(false);
+    expect(diags2.some((d) => d.code === "components/no-unused")).toBe(false);
     expect(diags2.some((d) => d.code === "syntax-error")).toBe(false);
   });
 
@@ -344,7 +344,7 @@ components:
 `;
     const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: TEXT }));
     const diagnostics = (await diagnosticsFor(ctx, ENTRY_PATH)).get(ENTRY_PATH) ?? [];
-    expect(diagnostics.some((d) => d.code === "no-unused-components")).toBe(true);
+    expect(diagnostics.some((d) => d.code === "components/no-unused")).toBe(true);
 
     const position = positionOf(TEXT, "Unused:");
     const results = await getCodeActions(ctx, { path: ENTRY_PATH, position, diagnostics });
@@ -358,7 +358,7 @@ components:
 
     const ctx2 = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: newText }));
     const diags2 = (await diagnosticsFor(ctx2, ENTRY_PATH)).get(ENTRY_PATH) ?? [];
-    expect(diags2.some((d) => d.code === "no-unused-components")).toBe(false);
+    expect(diags2.some((d) => d.code === "components/no-unused")).toBe(false);
     expect(diags2.some((d) => d.code === "syntax-error")).toBe(false);
   });
 });
@@ -400,9 +400,9 @@ paths:
 
     const ctx2 = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: newText }));
     const diags2 = (await diagnosticsFor(ctx2, ENTRY_PATH)).get(ENTRY_PATH) ?? [];
-    expect(diags2.some((d) => d.code === "no-unresolved-ref")).toBe(false);
+    expect(diags2.some((d) => d.code === "refs/no-unresolved")).toBe(false);
     expect(diags2.some((d) => d.code === "syntax-error")).toBe(false);
-    expect(diags2.some((d) => d.code === "no-unused-components")).toBe(false);
+    expect(diags2.some((d) => d.code === "components/no-unused")).toBe(false);
   });
 
   test("from the entry file, appending into an existing components/schemas map", async () => {
@@ -442,7 +442,7 @@ components:
 
     const ctx2 = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: newText }));
     const diags2 = (await diagnosticsFor(ctx2, ENTRY_PATH)).get(ENTRY_PATH) ?? [];
-    expect(diags2.some((d) => d.code === "no-unresolved-ref")).toBe(false);
+    expect(diags2.some((d) => d.code === "refs/no-unresolved")).toBe(false);
     expect(diags2.some((d) => d.code === "syntax-error")).toBe(false);
   });
 
@@ -509,7 +509,7 @@ paths:
       }),
     );
     const diags2 = (await diagnosticsFor(ctx2, ENTRY_PATH)).get(FRAGMENT_PATH) ?? [];
-    expect(diags2.some((d) => d.code === "no-unresolved-ref")).toBe(false);
+    expect(diags2.some((d) => d.code === "refs/no-unresolved")).toBe(false);
     expect(diags2.some((d) => d.code === "syntax-error")).toBe(false);
   });
 });
@@ -560,7 +560,7 @@ components:
 
     const ctx2 = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: newText }));
     const diags2 = (await diagnosticsFor(ctx2, ENTRY_PATH)).get(ENTRY_PATH) ?? [];
-    expect(diags2.some((d) => d.code === "no-unresolved-ref")).toBe(false);
+    expect(diags2.some((d) => d.code === "refs/no-unresolved")).toBe(false);
     expect(diags2.some((d) => d.code === "syntax-error")).toBe(false);
   });
 
@@ -627,7 +627,7 @@ components:
       }),
     );
     const diags2 = (await diagnosticsFor(ctx2, ENTRY_PATH)).get(FRAGMENT_PATH) ?? [];
-    expect(diags2.some((d) => d.code === "no-unresolved-ref")).toBe(false);
+    expect(diags2.some((d) => d.code === "refs/no-unresolved")).toBe(false);
     expect(diags2.some((d) => d.code === "syntax-error")).toBe(false);
   });
 

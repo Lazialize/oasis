@@ -14,7 +14,6 @@ export interface LintOptions {
 
 /** Map a rule/config severity to the severity carried on emitted diagnostics. "off" never reaches here. */
 function toDiagnosticSeverity(severity: RuleSeverity): LintDiagnosticSeverity {
-  if (severity === "warn") return "warning";
   if (severity === "off") return "info"; // unreachable in practice; kept exhaustive
   return severity;
 }
@@ -33,7 +32,7 @@ function resolveLocation(location: ReportLocation): Range | undefined {
  * Run the lint rule engine over a workspace graph. Core parse/graph diagnostics (syntax errors,
  * duplicate keys, unresolved refs, ref cycles) flow through the same pipeline as built-in rules:
  * syntax errors are always emitted as errors and cannot be disabled; the rest are surfaced by the
- * `no-duplicate-keys` / `no-unresolved-ref` / `no-ref-cycle` rules and are subject to config.
+ * `syntax/no-duplicate-keys` / `refs/no-unresolved` / `refs/no-cycle` rules and are subject to config.
  */
 export function lint(
   graph: WorkspaceGraph,
@@ -64,8 +63,8 @@ export function lint(
   // Unknown rule names in config surface as warnings, not crashes.
   for (const warning of config.configWarnings) {
     diagnostics.push({
-      rule: "config",
-      severity: "warning",
+      rule: "oasis/config",
+      severity: "warn",
       message: warning,
       range: zeroRange(options.configPath ?? graph.entryPath),
     });

@@ -13,23 +13,23 @@ async function lintFixture(relativePath: string) {
   return lint(graph, config);
 }
 
-describe("path-params-defined", () => {
+describe("paths/params-defined", () => {
   test("flags a path template param with no matching parameter definition", async () => {
     const diagnostics = await lintFixture("path-params/mismatch.yaml");
-    const d = diagnostics.find((d) => d.rule === "path-params-defined");
+    const d = diagnostics.find((d) => d.rule === "paths/params-defined");
     expect(d).toBeDefined();
     expect(d?.message).toContain("{id}");
   });
 
   test("flags a path parameter that is not required", async () => {
     const diagnostics = await lintFixture("path-params/not-required.yaml");
-    const d = diagnostics.find((d) => d.rule === "path-params-defined");
+    const d = diagnostics.find((d) => d.rule === "paths/params-defined");
     expect(d).toBeDefined();
     expect(d?.message).toContain("required: true");
   });
 
   test("valid fixture passes", async () => {
     const diagnostics = await lintFixture("valid/openapi.yaml");
-    expect(diagnostics.some((d) => d.rule === "path-params-defined")).toBe(false);
+    expect(diagnostics.some((d) => d.rule === "paths/params-defined")).toBe(false);
   });
 });

@@ -13,10 +13,10 @@ async function lintFixture(relativePath: string) {
   return lint(graph, config);
 }
 
-describe("operation-operationId", () => {
+describe("operation/operation-id", () => {
   test("flags an operation missing operationId", async () => {
     const diagnostics = await lintFixture("operations/missing-operation-id.yaml");
-    const d = diagnostics.find((d) => d.rule === "operation-operationId");
+    const d = diagnostics.find((d) => d.rule === "operation/operation-id");
     expect(d).toBeDefined();
     expect(d?.severity).toBe("error");
     expect(d?.range.start.line).toBe(7);
@@ -24,43 +24,43 @@ describe("operation-operationId", () => {
 
   test("flags a duplicate operationId across two paths", async () => {
     const diagnostics = await lintFixture("operations/duplicate-operation-id.yaml");
-    const dupes = diagnostics.filter((d) => d.rule === "operation-operationId");
+    const dupes = diagnostics.filter((d) => d.rule === "operation/operation-id");
     expect(dupes.length).toBeGreaterThanOrEqual(1);
     expect(dupes.some((d) => d.message.includes("Duplicate operationId"))).toBe(true);
   });
 
   test("valid fixture passes", async () => {
     const diagnostics = await lintFixture("valid/openapi.yaml");
-    expect(diagnostics.some((d) => d.rule === "operation-operationId")).toBe(false);
+    expect(diagnostics.some((d) => d.rule === "operation/operation-id")).toBe(false);
   });
 });
 
-describe("operation-tags", () => {
+describe("operation/tags", () => {
   test("flags an operation with no tags", async () => {
     const diagnostics = await lintFixture("operations/missing-tags.yaml");
-    const d = diagnostics.find((d) => d.rule === "operation-tags");
+    const d = diagnostics.find((d) => d.rule === "operation/tags");
     expect(d).toBeDefined();
-    expect(d?.severity).toBe("warning");
+    expect(d?.severity).toBe("warn");
     expect(d?.range.start.line).toBe(7);
   });
 
   test("valid fixture passes", async () => {
     const diagnostics = await lintFixture("valid/openapi.yaml");
-    expect(diagnostics.some((d) => d.rule === "operation-tags")).toBe(false);
+    expect(diagnostics.some((d) => d.rule === "operation/tags")).toBe(false);
   });
 });
 
-describe("operation-description", () => {
+describe("operation/description", () => {
   test("flags an operation with neither description nor summary", async () => {
     const diagnostics = await lintFixture("operations/missing-description.yaml");
-    const d = diagnostics.find((d) => d.rule === "operation-description");
+    const d = diagnostics.find((d) => d.rule === "operation/description");
     expect(d).toBeDefined();
-    expect(d?.severity).toBe("warning");
+    expect(d?.severity).toBe("warn");
     expect(d?.range.start.line).toBe(7);
   });
 
   test("valid fixture passes", async () => {
     const diagnostics = await lintFixture("valid/openapi.yaml");
-    expect(diagnostics.some((d) => d.rule === "operation-description")).toBe(false);
+    expect(diagnostics.some((d) => d.rule === "operation/description")).toBe(false);
   });
 });

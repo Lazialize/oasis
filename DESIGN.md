@@ -44,7 +44,7 @@ The single most important design constraint: **every value in a parsed document 
 - Rule interface roughly:
   ```ts
   interface Rule {
-    name: string;               // e.g. "operation-operationId"
+    name: string;               // e.g. "operation/operation-id"
     defaultSeverity: "error" | "warn" | "info" | "off";
     check(ctx: RuleContext): void;  // ctx exposes the document graph, version, report(pointer|node, message)
   }
@@ -53,16 +53,16 @@ The single most important design constraint: **every value in a parsed document 
 - Config file `oasis.config.jsonc` (JSONC via `jsonc-parser`) at project root, discovered upward from cwd or passed via `--config`:
   ```jsonc
   {
-    "lint": { "rules": { "operation-operationId": "error", "no-unused-components": "off" } }
+    "lint": { "rules": { "operation/operation-id": "error", "components/no-unused": "off" } }
   }
   ```
 - Initial built-in rules (validation-style + style-style):
   - structural validation of the OpenAPI schema itself (required fields, correct types, enum values) — implemented as rules so everything flows through one diagnostics pipeline
-  - `no-unresolved-ref`, `no-ref-cycle`
-  - `operation-operationId` (present + unique), `operation-tags`, `operation-description`
-  - `path-params-defined` (path template params ↔ parameters agreement)
-  - `no-unused-components`
-  - `no-duplicate-keys` (from parser)
+  - `refs/no-unresolved`, `refs/no-cycle`
+  - `operation/operation-id` (present + unique), `operation/tags`, `operation/description`
+  - `paths/params-defined` (path template params ↔ parameters agreement)
+  - `components/no-unused`
+  - `syntax/no-duplicate-keys` (from parser)
 
 ### packages/bundler
 

@@ -8,7 +8,23 @@ export interface RunBundleOptions {
   stderr: (text: string) => void;
 }
 
+const BUNDLE_HELP = `oasis bundle <entry> [-o|--out path] [--format yaml|json] [--dereference]
+
+Bundle a multi-file OpenAPI document into a single self-contained document, lifting external
+\`$ref\`s into \`components/*\` (or fully inlining them with --dereference).
+
+Options:
+  -o, --out path       Write the bundled document here instead of stdout
+  --format yaml|json    Output format (default: inferred from --out extension, else yaml)
+  --dereference         Fully inline every $ref instead of lifting external refs
+  -h, --help            Show this help message
+`;
+
 export async function runBundleCommand(args: string[], io: RunBundleOptions): Promise<number> {
+  if (args.includes("-h") || args.includes("--help")) {
+    io.stdout(BUNDLE_HELP);
+    return 0;
+  }
   const parsed = parseBundleArgs(args);
   if (!parsed.ok) {
     io.stderr(`oasis bundle: ${parsed.error}\n`);

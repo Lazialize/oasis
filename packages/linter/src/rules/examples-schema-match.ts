@@ -139,7 +139,7 @@ function checkParamsArray(ctx: RuleContext, env: ValidateEnv, doc: OasisDocument
 }
 
 export const exampleSchemaMatch: Rule = {
-  name: "example-schema-match",
+  name: "examples/schema-match",
   description:
     'Checks that "example"/"examples[].value" values conform to their schema, version-aware (3.0 dialect vs 3.1 / JSON Schema 2020-12). Validates a hand-rolled subset of keywords (see README); schemas using "not", "discriminator", or an unresolved $ref are skipped.',
   defaultSeverity: "warn",

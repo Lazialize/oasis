@@ -393,7 +393,7 @@ describe("structure/server-variables", () => {
       (d) => d.rule === "structure/server-variables" && d.message.includes('"unused"') && d.message.includes("not referenced"),
     );
     expect(d).toBeDefined();
-    expect(d?.severity).toBe("warning");
+    expect(d?.severity).toBe("warn");
   });
 
   test("flags a variable missing a default", async () => {

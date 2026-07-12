@@ -16,14 +16,14 @@ async function lintFixture(relativePath: string) {
 describe("oasis-disable-next-line", () => {
   test("suppresses a single named rule only for the line right after the comment", async () => {
     const diagnostics = await lintFixture("next-line-single.yaml");
-    const tagDiagnostics = diagnostics.filter((d) => d.rule === "operation-tags");
+    const tagDiagnostics = diagnostics.filter((d) => d.rule === "operation/tags");
     expect(tagDiagnostics).toHaveLength(1);
     expect(tagDiagnostics[0]?.message).toContain("/b");
   });
 
   test("comma-separated and space-separated rule lists both suppress multiple rules", async () => {
     const diagnostics = await lintFixture("next-line-multiple.yaml");
-    const relevant = diagnostics.filter((d) => d.rule === "operation-tags" || d.rule === "operation-description");
+    const relevant = diagnostics.filter((d) => d.rule === "operation/tags" || d.rule === "operation/description");
     // Only the untouched /none-suppressed operation should still report (tags + description = 2).
     expect(relevant).toHaveLength(2);
     expect(relevant.every((d) => d.message.includes("/none-suppressed"))).toBe(true);
@@ -34,28 +34,28 @@ describe("oasis-disable-next-line", () => {
     const forSuppressed = diagnostics.filter((d) => d.message.includes("/suppressed") && !d.message.includes("/not-suppressed"));
     expect(forSuppressed).toEqual([]);
 
-    // The untouched operation still reports operation-tags, operation-description and operation-operationId.
+    // The untouched operation still reports operation/tags, operation/description and operation/operation-id.
     const forNotSuppressed = diagnostics.filter((d) => d.message.includes("/not-suppressed"));
     const rulesReported = new Set(forNotSuppressed.map((d) => d.rule));
-    expect(rulesReported).toEqual(new Set(["operation-tags", "operation-description", "operation-operationId"]));
+    expect(rulesReported).toEqual(new Set(["operation/tags", "operation/description", "operation/operation-id"]));
   });
 
   test("directive placed before a multi-line node still targets it by its start line", async () => {
-    // operation-tags/operation-description report on the whole operation node, whose range starts
+    // operation/tags and operation/description report on the whole operation node, whose range starts
     // at its first property (operationId here), not at the "get:" line above it — so the
     // next-line directive has to sit immediately above that first property to suppress it. The
     // node itself still spans several lines (operationId, description, responses).
     const diagnostics = await lintFixture("next-line-single.yaml");
-    expect(diagnostics.some((d) => d.rule === "operation-tags" && d.message.includes("/a"))).toBe(false);
+    expect(diagnostics.some((d) => d.rule === "operation/tags" && d.message.includes("/a"))).toBe(false);
   });
 });
 
 describe("oasis-disable-file", () => {
   test("suppresses a named rule everywhere in the file", async () => {
     const diagnostics = await lintFixture("file-level.yaml");
-    expect(diagnostics.some((d) => d.rule === "operation-tags")).toBe(false);
-    // operation-description isn't suppressed and still fires for both operations.
-    expect(diagnostics.filter((d) => d.rule === "operation-description")).toHaveLength(2);
+    expect(diagnostics.some((d) => d.rule === "operation/tags")).toBe(false);
+    // operation/description isn't suppressed and still fires for both operations.
+    expect(diagnostics.filter((d) => d.rule === "operation/description")).toHaveLength(2);
   });
 
   test("no rule names suppresses every rule in the file", async () => {
@@ -65,7 +65,7 @@ describe("oasis-disable-file", () => {
 
   test("only suppresses the $ref'd file it appears in, not the entry document", async () => {
     const diagnostics = await lintFixture("multifile/entry.yaml");
-    const tagDiagnostics = diagnostics.filter((d) => d.rule === "operation-tags");
+    const tagDiagnostics = diagnostics.filter((d) => d.rule === "operation/tags");
     expect(tagDiagnostics).toHaveLength(1);
     expect(tagDiagnostics[0]?.range.filePath).toContain("entry.yaml");
     expect(tagDiagnostics[0]?.message).toContain("/entry");

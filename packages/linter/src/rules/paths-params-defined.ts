@@ -82,7 +82,7 @@ function checkOperationOrPathItem(
 }
 
 export const pathParamsDefined: Rule = {
-  name: "path-params-defined",
+  name: "paths/params-defined",
   description: 'Requires {param} path template placeholders and "in: path" parameters to agree, and path parameters to be required.',
   defaultSeverity: "error",
   check(ctx) {

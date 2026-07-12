@@ -77,7 +77,7 @@ function collectDiscriminatorMappingUsage(ctx: RuleContext, used: Set<string>): 
 }
 
 export const noUnusedComponents: Rule = {
-  name: "no-unused-components",
+  name: "components/no-unused",
   description:
     "Flags components that are defined but never referenced by any $ref in the workspace, and never referenced by name (security scheme names in a \"security\" requirement, or discriminator mapping values).",
   defaultSeverity: "warn",

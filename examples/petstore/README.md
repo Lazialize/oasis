@@ -6,11 +6,11 @@ A small multi-file OpenAPI 3.0 project for trying out `oasis`. Path items live i
 
 It contains **three deliberate lint findings** (marked with comments in the sources):
 
-- `path-params-defined` (error) — `GET /pets/{petId}` never declares the `petId` parameter
-- `operation-description` (warning) — `POST /pets` has no description/summary
-- `no-unused-components` (warning) — `LegacyPet` is referenced by nothing
+- `paths/params-defined` (error) — `GET /pets/{petId}` never declares the `petId` parameter
+- `operation/description` (warning) — `POST /pets` has no description/summary
+- `components/no-unused` (warning) — `LegacyPet` is referenced by nothing
 
-`oasis.config.jsonc` here turns `no-ref-cycle` off, since the path-file → entry back-references
+`oasis.config.jsonc` here turns `refs/no-cycle` off, since the path-file → entry back-references
 are intentional. It is discovered automatically when you run from this directory (or pass
 `--config`).
 

@@ -48,28 +48,28 @@ webhooks:
 `;
 
 describe("3.1 webhooks: operation rules apply", () => {
-  test("operation-operationId is unique across paths and webhooks", async () => {
+  test("operation/operation-id is unique across paths and webhooks", async () => {
     const diagnostics = await lintFiles({ "/virtual/entry.yaml": WEBHOOKS_31 });
-    const dupes = diagnostics.filter((d) => d.rule === "operation-operationId");
+    const dupes = diagnostics.filter((d) => d.rule === "operation/operation-id");
     expect(dupes.length).toBe(1);
     expect(dupes[0]?.message).toContain('Duplicate operationId "dupId"');
   });
 
-  test("operation-tags fires on a webhook operation with no tags", async () => {
+  test("operation/tags fires on a webhook operation with no tags", async () => {
     const diagnostics = await lintFiles({ "/virtual/entry.yaml": WEBHOOKS_31 });
-    const d = diagnostics.filter((d) => d.rule === "operation-tags");
+    const d = diagnostics.filter((d) => d.rule === "operation/tags");
     expect(d.length).toBe(1);
     expect(d[0]?.message).toContain("{weird}");
   });
 
-  test("operation-success-response fires on a webhook operation with only a default response", async () => {
+  test("operation/success-response fires on a webhook operation with only a default response", async () => {
     const diagnostics = await lintFiles({ "/virtual/entry.yaml": WEBHOOKS_31 });
-    const d = diagnostics.filter((d) => d.rule === "operation-success-response");
+    const d = diagnostics.filter((d) => d.rule === "operation/success-response");
     expect(d.length).toBe(1);
     expect(d[0]?.message).toContain("POST newPet");
   });
 
-  test("operation-description fires on a webhook operation without description/summary", async () => {
+  test("operation/description fires on a webhook operation without description/summary", async () => {
     const doc = `
 openapi: 3.1.0
 info:
@@ -86,34 +86,34 @@ webhooks:
           description: OK
 `;
     const diagnostics = await lintFiles({ "/virtual/entry.yaml": doc });
-    const d = diagnostics.filter((d) => d.rule === "operation-description");
+    const d = diagnostics.filter((d) => d.rule === "operation/description");
     expect(d.length).toBe(1);
     expect(d[0]?.message).toContain("POST newPet");
   });
 
-  test("security-defined fires on a webhook operation's security requirement", async () => {
+  test("security/defined fires on a webhook operation's security requirement", async () => {
     const diagnostics = await lintFiles({ "/virtual/entry.yaml": WEBHOOKS_31 });
-    const d = diagnostics.filter((d) => d.rule === "security-defined");
+    const d = diagnostics.filter((d) => d.rule === "security/defined");
     expect(d.length).toBe(1);
     expect(d[0]?.message).toContain("missingScheme");
   });
 
-  test("tags-defined fires on a webhook operation's undeclared tag", async () => {
-    const diagnostics = await lintFiles({ "/virtual/entry.yaml": WEBHOOKS_31 }, { lint: { rules: { "tags-defined": "warn" } } });
-    const d = diagnostics.filter((d) => d.rule === "tags-defined");
+  test("tags/defined fires on a webhook operation's undeclared tag", async () => {
+    const diagnostics = await lintFiles({ "/virtual/entry.yaml": WEBHOOKS_31 }, { lint: { rules: { "tags/defined": "warn" } } });
+    const d = diagnostics.filter((d) => d.rule === "tags/defined");
     expect(d.length).toBe(1);
     expect(d[0]?.message).toContain("unknownTag");
   });
 });
 
 describe("3.1 webhooks: path-shaped rules do NOT apply", () => {
-  test("path-params-defined ignores webhook keys (arbitrary names, not URL templates)", async () => {
+  test("paths/params-defined ignores webhook keys (arbitrary names, not URL templates)", async () => {
     const diagnostics = await lintFiles({ "/virtual/entry.yaml": WEBHOOKS_31 });
     // "{weird}" looks like a path template parameter but is just a webhook name.
-    expect(diagnostics.some((d) => d.rule === "path-params-defined")).toBe(false);
+    expect(diagnostics.some((d) => d.rule === "paths/params-defined")).toBe(false);
   });
 
-  test("no-duplicate-paths ignores webhooks entirely", async () => {
+  test("paths/no-duplicates ignores webhooks entirely", async () => {
     const doc = `
 openapi: 3.1.0
 info:
@@ -145,8 +145,8 @@ webhooks:
           description: OK
 `;
     const diagnostics = await lintFiles({ "/virtual/entry.yaml": doc });
-    expect(diagnostics.some((d) => d.rule === "no-duplicate-paths")).toBe(false);
-    expect(diagnostics.some((d) => d.rule === "path-params-defined")).toBe(false);
+    expect(diagnostics.some((d) => d.rule === "paths/no-duplicates")).toBe(false);
+    expect(diagnostics.some((d) => d.rule === "paths/params-defined")).toBe(false);
   });
 });
 
@@ -166,14 +166,14 @@ webhooks:
           description: only default
 `;
     const diagnostics = await lintFiles({ "/virtual/entry.yaml": doc });
-    for (const rule of ["operation-operationId", "operation-tags", "operation-description", "operation-success-response"]) {
+    for (const rule of ["operation/operation-id", "operation/tags", "operation/description", "operation/success-response"]) {
       expect(diagnostics.some((d) => d.rule === rule)).toBe(false);
     }
   });
 });
 
 describe("3.1 webhooks: refs and schemas", () => {
-  test("no-unused-components counts a component referenced only from a webhook", async () => {
+  test("components/no-unused counts a component referenced only from a webhook", async () => {
     const doc = `
 openapi: 3.1.0
 info:
@@ -200,10 +200,10 @@ components:
       type: object
 `;
     const diagnostics = await lintFiles({ "/virtual/entry.yaml": doc });
-    expect(diagnostics.some((d) => d.rule === "no-unused-components")).toBe(false);
+    expect(diagnostics.some((d) => d.rule === "components/no-unused")).toBe(false);
   });
 
-  test("example-schema-match validates a webhook request body example", async () => {
+  test("examples/schema-match validates a webhook request body example", async () => {
     const doc = `
 openapi: 3.1.0
 info:
@@ -227,7 +227,7 @@ webhooks:
           description: OK
 `;
     const diagnostics = await lintFiles({ "/virtual/entry.yaml": doc });
-    const d = diagnostics.filter((d) => d.rule === "example-schema-match");
+    const d = diagnostics.filter((d) => d.rule === "examples/schema-match");
     expect(d.length).toBe(1);
     expect(d[0]?.message).toContain("got string");
   });

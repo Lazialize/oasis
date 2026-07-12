@@ -196,7 +196,7 @@ describe("project mode", () => {
 
     const byFile = await getDiagnosticsByFile(ctx, owner!);
     const fragDiags = byFile.get(FRAGMENT_PATH) ?? [];
-    expect(fragDiags.some((d) => d.code === "operation-operationId")).toBe(true);
+    expect(fragDiags.some((d) => d.code === "operation/operation-id")).toBe(true);
   });
 
   test("a file reachable from two entries is owned by the first entry in declaration order", async () => {

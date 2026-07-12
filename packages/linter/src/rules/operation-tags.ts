@@ -4,7 +4,7 @@ import { childAt } from "../util.ts";
 import type { Rule } from "../types.ts";
 
 export const operationTags: Rule = {
-  name: "operation-tags",
+  name: "operation/tags",
   description: "Requires every operation to declare at least one non-empty tag.",
   defaultSeverity: "warn",
   check(ctx) {

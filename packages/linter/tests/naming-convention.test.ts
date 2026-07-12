@@ -3,15 +3,15 @@ import { InMemoryFileSystem, loadWorkspaceGraph, NodeFileSystem } from "@oasis/c
 import type { FileSystem } from "@oasis/core";
 import { lint } from "../src/engine.ts";
 import { resolveConfig } from "../src/config.ts";
-import { matchesCase, namingConvention } from "../src/rules/naming-convention.ts";
-import type { NamingConventionOptions } from "../src/rules/naming-convention.ts";
+import { matchesCase, namingConvention } from "../src/rules/style-naming-convention.ts";
+import type { NamingConventionOptions } from "../src/rules/style-naming-convention.ts";
 
 const fixturesRoot = `${import.meta.dir}/fixtures`;
 const ruleList = [namingConvention];
 
 async function lintWithOptions(entry: string, options: NamingConventionOptions, fs: FileSystem = new NodeFileSystem()) {
   const graph = await loadWorkspaceGraph(fs, entry);
-  const config = resolveConfig({ lint: { rules: { "naming-convention": ["warn", options] } } }, ruleList);
+  const config = resolveConfig({ lint: { rules: { "style/naming-convention": ["warn", options] } } }, ruleList);
   return lint(graph, config, {}, ruleList);
 }
 
@@ -60,7 +60,7 @@ describe("matchesCase", () => {
   });
 });
 
-describe("naming-convention rule", () => {
+describe("style/naming-convention rule", () => {
   const entry = `${fixturesRoot}/naming-convention/mixed.yaml`;
 
   test("unconfigured (default options {}) reports nothing even for badly-cased names", async () => {
@@ -178,7 +178,7 @@ components:
   });
 });
 
-describe("naming-convention validateOptions", () => {
+describe("style/naming-convention validateOptions", () => {
   test("accepts an empty options object", () => {
     expect(namingConvention.validateOptions?.({})).toBeUndefined();
   });
@@ -226,14 +226,14 @@ paths: {}
 `,
     });
     const graph = await loadWorkspaceGraph(mem, "/virtual/entry.yaml");
-    const config = resolveConfig({ lint: { rules: { "naming-convention": ["warn", { operationId: "not-a-style" }] } } }, ruleList);
-    expect(config.configWarnings.some((w) => w.includes("naming-convention") && w.includes("invalid casing style"))).toBe(true);
+    const config = resolveConfig({ lint: { rules: { "style/naming-convention": ["warn", { operationId: "not-a-style" }] } } }, ruleList);
+    expect(config.configWarnings.some((w) => w.includes("style/naming-convention") && w.includes("invalid casing style"))).toBe(true);
 
     const diagnostics = lint(graph, config, {}, ruleList);
-    const configDiag = diagnostics.find((d) => d.rule === "config");
+    const configDiag = diagnostics.find((d) => d.rule === "oasis/config");
     expect(configDiag).toBeDefined();
-    expect(configDiag?.message).toContain("naming-convention");
+    expect(configDiag?.message).toContain("style/naming-convention");
     // The rule falls back to its default (off, {}) rather than crashing.
-    expect(diagnostics.some((d) => d.rule === "naming-convention")).toBe(false);
+    expect(diagnostics.some((d) => d.rule === "style/naming-convention")).toBe(false);
   });
 });

@@ -3,7 +3,7 @@ import { InMemoryFileSystem, loadWorkspaceGraph } from "@oasis/core";
 import type { FileSystem } from "@oasis/core";
 import { lint } from "../src/engine.ts";
 import { resolveConfig } from "../src/config.ts";
-import { exampleSchemaMatch } from "../src/rules/example-schema-match.ts";
+import { exampleSchemaMatch } from "../src/rules/examples-schema-match.ts";
 
 const ruleList = [exampleSchemaMatch];
 
@@ -53,7 +53,7 @@ function indent(text: string, spaces: number): string {
     .join("\n");
 }
 
-describe("example-schema-match: type (flagship 3.0/3.1 branch)", () => {
+describe("examples/schema-match: type (flagship 3.0/3.1 branch)", () => {
   test("3.0: nullable example null passes", async () => {
     const doc = wrap30(`type: string\nnullable: true\nexample: null`);
     const diagnostics = await lintFiles({ "/virtual/entry.yaml": doc });
@@ -122,7 +122,7 @@ describe("example-schema-match: type (flagship 3.0/3.1 branch)", () => {
   });
 });
 
-describe("example-schema-match: enum / const", () => {
+describe("examples/schema-match: enum / const", () => {
   test("enum: matching value passes", async () => {
     const doc = wrap30(`type: string\nenum: [a, b, c]\nexample: b`);
     const diagnostics = await lintFiles({ "/virtual/entry.yaml": doc });
@@ -150,7 +150,7 @@ describe("example-schema-match: enum / const", () => {
   });
 });
 
-describe("example-schema-match: object (required/properties/additionalProperties)", () => {
+describe("examples/schema-match: object (required/properties/additionalProperties)", () => {
   const schema = `
 type: object
 required: [name]
@@ -191,7 +191,7 @@ additionalProperties: false
   });
 });
 
-describe("example-schema-match: array (items/prefixItems/minItems/maxItems)", () => {
+describe("examples/schema-match: array (items/prefixItems/minItems/maxItems)", () => {
   test("items: every element must match", async () => {
     const doc = wrap30(`type: array\nitems:\n  type: integer\nexample: [1, 2, "3"]`);
     const diagnostics = await lintFiles({ "/virtual/entry.yaml": doc });
@@ -225,7 +225,7 @@ describe("example-schema-match: array (items/prefixItems/minItems/maxItems)", ()
   });
 });
 
-describe("example-schema-match: numeric and string constraints", () => {
+describe("examples/schema-match: numeric and string constraints", () => {
   test("3.0: exclusiveMinimum/exclusiveMaximum are booleans modifying minimum/maximum", async () => {
     const doc = wrap30(`type: number\nminimum: 0\nexclusiveMinimum: true\nexample: 0`);
     const diagnostics = await lintFiles({ "/virtual/entry.yaml": doc });
@@ -280,7 +280,7 @@ describe("example-schema-match: numeric and string constraints", () => {
   });
 });
 
-describe("example-schema-match: allOf / oneOf / anyOf", () => {
+describe("examples/schema-match: allOf / oneOf / anyOf", () => {
   test("allOf: every branch must pass", async () => {
     const doc = wrap30(`allOf:\n  - type: object\n    required: [name]\n  - properties:\n      age:\n        type: integer\nexample: {name: Alice, age: "old"}`);
     const diagnostics = await lintFiles({ "/virtual/entry.yaml": doc });
@@ -314,7 +314,7 @@ describe("example-schema-match: allOf / oneOf / anyOf", () => {
   });
 });
 
-describe("example-schema-match: deliberate skip cases (report nothing)", () => {
+describe("examples/schema-match: deliberate skip cases (report nothing)", () => {
   test('schema using "not" is skipped entirely', async () => {
     const doc = wrap30(`not:\n  type: string\nexample: "still a string"`);
     const diagnostics = await lintFiles({ "/virtual/entry.yaml": doc });
@@ -359,7 +359,7 @@ paths:
   });
 });
 
-describe("example-schema-match: media type / parameter placements", () => {
+describe("examples/schema-match: media type / parameter placements", () => {
   test("response content media type example is validated against its schema", async () => {
     const doc = `
 openapi: 3.0.3
@@ -496,7 +496,7 @@ paths:
   });
 });
 
-describe("example-schema-match: $ref across files", () => {
+describe("examples/schema-match: $ref across files", () => {
   test("a schema $ref'd from another file is resolved and the example is attributed to that file", async () => {
     const entry = `
 openapi: 3.0.3
@@ -569,7 +569,7 @@ components:
   });
 });
 
-describe("example-schema-match: schema-level example (directly on a Schema Object)", () => {
+describe("examples/schema-match: schema-level example (directly on a Schema Object)", () => {
   test("a components/schemas entry's own example is validated against itself", async () => {
     const doc = wrap30(`type: object\nrequired: [id]\nproperties:\n  id:\n    type: integer\nexample:\n  id: "not an integer"`);
     const diagnostics = await lintFiles({ "/virtual/entry.yaml": doc });

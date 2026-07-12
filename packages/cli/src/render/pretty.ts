@@ -1,5 +1,6 @@
 import type { LintDiagnostic, LintDiagnosticSeverity } from "@oasis/linter";
 import { summarize } from "./json.ts";
+import { toRelativeFilePath } from "./paths.ts";
 
 const COLORS = {
   red: "\x1b[31m",
@@ -23,12 +24,12 @@ function colorize(text: string, color: keyof typeof COLORS, enabled: boolean): s
 
 function severityLabel(severity: LintDiagnosticSeverity, enabled: boolean): string {
   if (severity === "error") return colorize("error", "red", enabled);
-  if (severity === "warning") return colorize("warning", "yellow", enabled);
+  if (severity === "warn") return colorize("warn", "yellow", enabled);
   return colorize("info", "cyan", enabled);
 }
 
 /** Render lint diagnostics grouped by file, `line:col message rule-name`, with a summary line. */
-export function renderPretty(diagnostics: LintDiagnostic[]): string {
+export function renderPretty(diagnostics: LintDiagnostic[], cwd: string = process.cwd()): string {
   const enabled = colorsEnabled();
   const lines: string[] = [];
 
@@ -44,7 +45,8 @@ export function renderPretty(diagnostics: LintDiagnostic[]): string {
     byFile.set(d.range.filePath, list);
   }
 
-  for (const [file, fileDiagnostics] of byFile) {
+  for (const [rawFile, fileDiagnostics] of byFile) {
+    const file = toRelativeFilePath(rawFile, cwd);
     lines.push(colorize(file, "bold", enabled));
     for (const d of fileDiagnostics) {
       const location = `${d.range.start.line + 1}:${d.range.start.character + 1}`;
@@ -53,8 +55,10 @@ export function renderPretty(diagnostics: LintDiagnostic[]): string {
     lines.push("");
   }
 
-  const { errors, warnings } = summarize(diagnostics);
-  lines.push(`${errors} error${errors === 1 ? "" : "s"}, ${warnings} warning${warnings === 1 ? "" : "s"}`);
+  const { errors, warnings, infos } = summarize(diagnostics);
+  lines.push(
+    `${errors} error${errors === 1 ? "" : "s"}, ${warnings} warning${warnings === 1 ? "" : "s"}, ${infos} info${infos === 1 ? "" : "s"}`,
+  );
 
   return lines.join("\n");
 }

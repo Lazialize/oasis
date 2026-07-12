@@ -4,7 +4,7 @@ import { childAt } from "../util.ts";
 import type { Rule } from "../types.ts";
 
 export const operationOperationId: Rule = {
-  name: "operation-operationId",
+  name: "operation/operation-id",
   description: "Requires every operation to declare a unique operationId across the workspace.",
   defaultSeverity: "error",
   check(ctx) {

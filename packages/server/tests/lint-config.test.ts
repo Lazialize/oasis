@@ -19,7 +19,7 @@ const CONFIG_PATH = `${ROOT}/oasis.config.jsonc`;
 const ENTRY_PATH = `${ROOT}/openapi.yaml`;
 const FRAGMENT_PATH = `${ROOT}/paths/pets.yaml`;
 
-/** Missing `operationId` on `GET /pets`, so `operation-operationId` fires unless suppressed. */
+/** Missing `operationId` on `GET /pets`, so `operation/operation-id` fires unless suppressed. */
 function entryText(suppressed: boolean): string {
   return `openapi: 3.1.0
 info:
@@ -28,7 +28,7 @@ info:
 paths:
   /pets:
     get:
-${suppressed ? "      # oasis-disable-next-line operation-operationId\n" : ""}      tags: [pets]
+${suppressed ? "      # oasis-disable-next-line operation/operation-id\n" : ""}      tags: [pets]
       description: List pets.
       responses:
         '200':
@@ -45,7 +45,7 @@ const FRAGMENT_TEXT_UNSUPPRESSED = `get:
 `;
 
 const FRAGMENT_TEXT_SUPPRESSED = `get:
-  # oasis-disable-next-line operation-operationId
+  # oasis-disable-next-line operation/operation-id
   tags: [pets]
   description: List pets.
   responses:
@@ -66,14 +66,14 @@ describe("suppression comments through the LSP", () => {
     const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: entryText(true) }));
     const byFile = await getDiagnosticsByFile(ctx, ENTRY_PATH);
     const diags = byFile.get(ENTRY_PATH) ?? [];
-    expect(diags.some((d) => d.code === "operation-operationId")).toBe(false);
+    expect(diags.some((d) => d.code === "operation/operation-id")).toBe(false);
   });
 
   test("without the comment, the diagnostic is present", async () => {
     const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: entryText(false) }));
     const byFile = await getDiagnosticsByFile(ctx, ENTRY_PATH);
     const diags = byFile.get(ENTRY_PATH) ?? [];
-    expect(diags.some((d) => d.code === "operation-operationId")).toBe(true);
+    expect(diags.some((d) => d.code === "operation/operation-id")).toBe(true);
   });
 
   test("editing the in-memory buffer toggles the diagnostic without a save: remove then re-add the comment", async () => {
@@ -82,19 +82,19 @@ describe("suppression comments through the LSP", () => {
 
     // Opened with the suppression comment present: no diagnostic.
     let byFile = await getDiagnosticsByFile(ctx, ENTRY_PATH);
-    expect((byFile.get(ENTRY_PATH) ?? []).some((d) => d.code === "operation-operationId")).toBe(false);
+    expect((byFile.get(ENTRY_PATH) ?? []).some((d) => d.code === "operation/operation-id")).toBe(false);
 
     // didChange: remove the comment (unsaved edit, only the overlay/in-memory FS changes).
     fs.writeFile(ENTRY_PATH, entryText(false));
     invalidateGraph(ctx, ENTRY_PATH);
     byFile = await getDiagnosticsByFile(ctx, ENTRY_PATH);
-    expect((byFile.get(ENTRY_PATH) ?? []).some((d) => d.code === "operation-operationId")).toBe(true);
+    expect((byFile.get(ENTRY_PATH) ?? []).some((d) => d.code === "operation/operation-id")).toBe(true);
 
     // didChange: add it back.
     fs.writeFile(ENTRY_PATH, entryText(true));
     invalidateGraph(ctx, ENTRY_PATH);
     byFile = await getDiagnosticsByFile(ctx, ENTRY_PATH);
-    expect((byFile.get(ENTRY_PATH) ?? []).some((d) => d.code === "operation-operationId")).toBe(false);
+    expect((byFile.get(ENTRY_PATH) ?? []).some((d) => d.code === "operation/operation-id")).toBe(false);
   });
 
   test("a suppression directive in a $ref'd project-graph file suppresses diagnostics for that file only", async () => {
@@ -103,7 +103,7 @@ describe("suppression comments through the LSP", () => {
 
     const byFile = await getDiagnosticsByFile(ctx, ENTRY_PATH);
     const fragDiags = byFile.get(FRAGMENT_PATH) ?? [];
-    expect(fragDiags.some((d) => d.code === "operation-operationId")).toBe(false);
+    expect(fragDiags.some((d) => d.code === "operation/operation-id")).toBe(false);
   });
 
   test("without the directive, the fragment's diagnostic is published as part of the entry's graph", async () => {
@@ -112,7 +112,7 @@ describe("suppression comments through the LSP", () => {
 
     const byFile = await getDiagnosticsByFile(ctx, ENTRY_PATH);
     const fragDiags = byFile.get(FRAGMENT_PATH) ?? [];
-    expect(fragDiags.some((d) => d.code === "operation-operationId")).toBe(true);
+    expect(fragDiags.some((d) => d.code === "operation/operation-id")).toBe(true);
   });
 
   test("suppression scanning reads the unsaved overlay buffer, not the on-disk file", async () => {
@@ -127,7 +127,7 @@ describe("suppression comments through the LSP", () => {
 
     const byFile = await getDiagnosticsByFile(ctx, entryPath);
     const diags = byFile.get(entryPath) ?? [];
-    expect(diags.some((d) => d.code === "operation-operationId")).toBe(false);
+    expect(diags.some((d) => d.code === "operation/operation-id")).toBe(false);
   });
 });
 
@@ -141,7 +141,7 @@ describe("overrides through the LSP", () => {
     return {
       [OVERRIDE_CONFIG_PATH]: JSON.stringify({
         entries: ["openapi.yaml"],
-        lint: { overrides: [{ files: ["paths/**"], rules: { "operation-operationId": overrideSeverity } }] },
+        lint: { overrides: [{ files: ["paths/**"], rules: { "operation/operation-id": overrideSeverity } }] },
       }),
       [NON_MATCHING_PATH]: `openapi: 3.1.0\ninfo:\n  title: Test\n  version: "1.0.0"\npaths:\n  /pets:\n    $ref: './paths/pets.yaml'\n`,
       [MATCHING_PATH]: FRAGMENT_TEXT_UNSUPPRESSED,
@@ -154,7 +154,7 @@ describe("overrides through the LSP", () => {
 
     const byFile = await getDiagnosticsByFile(ctx, NON_MATCHING_PATH);
     // Matching file: overridden off.
-    expect((byFile.get(MATCHING_PATH) ?? []).some((d) => d.code === "operation-operationId")).toBe(false);
+    expect((byFile.get(MATCHING_PATH) ?? []).some((d) => d.code === "operation/operation-id")).toBe(false);
   });
 
   test("a glob override changes severity for matching files; non-matching files keep the top-level severity", async () => {
@@ -163,14 +163,14 @@ describe("overrides through the LSP", () => {
     await scanWorkspaceRootsForProjects(ctx, [OVERRIDE_ROOT]);
 
     const byFile = await getDiagnosticsByFile(ctx, NON_MATCHING_PATH);
-    const matching = (byFile.get(MATCHING_PATH) ?? []).find((d) => d.code === "operation-operationId");
+    const matching = (byFile.get(MATCHING_PATH) ?? []).find((d) => d.code === "operation/operation-id");
     expect(matching).toBeDefined();
     expect(matching?.severity).toBe(2); // DiagnosticSeverity.Warning
 
     // The entry itself has no operations of its own (just a $ref), so nothing to compare there;
     // instead verify a rule with no override keeps its default (error) severity on the matching
     // file too, proving only the overridden rule's severity changed.
-    const otherRule = (byFile.get(MATCHING_PATH) ?? []).find((d) => d.code === "operation-description");
+    const otherRule = (byFile.get(MATCHING_PATH) ?? []).find((d) => d.code === "operation/description");
     expect(otherRule).toBeUndefined(); // fragment has a description, so nothing to assert on severity directly.
   });
 
@@ -184,7 +184,7 @@ describe("overrides through the LSP", () => {
     expect(MATCHING_PATH.startsWith(OVERRIDE_ROOT)).toBe(true);
     const byFile = await getDiagnosticsByFile(ctx, NON_MATCHING_PATH);
     expect(byFile.has(MATCHING_PATH)).toBe(true);
-    expect((byFile.get(MATCHING_PATH) ?? []).some((d) => d.code === "operation-operationId")).toBe(false);
+    expect((byFile.get(MATCHING_PATH) ?? []).some((d) => d.code === "operation/operation-id")).toBe(false);
   });
 });
 
@@ -202,7 +202,7 @@ describe("robust re-lint on config edits", () => {
 
   test("(a) editing the config to invalid JSONC keeps the last-good project loaded, not crashing", async () => {
     const fs = new InMemoryFileSystem(
-      reloadProjectFiles(`{ "entries": ["openapi.yaml"], "lint": { "rules": { "operation-operationId": "off" } } }`),
+      reloadProjectFiles(`{ "entries": ["openapi.yaml"], "lint": { "rules": { "operation/operation-id": "off" } } }`),
     );
     const ctx = createServerContext(fs);
     await scanWorkspaceRootsForProjects(ctx, [CFG_ROOT]);
@@ -210,7 +210,7 @@ describe("robust re-lint on config edits", () => {
     const before = ctx.projects.get(CFG_CONFIG_PATH);
     expect(before?.entryPaths).toEqual([CFG_ENTRY_PATH]);
     let byFile = await getDiagnosticsByFile(ctx, CFG_ENTRY_PATH);
-    expect((byFile.get(CFG_ENTRY_PATH) ?? []).some((d) => d.code === "operation-operationId")).toBe(false);
+    expect((byFile.get(CFG_ENTRY_PATH) ?? []).some((d) => d.code === "operation/operation-id")).toBe(false);
 
     // Mid-edit: syntactically invalid JSONC (e.g. a dangling comma while typing).
     fs.writeFile(CFG_CONFIG_PATH, `{ "entries": ["openapi.yaml"], "lint": { "rules": {,,, } }`);
@@ -221,25 +221,25 @@ describe("robust re-lint on config edits", () => {
     // ...but the *stored* project state (used to serve diagnostics) is untouched: last-good.
     expect(ctx.projects.get(CFG_CONFIG_PATH)?.entryPaths).toEqual([CFG_ENTRY_PATH]);
     byFile = await getDiagnosticsByFile(ctx, CFG_ENTRY_PATH);
-    expect((byFile.get(CFG_ENTRY_PATH) ?? []).some((d) => d.code === "operation-operationId")).toBe(false);
+    expect((byFile.get(CFG_ENTRY_PATH) ?? []).some((d) => d.code === "operation/operation-id")).toBe(false);
   });
 
   test("(b) editing rules severities only re-publishes diagnostics for already-open documents without editing them", async () => {
     const fs = new InMemoryFileSystem(
-      reloadProjectFiles(`{ "entries": ["openapi.yaml"], "lint": { "rules": { "operation-operationId": "off" } } }`),
+      reloadProjectFiles(`{ "entries": ["openapi.yaml"], "lint": { "rules": { "operation/operation-id": "off" } } }`),
     );
     const ctx = createServerContext(fs);
     await scanWorkspaceRootsForProjects(ctx, [CFG_ROOT]);
 
     let byFile = await getDiagnosticsByFile(ctx, CFG_ENTRY_PATH);
-    expect((byFile.get(CFG_ENTRY_PATH) ?? []).some((d) => d.code === "operation-operationId")).toBe(false);
+    expect((byFile.get(CFG_ENTRY_PATH) ?? []).some((d) => d.code === "operation/operation-id")).toBe(false);
 
     // Only the config changes; the entry document's own text is untouched.
-    fs.writeFile(CFG_CONFIG_PATH, `{ "entries": ["openapi.yaml"], "lint": { "rules": { "operation-operationId": "error" } } }`);
+    fs.writeFile(CFG_CONFIG_PATH, `{ "entries": ["openapi.yaml"], "lint": { "rules": { "operation/operation-id": "error" } } }`);
     await loadProjectAtPath(ctx, CFG_CONFIG_PATH);
 
     byFile = await getDiagnosticsByFile(ctx, CFG_ENTRY_PATH);
-    expect((byFile.get(CFG_ENTRY_PATH) ?? []).some((d) => d.code === "operation-operationId")).toBe(true);
+    expect((byFile.get(CFG_ENTRY_PATH) ?? []).some((d) => d.code === "operation/operation-id")).toBe(true);
   });
 
   test("(c) editing an override's glob re-publishes diagnostics immediately", async () => {
@@ -247,7 +247,7 @@ describe("robust re-lint on config edits", () => {
     const files: Record<string, string> = {
       [CFG_CONFIG_PATH]: JSON.stringify({
         entries: ["openapi.yaml"],
-        lint: { overrides: [{ files: ["nomatch/**"], rules: { "operation-operationId": "off" } }] },
+        lint: { overrides: [{ files: ["nomatch/**"], rules: { "operation/operation-id": "off" } }] },
       }),
       [CFG_ENTRY_PATH]: `openapi: 3.1.0\ninfo:\n  title: Test\n  version: "1.0.0"\npaths:\n  /pets:\n    $ref: './paths/pets.yaml'\n`,
       [fragmentPath]: FRAGMENT_TEXT_UNSUPPRESSED,
@@ -257,20 +257,20 @@ describe("robust re-lint on config edits", () => {
     await scanWorkspaceRootsForProjects(ctx, [CFG_ROOT]);
 
     let byFile = await getDiagnosticsByFile(ctx, CFG_ENTRY_PATH);
-    expect((byFile.get(fragmentPath) ?? []).some((d) => d.code === "operation-operationId")).toBe(true);
+    expect((byFile.get(fragmentPath) ?? []).some((d) => d.code === "operation/operation-id")).toBe(true);
 
     // Widen the glob so it now matches the fragment; the fragment file itself is never touched.
     fs.writeFile(
       CFG_CONFIG_PATH,
       JSON.stringify({
         entries: ["openapi.yaml"],
-        lint: { overrides: [{ files: ["paths/**"], rules: { "operation-operationId": "off" } }] },
+        lint: { overrides: [{ files: ["paths/**"], rules: { "operation/operation-id": "off" } }] },
       }),
     );
     await loadProjectAtPath(ctx, CFG_CONFIG_PATH);
 
     byFile = await getDiagnosticsByFile(ctx, CFG_ENTRY_PATH);
-    expect((byFile.get(fragmentPath) ?? []).some((d) => d.code === "operation-operationId")).toBe(false);
+    expect((byFile.get(fragmentPath) ?? []).some((d) => d.code === "operation/operation-id")).toBe(false);
   });
 
   test("(d) rapid successive config edits converge to the last edit, not a stale intermediate one", async () => {
@@ -285,9 +285,9 @@ describe("robust re-lint on config edits", () => {
     // correctness property that matters; each reload reads whatever `fs` currently holds when it
     // runs, so out-of-order completion can't leave a stale intermediate result behind.
     const edits = [
-      `{ "entries": ["openapi.yaml"], "lint": { "rules": { "operation-operationId": "off" } } }`,
-      `{ "entries": ["openapi.yaml"], "lint": { "rules": { "operation-operationId": "warn" } } }`,
-      `{ "entries": ["openapi.yaml"], "lint": { "rules": { "operation-operationId": "error" } } }`,
+      `{ "entries": ["openapi.yaml"], "lint": { "rules": { "operation/operation-id": "off" } } }`,
+      `{ "entries": ["openapi.yaml"], "lint": { "rules": { "operation/operation-id": "warn" } } }`,
+      `{ "entries": ["openapi.yaml"], "lint": { "rules": { "operation/operation-id": "error" } } }`,
     ];
     let reloads: Promise<unknown>[] = [];
     for (const text of edits) {
@@ -297,7 +297,7 @@ describe("robust re-lint on config edits", () => {
     await Promise.all(reloads);
 
     const byFile = await getDiagnosticsByFile(ctx, CFG_ENTRY_PATH);
-    const diag = (byFile.get(CFG_ENTRY_PATH) ?? []).find((d) => d.code === "operation-operationId");
+    const diag = (byFile.get(CFG_ENTRY_PATH) ?? []).find((d) => d.code === "operation/operation-id");
     expect(diag).toBeDefined();
     expect(diag?.severity).toBe(1); // DiagnosticSeverity.Error: the last edit's severity.
   });
@@ -321,7 +321,7 @@ describe("resolveConfigForEntry: single source of truth for config resolution", 
     const docPath = `${RES_ROOT}/sub/openapi.yaml`;
     const ctx = createServerContext(
       new InMemoryFileSystem({
-        [outerConfigPath]: `{ "lint": { "rules": { "operation-operationId": "off" } } }`,
+        [outerConfigPath]: `{ "lint": { "rules": { "operation/operation-id": "off" } } }`,
         [innerConfigPath]: `{ "lint": { "rules": {,,, } }`, // invalid JSONC
         [docPath]: `openapi: 3.1.0\ninfo:\n  title: T\n  version: "1.0.0"\npaths: {}\n`,
       }),
@@ -380,7 +380,7 @@ describe("resolveConfigForEntry: single source of truth for config resolution", 
     const configPath = `${RES_ROOT}/cache/oasis.config.jsonc`;
     const docPath = `${RES_ROOT}/cache/openapi.yaml`;
     const fs = new InMemoryFileSystem({
-      [configPath]: `{ "lint": { "rules": { "operation-operationId": "off" } } }`,
+      [configPath]: `{ "lint": { "rules": { "operation/operation-id": "off" } } }`,
       [docPath]: `openapi: 3.1.0\ninfo:\n  title: T\n  version: "1.0.0"\npaths: {}\n`,
     });
     const ctx = createServerContext(fs);
@@ -390,7 +390,7 @@ describe("resolveConfigForEntry: single source of truth for config resolution", 
 
     // Rewrite the config directly on the filesystem without going through `loadProjectAtPath` (no
     // didChange simulated): the cache should still serve the stale, already-resolved answer.
-    fs.writeFile(configPath, `{ "lint": { "rules": { "operation-operationId": "error" } } }`);
+    fs.writeFile(configPath, `{ "lint": { "rules": { "operation/operation-id": "error" } } }`);
     const second = await resolveConfigForEntry(ctx, docPath);
     expect(second).toBe(first); // same cached object, not re-read
 
@@ -399,7 +399,7 @@ describe("resolveConfigForEntry: single source of truth for config resolution", 
     await loadProjectAtPath(ctx, configPath);
     expect(ctx.standaloneConfigCache.has(docPath)).toBe(false);
     const third = await resolveConfigForEntry(ctx, docPath);
-    expect(third.configFile).toEqual({ lint: { rules: { "operation-operationId": "error" } } });
+    expect(third.configFile).toEqual({ lint: { rules: { "operation/operation-id": "error" } } });
   });
 
   test("finding 1: editing an override-only config (no `entries`) is tracked for standalone re-validation via openStandaloneEntries", async () => {
@@ -412,7 +412,7 @@ describe("resolveConfigForEntry: single source of truth for config resolution", 
     const standaloneText = `openapi: 3.1.0\ninfo:\n  title: T\n  version: "1.0.0"\npaths:\n  /pets:\n    get:\n      tags: [pets]\n      description: List pets.\n      responses:\n        '200':\n          description: OK\n`;
     const ctx = createServerContext(
       new InMemoryFileSystem({
-        [overrideConfigPath]: `{ "lint": { "rules": { "operation-operationId": "off" } } }`,
+        [overrideConfigPath]: `{ "lint": { "rules": { "operation/operation-id": "off" } } }`,
         [standalonePath]: standaloneText,
       }),
     );
@@ -422,17 +422,17 @@ describe("resolveConfigForEntry: single source of truth for config resolution", 
     expect(ctx.openStandaloneEntries.has(standalonePath)).toBe(true);
 
     let byFile = await getDiagnosticsByFile(ctx, standalonePath);
-    expect((byFile.get(standalonePath) ?? []).some((d) => d.code === "operation-operationId")).toBe(false);
+    expect((byFile.get(standalonePath) ?? []).some((d) => d.code === "operation/operation-id")).toBe(false);
 
     // The config file itself changes (as `didChange`/`didChangeWatchedFiles` on it would drive);
     // loadProjectAtPath returns undefined (still no entries), but the standalone doc's cached
     // resolution must still be invalidated.
-    (ctx.fileSystem as InMemoryFileSystem).writeFile(overrideConfigPath, `{ "lint": { "rules": { "operation-operationId": "error" } } }`);
+    (ctx.fileSystem as InMemoryFileSystem).writeFile(overrideConfigPath, `{ "lint": { "rules": { "operation/operation-id": "error" } } }`);
     const after = await loadProjectAtPath(ctx, overrideConfigPath);
     expect(after).toBeUndefined(); // still no entries: not a registered project
     expect(ctx.standaloneConfigCache.has(standalonePath)).toBe(false); // invalidated regardless
 
     byFile = await getDiagnosticsByFile(ctx, standalonePath);
-    expect((byFile.get(standalonePath) ?? []).some((d) => d.code === "operation-operationId")).toBe(true);
+    expect((byFile.get(standalonePath) ?? []).some((d) => d.code === "operation/operation-id")).toBe(true);
   });
 });

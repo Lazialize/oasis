@@ -151,6 +151,6 @@ paths:
 
     expect(Array.isArray(publish.params.diagnostics)).toBe(true);
     expect(publish.params.diagnostics.length).toBeGreaterThan(0);
-    expect(publish.params.diagnostics.some((d: { code?: string }) => d.code === "no-unresolved-ref")).toBe(true);
+    expect(publish.params.diagnostics.some((d: { code?: string }) => d.code === "refs/no-unresolved")).toBe(true);
   }, 20000);
 });

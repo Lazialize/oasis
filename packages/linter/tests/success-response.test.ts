@@ -13,34 +13,34 @@ async function lintFixture(relativePath: string) {
   return lint(graph, config);
 }
 
-describe("operation-success-response", () => {
+describe("operation/success-response", () => {
   test("flags an operation with only a non-2xx/3xx response", async () => {
     const diagnostics = await lintFixture("success-response/no-success.yaml");
-    const d = diagnostics.find((d) => d.rule === "operation-success-response");
+    const d = diagnostics.find((d) => d.rule === "operation/success-response");
     expect(d).toBeDefined();
-    expect(d?.severity).toBe("warning");
+    expect(d?.severity).toBe("warn");
   });
 
   test('flags an operation with only a "default" response', async () => {
     const diagnostics = await lintFixture("success-response/default-only.yaml");
-    const d = diagnostics.find((d) => d.rule === "operation-success-response");
+    const d = diagnostics.find((d) => d.rule === "operation/success-response");
     expect(d).toBeDefined();
   });
 
   test('accepts a "2XX" range key', async () => {
     const diagnostics = await lintFixture("success-response/range.yaml");
-    expect(diagnostics.some((d) => d.rule === "operation-success-response")).toBe(false);
+    expect(diagnostics.some((d) => d.rule === "operation/success-response")).toBe(false);
   });
 
   test("flags a violation in a referenced (non-entry) file", async () => {
     const diagnostics = await lintFixture("success-response/multifile/entry.yaml");
-    const d = diagnostics.find((d) => d.rule === "operation-success-response");
+    const d = diagnostics.find((d) => d.rule === "operation/success-response");
     expect(d).toBeDefined();
     expect(d?.range.filePath).toBe(`${fixturesRoot}/success-response/multifile/paths-pets.yaml`);
   });
 
   test("valid fixture passes", async () => {
     const diagnostics = await lintFixture("valid/openapi.yaml");
-    expect(diagnostics.some((d) => d.rule === "operation-success-response")).toBe(false);
+    expect(diagnostics.some((d) => d.rule === "operation/success-response")).toBe(false);
   });
 });

@@ -13,7 +13,7 @@ describe("multi-file lint", () => {
     const config = resolveConfig(undefined);
     const diagnostics = lint(graph, config);
 
-    const d = diagnostics.find((d) => d.rule === "operation-operationId");
+    const d = diagnostics.find((d) => d.rule === "operation/operation-id");
     expect(d).toBeDefined();
     expect(d?.range.filePath).toBe(`${fixturesRoot}/multifile/paths-pets.yaml`);
     expect(d?.range.filePath).not.toBe(entry);
