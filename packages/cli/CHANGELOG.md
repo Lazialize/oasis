@@ -1,5 +1,15 @@
 # @oasis/cli
 
+## 0.7.0
+
+### Patch Changes
+
+- Updated dependencies [[`7d5b7e5`](https://github.com/Lazialize/oasis/commit/7d5b7e500c24bd368a03f5273861c5585ee02d55), [`68e50b0`](https://github.com/Lazialize/oasis/commit/68e50b00ac7f3243e837f0322cd9ab67fba88a68), [`a8fd19e`](https://github.com/Lazialize/oasis/commit/a8fd19e0659843e7eb925b593b2e72606569d44a), [`49e3f93`](https://github.com/Lazialize/oasis/commit/49e3f933064e2cb5cd8542d7960ce4a635f905b9)]:
+  - @oasis/server@0.7.0
+  - @oasis/bundler@0.7.0
+  - @oasis/core@0.7.0
+  - @oasis/linter@0.7.0
+
 ## 0.6.0
 
 ### Minor Changes
