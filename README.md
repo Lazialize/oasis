@@ -62,6 +62,7 @@ Lints one or more OpenAPI documents, following `$ref`s across files. Diagnostics
 ```sh
 oasis lint openapi.yaml
 oasis lint openapi.yaml --format json     # machine-readable output
+oasis lint openapi.yaml --format sarif    # SARIF 2.1.0, for GitHub Code Scanning (see below)
 oasis lint openapi.yaml --config path/to/oasis.config.jsonc
 ```
 
@@ -80,6 +81,38 @@ normal output rather than a crash; the other entries still lint. If every declar
 nothing, that's also a usage error.
 
 Exit code is `1` if any error-severity diagnostic is reported, `0` otherwise, `2` on usage/config errors.
+
+#### GitHub Code Scanning / Actions
+
+`--format sarif` emits a [SARIF 2.1.0](https://sarifweb.azurewebsites.net/) log on stdout, suitable
+for upload to GitHub Code Scanning via
+[`github/codeql-action/upload-sarif`](https://github.com/github/codeql-action/tree/main/upload-sarif):
+
+```yaml
+name: lint
+on: [push, pull_request]
+jobs:
+  oasis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download oasis
+        run: |
+          curl -L -o oasis.tar.gz https://github.com/Lazialize/oasis/releases/latest/download/oasis-linux-x64.tar.gz
+          tar -xzf oasis.tar.gz
+      - name: Lint (SARIF)
+        run: ./oasis lint openapi.yaml --format sarif > oasis.sarif || true
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: oasis.sarif
+```
+
+`oasis lint` exits `1` when it finds any error, which would otherwise fail the job before the SARIF
+upload step runs. The `|| true` above swallows that exit code so the upload always happens; the
+trade-off is that the job goes green even with lint errors; findings surface instead in the repo's
+Code Scanning tab (and, on PRs, as annotations). If you'd rather keep the job red on lint errors
+while still uploading, replace `|| true` with `continue-on-error: true` on the lint step and add a
+separate step afterwards that re-runs `oasis lint` (or checks its exit code) to fail the job.
 
 #### Built-in rules
 

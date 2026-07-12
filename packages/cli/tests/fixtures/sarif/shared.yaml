@@ -1,0 +1,7 @@
+components:
+  schemas:
+    Pet:
+      type: [string, "null"]
+      properties:
+        name:
+          type: string

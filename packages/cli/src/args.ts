@@ -1,20 +1,20 @@
 export interface ParsedLintArgs {
   entries: string[];
   configPath?: string;
-  format: "pretty" | "json";
+  format: "pretty" | "json" | "sarif";
 }
 
 export type ParseResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
 /**
- * Parse arguments for `oasis lint [entry...] [--config path] [--format pretty|json]`.
+ * Parse arguments for `oasis lint [entry...] [--config path] [--format pretty|json|sarif]`.
  * Entries are optional: with none given, the caller falls back to `entries` declared in a
  * discovered `oasis.config.jsonc` (see `runLintCommand`).
  */
 export function parseLintArgs(args: string[]): ParseResult<ParsedLintArgs> {
   const entries: string[] = [];
   let configPath: string | undefined;
-  let format: "pretty" | "json" = "pretty";
+  let format: "pretty" | "json" | "sarif" = "pretty";
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -24,8 +24,8 @@ export function parseLintArgs(args: string[]): ParseResult<ParsedLintArgs> {
       configPath = value;
     } else if (arg === "--format") {
       const value = args[++i];
-      if (value !== "pretty" && value !== "json") {
-        return { ok: false, error: '--format must be "pretty" or "json"' };
+      if (value !== "pretty" && value !== "json" && value !== "sarif") {
+        return { ok: false, error: '--format must be "pretty", "json", or "sarif"' };
       }
       format = value;
     } else if (arg?.startsWith("--")) {

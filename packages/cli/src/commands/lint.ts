@@ -5,6 +5,7 @@ import type { LintDiagnostic } from "@oasis/linter";
 import { parseLintArgs } from "../args.ts";
 import { renderJson } from "../render/json.ts";
 import { renderPretty } from "../render/pretty.ts";
+import { renderSarif } from "../render/sarif.ts";
 
 export interface RunLintOptions {
   stdout: (text: string) => void;
@@ -81,7 +82,9 @@ export async function runLintCommand(args: string[], io: RunLintOptions): Promis
     diagnostics.push(...lint(graph, resolved, { configPath: loaded.path }));
   }
 
-  io.stdout(format === "json" ? renderJson(diagnostics) : renderPretty(diagnostics));
+  const rendered =
+    format === "json" ? renderJson(diagnostics) : format === "sarif" ? renderSarif(diagnostics) : renderPretty(diagnostics);
+  io.stdout(rendered);
   io.stdout("\n");
 
   return diagnostics.some((d) => d.severity === "error") ? 1 : 0;

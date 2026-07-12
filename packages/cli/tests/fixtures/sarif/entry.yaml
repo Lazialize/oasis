@@ -1,0 +1,16 @@
+openapi: 3.0.3
+info:
+  title: SARIF Fixture
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      tags: [pets]
+      description: List pets.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: './shared.yaml#/components/schemas/Pet'
