@@ -14,7 +14,7 @@ export async function runBundleCommand(args: string[], io: RunBundleOptions): Pr
     io.stderr(`oasis bundle: ${parsed.error}\n`);
     return 2;
   }
-  const { entry, outPath, format: explicitFormat } = parsed.value;
+  const { entry, outPath, format: explicitFormat, dereference } = parsed.value;
 
   const format = explicitFormat ?? (outPath && extname(outPath).toLowerCase() === ".json" ? "json" : "yaml");
 
@@ -39,7 +39,7 @@ export async function runBundleCommand(args: string[], io: RunBundleOptions): Pr
     return 2;
   }
 
-  const result = bundle(graph, { format });
+  const result = bundle(graph, { format, dereference });
 
   for (const d of result.diagnostics) {
     io.stderr(

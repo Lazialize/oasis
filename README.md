@@ -291,11 +291,23 @@ Bundles a multi-file document into a single one.
 oasis bundle openapi.yaml                  # YAML to stdout
 oasis bundle openapi.yaml -o dist/openapi.json   # format inferred from extension
 oasis bundle openapi.yaml --format json
+oasis bundle openapi.yaml --dereference
 ```
 
 - External `$ref`s are lifted into `components/*` and rewritten to `#/components/...`; the same target is lifted once, and name conflicts are resolved deterministically (`User`, `User_2`, …)
 - Path Item `$ref`s (`paths: { /users: { $ref: './paths/users.yaml' } }`) are inlined in place — 3.0 has no `components/pathItems`, and the same strategy is used for 3.1 for consistency
 - Reference cycles terminate correctly; unresolved refs are kept verbatim with a warning
+
+**`--dereference`**: instead of lifting external `$ref`s into `components/*`, every `$ref` — internal
+(`#/components/...`) and external — is replaced in place with a deep copy of its resolved target,
+recursively, producing a document with no `$ref`s at all wherever possible. Components that are
+only reachable through a (now-inlined) `$ref` are dropped from the output; components not
+reachable from anywhere are kept verbatim, and so are entries that turn out to be part of a
+reference cycle. A `$ref` cannot be inlined at the point where its expansion would revisit a
+target already being expanded (a cycle): that occurrence is left as a `$ref` to a minimal
+`components/*` entry kept for the cycle's target, and a warning diagnostic is emitted naming the
+cycle. The result: fully self-contained except for reference cycles, which keep minimal
+`components` entries.
 
 ### `oasis lsp`
 

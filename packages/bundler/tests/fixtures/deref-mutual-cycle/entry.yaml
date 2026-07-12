@@ -1,0 +1,17 @@
+openapi: 3.0.3
+info:
+  title: Dereference Mutual Cycle
+  version: "1.0.0"
+paths:
+  /a:
+    get:
+      operationId: getA
+      tags: [a]
+      description: Get A.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: './a.yaml#/components/schemas/A'

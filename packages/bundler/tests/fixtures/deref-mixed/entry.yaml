@@ -1,0 +1,43 @@
+openapi: 3.0.3
+info:
+  title: Dereference Mixed
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      tags: [pets]
+      description: List pets.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: './shared.yaml#/components/schemas/Pet'
+  /nodes:
+    get:
+      operationId: listNodes
+      tags: [nodes]
+      description: List nodes.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Node'
+components:
+  schemas:
+    Node:
+      type: object
+      properties:
+        value:
+          type: string
+        next:
+          $ref: '#/components/schemas/Node'
+    Extra:
+      type: object
+      properties:
+        note:
+          type: string
