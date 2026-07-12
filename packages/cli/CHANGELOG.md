@@ -1,5 +1,71 @@
 # @oasis/cli
 
+## 0.8.0
+
+### Minor Changes
+
+- [#14](https://github.com/Lazialize/oasis/pull/14) [`e7bc9c4`](https://github.com/Lazialize/oasis/commit/e7bc9c42099913a43a3449162f3ded39fadba011) Thanks [@Lazialize](https://github.com/Lazialize)! - Breaking changes taken during the pre-1.0 "last window" (see ROADMAP.md's "Definition of 1.0":
+  rule names and diagnostic output are frozen at 1.0). If you're pinned to a specific version, read
+  this before upgrading:
+
+  - **Severity token**: emitted diagnostics now carry `"warn"` instead of `"warning"` (JSON output,
+    pretty output, and the LSP's internal severity mapping). Config already used `"warn"` — this
+    only affects code that reads the _emitted_ severity string (e.g. `--format json` consumers).
+    SARIF `level` is unaffected (`"warning"` is fixed by the SARIF spec).
+  - **Rule renames**: most non-`structure/*` built-in rules are now namespaced, matching
+    `structure/*`'s existing `<namespace>/<leaf>` shape. There are no aliases — old names in
+    `oasis.config.jsonc` or `# oasis-disable-*` comments now produce an "unknown rule" config
+    warning instead of applying. Update any config, suppression comments, or tooling that references
+    a rule by name:
+
+    | Old name                     | New name                     |
+    | ---------------------------- | ---------------------------- |
+    | `no-duplicate-keys`          | `syntax/no-duplicate-keys`   |
+    | `no-unresolved-ref`          | `refs/no-unresolved`         |
+    | `no-ref-cycle`               | `refs/no-cycle`              |
+    | `operation-operationId`      | `operation/operation-id`     |
+    | `operation-tags`             | `operation/tags`             |
+    | `operation-description`      | `operation/description`      |
+    | `operation-success-response` | `operation/success-response` |
+    | `path-params-defined`        | `paths/params-defined`       |
+    | `no-duplicate-paths`         | `paths/no-duplicates`        |
+    | `no-unused-components`       | `components/no-unused`       |
+    | `security-defined`           | `security/defined`           |
+    | `tags-defined`               | `tags/defined`               |
+    | `no-unused-tags`             | `tags/no-unused`             |
+    | `naming-convention`          | `style/naming-convention`    |
+    | `example-schema-match`       | `examples/schema-match`      |
+
+  - **`oasis/config`**: diagnostics about the configuration or invocation itself (an unknown rule
+    name, a declared `entries` path that doesn't exist, …) now use the reserved rule id
+    `"oasis/config"` instead of `"config"`. It isn't a real rule — it can't be configured or
+    suppressed.
+  - **JSON output `file` path**: `oasis lint --format json` now emits `file` relative to
+    `process.cwd()` (forward-slashed) when the diagnostic's file is inside the working directory,
+    falling back to an absolute path otherwise — matching the existing SARIF `--format sarif`
+    behavior. Previously this was always an absolute path. Pretty output (the default) changed the
+    same way for consistency.
+
+  Additive, non-breaking in this same release:
+
+  - `oasis lint --help`/`-h` and `oasis bundle --help`/`-h` now print per-command usage and exit 0
+    instead of failing with "Unknown flag".
+  - Pretty output's summary line now includes the info count alongside errors/warnings.
+
+- [#14](https://github.com/Lazialize/oasis/pull/14) [`134c8cb`](https://github.com/Lazialize/oasis/commit/134c8cb4dee217c8e6ce06bfbaaaef078ba0f3d9) Thanks [@Lazialize](https://github.com/Lazialize)! - The release workflow now publishes the VS Code extension to the Marketplace (`vsce publish
+--packagePath`, gated on a `VSCE_PAT` secret) and updates the `Lazialize/homebrew-oasis` tap's
+  `Formula/oasis.rb` from the release binaries (gated on a `HOMEBREW_TAP_TOKEN` secret) after each
+  GitHub Release. Removed `"private": true` from `editors/vscode/package.json`, which was blocking
+  Marketplace publishing. See `docs/releasing.md` for the secrets these steps require.
+
+### Patch Changes
+
+- Updated dependencies [[`e7bc9c4`](https://github.com/Lazialize/oasis/commit/e7bc9c42099913a43a3449162f3ded39fadba011)]:
+  - @oasis/core@0.8.0
+  - @oasis/linter@0.8.0
+  - @oasis/bundler@0.8.0
+  - @oasis/server@0.8.0
+
 ## 0.7.0
 
 ### Patch Changes
