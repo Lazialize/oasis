@@ -12,6 +12,7 @@ import type {
   DocumentSymbol,
   CompletionItem as LspCompletionItem,
   InitializeParams,
+  SymbolInformation,
 } from "vscode-languageserver";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { URI } from "vscode-uri";
@@ -19,12 +20,15 @@ import { parseDocument } from "@oasis/core";
 import type { Range } from "@oasis/core";
 import { getCodeActions } from "./handlers/code-actions.ts";
 import { getDefinition } from "./handlers/definition.ts";
+import { getDocumentLinks } from "./handlers/document-link.ts";
 import { getHover } from "./handlers/hover.ts";
 import { getCompletions } from "./handlers/completion.ts";
 import { getDocumentSymbols } from "./handlers/document-symbol.ts";
 import { getReferences } from "./handlers/references.ts";
 import { prepareRename, renameComponent } from "./handlers/rename.ts";
+import { getWorkspaceSymbols } from "./handlers/workspace-symbol.ts";
 import type { SymbolNodeKind, SymbolResult } from "./handlers/document-symbol.ts";
+import type { WorkspaceSymbolKind } from "./handlers/workspace-symbol.ts";
 import { getDiagnosticsByFile, toLspRange } from "./diagnostics.ts";
 import { routeDocument } from "./document-routing.ts";
 import { OverlayFileSystem } from "./overlay-fs.ts";
@@ -65,6 +69,15 @@ const SYMBOL_KIND_MAP: Record<SymbolNodeKind, LspSymbolKind> = {
   operation: LspSymbolKind.Method,
   object: LspSymbolKind.Object,
   info: LspSymbolKind.Namespace,
+};
+
+const WORKSPACE_SYMBOL_KIND_MAP: Record<WorkspaceSymbolKind, LspSymbolKind> = {
+  class: LspSymbolKind.Class,
+  variable: LspSymbolKind.Variable,
+  interface: LspSymbolKind.Interface,
+  key: LspSymbolKind.Key,
+  method: LspSymbolKind.Method,
+  object: LspSymbolKind.Object,
 };
 
 function toLspSymbol(symbol: SymbolResult): DocumentSymbol {
@@ -235,6 +248,8 @@ export function startServer(): Connection {
         referencesProvider: true,
         renameProvider: { prepareProvider: true },
         codeActionProvider: { codeActionKinds: ["quickfix", "refactor.extract"] },
+        documentLinkProvider: {},
+        workspaceSymbolProvider: true,
       },
     };
   });
@@ -350,6 +365,24 @@ export function startServer(): Connection {
         diagnostics: result.diagnosticIndex !== undefined ? [params.context.diagnostics[result.diagnosticIndex]!] : undefined,
         isPreferred: result.isPreferred,
         edit: { changes: groupEditsByUri(result.edits) },
+      }),
+    );
+  });
+
+  connection.onDocumentLinks(async (params) => {
+    const path = uriToPath(params.textDocument.uri);
+    const links = await getDocumentLinks(ctx, { path });
+    return links.map((link) => ({ range: toLspRange(link.range), target: pathToUri(link.targetPath) }));
+  });
+
+  connection.onWorkspaceSymbol((params): SymbolInformation[] => {
+    const results = getWorkspaceSymbols(ctx, params.query);
+    return results.map(
+      (result): SymbolInformation => ({
+        name: result.name,
+        kind: WORKSPACE_SYMBOL_KIND_MAP[result.kind],
+        containerName: result.containerName,
+        location: { uri: pathToUri(result.filePath), range: toLspRange(result.range) },
       }),
     );
   });

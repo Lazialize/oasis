@@ -319,6 +319,8 @@ Starts the language server on stdio. Normally launched by an editor, not by hand
 - **Completion** — keys valid at the cursor position (version-aware: 3.0 `nullable` vs 3.1 `const`/`webhooks`…), and `$ref` target suggestions from the whole workspace
 - **Document Symbols** — outline of paths/operations/components
 - **Find References / Rename** — from a component definition or any `$ref` pointing at it: every `$ref` across the graph, or a cross-file rename of the component and all its references
+- **Document Links** — `$ref` file paths are clickable, jumping straight to the target file
+- **Workspace Symbols** — search component definitions and operations (by `operationId`) across every loaded project graph and open document
 
 **Project mode:** an `oasis.config.jsonc` with an `entries` field defines a project — the server
 builds a workspace graph per entry and publishes diagnostics for every file in it immediately, no
