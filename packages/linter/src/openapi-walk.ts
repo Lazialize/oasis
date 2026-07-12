@@ -26,11 +26,38 @@ export interface PathItemInfo {
 }
 
 /**
+ * Per-graph memoization for the traversal helpers below. Many independent lint rules each call
+ * `iteratePathItems`/`iterateOperations`/`iterateSchemas`/`iterateMediaTypes` once per lint run,
+ * and every call re-walks the whole `paths`/`webhooks`/`components` tree from scratch. Since all
+ * of these are pure functions of `(graph, entryDoc, documents, version)` and `entryDoc`/`documents`
+ * are always derived consistently from `graph` by callers, results are cached per graph object
+ * (a `WeakMap` so entries are dropped once a graph is no longer referenced, e.g. after an LSP
+ * re-lint rebuilds the graph from an edited document).
+ */
+const walkCache = new WeakMap<WorkspaceGraph, Map<string, unknown>>();
+
+function cached<T>(graph: WorkspaceGraph, key: string, compute: () => T): T {
+  let perGraph = walkCache.get(graph);
+  if (!perGraph) {
+    perGraph = new Map();
+    walkCache.set(graph, perGraph);
+  }
+  if (perGraph.has(key)) return perGraph.get(key) as T;
+  const result = compute();
+  perGraph.set(key, result);
+  return result;
+}
+
+/**
  * Enumerate every entry of the entry document's top-level `paths` map, following a top-level $ref
  * if present. When `version` is "3.1", entries of the root `webhooks` map are included too (on
  * 3.0 documents `webhooks` is not a spec key; flagging it is left to structure rules).
  */
 export function iteratePathItems(graph: WorkspaceGraph, entryDoc: OasisDocument, version?: OpenApiVersion): PathItemInfo[] {
+  return cached(graph, `pathItems:${entryDoc.filePath}:${version}`, () => computeIteratePathItems(graph, entryDoc, version));
+}
+
+function computeIteratePathItems(graph: WorkspaceGraph, entryDoc: OasisDocument, version?: OpenApiVersion): PathItemInfo[] {
   const root = entryDoc.yamlDoc.contents;
   if (!isNode(root) || !isMap(root)) return [];
 
@@ -71,6 +98,10 @@ export interface OperationInfo {
  * operations under the root `webhooks` map are included (see `iteratePathItems`).
  */
 export function iterateOperations(graph: WorkspaceGraph, entryDoc: OasisDocument, version?: OpenApiVersion): OperationInfo[] {
+  return cached(graph, `operations:${entryDoc.filePath}:${version}`, () => computeIterateOperations(graph, entryDoc, version));
+}
+
+function computeIterateOperations(graph: WorkspaceGraph, entryDoc: OasisDocument, version?: OpenApiVersion): OperationInfo[] {
   const results: OperationInfo[] = [];
   for (const pathItem of iteratePathItems(graph, entryDoc, version)) {
     if (!isMap(pathItem.node)) continue;
@@ -107,6 +138,16 @@ export interface SchemaSite {
  * schema (properties, items, allOf, ...) is left to the caller.
  */
 export function iterateSchemas(
+  graph: WorkspaceGraph,
+  entryDoc: OasisDocument,
+  documents: OasisDocument[],
+  version?: OpenApiVersion,
+): SchemaSite[] {
+  const key = `schemas:${entryDoc.filePath}:${documents.length}:${version}`;
+  return cached(graph, key, () => computeIterateSchemas(graph, entryDoc, documents, version));
+}
+
+function computeIterateSchemas(
   graph: WorkspaceGraph,
   entryDoc: OasisDocument,
   documents: OasisDocument[],
@@ -242,6 +283,16 @@ export interface MediaTypeSite {
  * file + pointer.
  */
 export function iterateMediaTypes(
+  graph: WorkspaceGraph,
+  entryDoc: OasisDocument,
+  documents: OasisDocument[],
+  version?: OpenApiVersion,
+): MediaTypeSite[] {
+  const key = `mediaTypes:${entryDoc.filePath}:${documents.length}:${version}`;
+  return cached(graph, key, () => computeIterateMediaTypes(graph, entryDoc, documents, version));
+}
+
+function computeIterateMediaTypes(
   graph: WorkspaceGraph,
   entryDoc: OasisDocument,
   documents: OasisDocument[],

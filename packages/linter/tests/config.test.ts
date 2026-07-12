@@ -1,7 +1,15 @@
 import { describe, expect, test } from "bun:test";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { loadWorkspaceGraph, NodeFileSystem } from "@oasis/core";
 import { lint } from "../src/engine.ts";
-import { effectiveRuleConfig, findConfigUpward, loadConfig, resolveConfig, resolveEntries } from "../src/config.ts";
+import {
+  effectiveRuleConfig,
+  findConfigUpward,
+  isGlobPattern,
+  loadConfig,
+  resolveConfig,
+  resolveEntries,
+} from "../src/config.ts";
 import { rules } from "../src/rules/index.ts";
 import type { Rule, RuleContext } from "../src/types.ts";
 
@@ -242,5 +250,58 @@ describe("resolveEntries", () => {
     );
     expect(entries).toEqual([`${fixturesRoot}/config/target.yaml`, `${fixturesRoot}/config/nested/subdir`]);
     expect(warnings.length).toBe(1);
+  });
+
+  describe("glob patterns", () => {
+    const globRoot = `${fixturesRoot}/entries-glob`;
+
+    test("isGlobPattern recognizes glob metacharacters and rejects plain paths", () => {
+      expect(isGlobPattern("apis/**/openapi.yaml")).toBe(true);
+      expect(isGlobPattern("apis/*/openapi.yaml")).toBe(true);
+      expect(isGlobPattern("apis/openapi.yaml")).toBe(false);
+      expect(isGlobPattern("apis/a/openapi.yaml")).toBe(false);
+    });
+
+    test("expands a glob pattern to every matching file, sorted", () => {
+      const { entries, warnings } = resolveEntries({ entries: ["apis/*/openapi.yaml"] }, globRoot);
+      expect(entries).toEqual([`${globRoot}/apis/a/openapi.yaml`, `${globRoot}/apis/b/openapi.yaml`]);
+      expect(warnings).toEqual([]);
+    });
+
+    test("skips node_modules even when the pattern would otherwise match it", () => {
+      // A node_modules fixture can't be committed (gitignored), so create it on the fly.
+      mkdirSync(`${globRoot}/node_modules/apis/c`, { recursive: true });
+      writeFileSync(
+        `${globRoot}/node_modules/apis/c/openapi.yaml`,
+        `openapi: 3.0.3\ninfo:\n  title: C\n  version: "1.0.0"\npaths: {}\n`,
+      );
+
+      const { entries } = resolveEntries({ entries: ["**/openapi.yaml"] }, globRoot);
+      expect(entries).toEqual([`${globRoot}/apis/a/openapi.yaml`, `${globRoot}/apis/b/openapi.yaml`]);
+      expect(entries.some((e) => e.includes("node_modules"))).toBe(false);
+    });
+
+    test("a glob matching zero files produces the same warning treatment as a missing literal entry", () => {
+      const { entries, warnings } = resolveEntries({ entries: ["apis/*/does-not-exist.yaml"] }, globRoot);
+      expect(entries).toEqual([]);
+      expect(warnings.length).toBe(1);
+      expect(warnings[0]).toContain("apis/*/does-not-exist.yaml");
+      expect(warnings[0]).toContain("no files");
+    });
+
+    test("dedupes files matched by more than one pattern (literal + glob, or overlapping globs)", () => {
+      const { entries, warnings } = resolveEntries(
+        { entries: ["apis/a/openapi.yaml", "apis/*/openapi.yaml", "apis/**/openapi.yaml"] },
+        globRoot,
+      );
+      expect(entries).toEqual([`${globRoot}/apis/a/openapi.yaml`, `${globRoot}/apis/b/openapi.yaml`]);
+      expect(warnings).toEqual([]);
+    });
+
+    test("mixes literal and glob entries in declaration order", () => {
+      const { entries, warnings } = resolveEntries({ entries: ["apis/b/openapi.yaml", "apis/*/openapi.yaml"] }, globRoot);
+      expect(entries).toEqual([`${globRoot}/apis/b/openapi.yaml`, `${globRoot}/apis/a/openapi.yaml`]);
+      expect(warnings).toEqual([]);
+    });
   });
 });

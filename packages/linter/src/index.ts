@@ -14,7 +14,16 @@ export type {
   ResolvedRuleConfig,
   RuleConfigValue,
 } from "./config.ts";
-export { CONFIG_FILE_NAME, effectiveRuleConfig, findConfigUpward, loadConfig, resolveConfig, resolveEntries } from "./config.ts";
+export {
+  CONFIG_FILE_NAME,
+  effectiveRuleConfig,
+  expandGlobEntry,
+  findConfigUpward,
+  isGlobPattern,
+  loadConfig,
+  resolveConfig,
+  resolveEntries,
+} from "./config.ts";
 
 export { rules } from "./rules/index.ts";
 

@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { dirname, join, relative as pathRelative, resolve as pathResolve } from "node:path";
+import { dirname, join, relative as pathRelative, resolve as pathResolve, sep } from "node:path";
 import { parse as parseJsonc, type ParseError } from "jsonc-parser";
 import { rules } from "./rules/index.ts";
 import type { Rule, RuleSeverity } from "./types.ts";
@@ -219,21 +219,67 @@ export interface ResolvedEntries {
   warnings: string[];
 }
 
+const GLOB_META_RE = /[*?[{]/;
+
+/** Whether an `entries` string should be treated as a glob pattern rather than a literal path. */
+export function isGlobPattern(pattern: string): boolean {
+  return GLOB_META_RE.test(pattern);
+}
+
+/**
+ * Expand a glob `entries` pattern against `configDir` (the directory containing the config file)
+ * into absolute file paths, using a real filesystem scan (`Bun.Glob`). Symlinked directories are
+ * not followed, hidden (dot) files/dirs never match, and any match under a `node_modules`
+ * directory is skipped. Requires real disk access — see `resolveEntries` for why that's fine here.
+ */
+export function expandGlobEntry(pattern: string, configDir: string): string[] {
+  const glob = new Bun.Glob(pattern);
+  const matches: string[] = [];
+  for (const abs of glob.scanSync({ cwd: configDir, absolute: true, followSymlinks: false })) {
+    const rel = pathRelative(configDir, abs);
+    if (rel.split(sep).includes("node_modules")) continue;
+    matches.push(abs);
+  }
+  return matches.sort();
+}
+
 /**
  * Resolve `configFile.entries` (paths relative to `configDir`, the directory containing the
- * config file) into absolute paths. Missing files produce a warning rather than throwing; an
- * absent/empty `entries` field resolves to an empty list with no warnings.
+ * config file) into absolute paths. Entries may be literal paths or glob patterns (containing
+ * `* ? [ {`); glob patterns are expanded with `expandGlobEntry`. Missing literal files and globs
+ * that match nothing both produce a warning rather than throwing; an absent/empty `entries` field
+ * resolves to an empty list with no warnings. Files matched by more than one entry (literal or
+ * glob) are deduped, keeping the first occurrence's position.
  */
 export function resolveEntries(configFile: LintConfigFile | undefined, configDir: string): ResolvedEntries {
   const entries: string[] = [];
+  const seen = new Set<string>();
   const warnings: string[] = [];
+
   for (const raw of configFile?.entries ?? []) {
+    if (isGlobPattern(raw)) {
+      const matches = expandGlobEntry(raw, configDir);
+      if (matches.length === 0) {
+        warnings.push(`Entry glob "${raw}" in config matched no files (resolved against "${configDir}"); skipping.`);
+        continue;
+      }
+      for (const abs of matches) {
+        if (seen.has(abs)) continue;
+        seen.add(abs);
+        entries.push(abs);
+      }
+      continue;
+    }
+
     const abs = pathResolve(configDir, raw);
     if (!existsSync(abs)) {
       warnings.push(`Entry "${raw}" in config not found (resolved to "${abs}"); skipping.`);
       continue;
     }
+    if (seen.has(abs)) continue;
+    seen.add(abs);
     entries.push(abs);
   }
+
   return { entries, warnings };
 }

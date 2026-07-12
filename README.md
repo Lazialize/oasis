@@ -40,6 +40,21 @@ extension section below for `oasis.server.path`.
 
 ## Commands
 
+### `oasis init`
+
+Scaffolds an `oasis.config.jsonc` in the current directory:
+
+```sh
+oasis init
+```
+
+It scans the working directory (up to 2 levels deep, skipping `node_modules` and hidden
+directories) for YAML/JSON files whose root has an `openapi:` key and lists what it finds in the
+generated `entries`; with no documents found, `entries` is left as a commented-out placeholder.
+The generated file also contains an empty `lint.rules` block with commented example overrides.
+If an `oasis.config.jsonc` already exists in the directory, `oasis init` refuses to overwrite it
+and exits `2`.
+
 ### `oasis lint [entry...]`
 
 Lints one or more OpenAPI documents, following `$ref`s across files. Diagnostics in referenced files are attributed to those files.
@@ -47,6 +62,7 @@ Lints one or more OpenAPI documents, following `$ref`s across files. Diagnostics
 ```sh
 oasis lint openapi.yaml
 oasis lint openapi.yaml --format json     # machine-readable output
+oasis lint openapi.yaml --format sarif    # SARIF 2.1.0, for GitHub Code Scanning (see below)
 oasis lint openapi.yaml --config path/to/oasis.config.jsonc
 ```
 
@@ -60,10 +76,43 @@ oasis lint     # discovers oasis.config.jsonc and lints its "entries"
 
 This fails with a usage error (exit `2`) if no entry is given and no config is found, or if a
 config is found but has no (or an empty) `entries` list. An entry listed in `entries` that doesn't
-exist on disk is surfaced as a warning diagnostic in the normal output rather than a crash; the
-other entries still lint. If every declared entry is missing, that's also a usage error.
+exist on disk — or a glob entry that matches no files — is surfaced as a warning diagnostic in the
+normal output rather than a crash; the other entries still lint. If every declared entry yields
+nothing, that's also a usage error.
 
 Exit code is `1` if any error-severity diagnostic is reported, `0` otherwise, `2` on usage/config errors.
+
+#### GitHub Code Scanning / Actions
+
+`--format sarif` emits a [SARIF 2.1.0](https://sarifweb.azurewebsites.net/) log on stdout, suitable
+for upload to GitHub Code Scanning via
+[`github/codeql-action/upload-sarif`](https://github.com/github/codeql-action/tree/main/upload-sarif):
+
+```yaml
+name: lint
+on: [push, pull_request]
+jobs:
+  oasis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download oasis
+        run: |
+          curl -L -o oasis.tar.gz https://github.com/Lazialize/oasis/releases/latest/download/oasis-linux-x64.tar.gz
+          tar -xzf oasis.tar.gz
+      - name: Lint (SARIF)
+        run: ./oasis lint openapi.yaml --format sarif > oasis.sarif || true
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: oasis.sarif
+```
+
+`oasis lint` exits `1` when it finds any error, which would otherwise fail the job before the SARIF
+upload step runs. The `|| true` above swallows that exit code so the upload always happens; the
+trade-off is that the job goes green even with lint errors; findings surface instead in the repo's
+Code Scanning tab (and, on PRs, as annotations). If you'd rather keep the job red on lint errors
+while still uploading, replace `|| true` with `continue-on-error: true` on the lint step and add a
+separate step afterwards that re-runs `oasis lint` (or checks its exit code) to fail the job.
 
 #### Built-in rules
 
@@ -91,7 +140,7 @@ Exit code is `1` if any error-severity diagnostic is reported, `0` otherwise, `2
 | `operation-description` | warn | Operations have a `description` or `summary` |
 | `operation-success-response` | warn | Operations have at least one 2xx/3xx response (`default` alone doesn't count) |
 | `path-params-defined` | error | `{param}` templates ↔ `in: path` parameters agree; path params are `required` |
-| `no-unused-components` | warn | Components nothing references |
+| `no-unused-components` | warn | Components nothing references, by `$ref` or by name (`security` requirement scheme names, `discriminator.mapping` values) |
 | `no-duplicate-paths` | error | Path templates that are equivalent up to parameter names (`/users/{id}` vs `/users/{userId}`) |
 | `security-defined` | error | `security` requirement scheme names exist in `components/securitySchemes` |
 | `tags-defined` | off | Operation tags are declared in the root `tags` list |
@@ -224,11 +273,15 @@ overrides win over `lint.rules` wherever they match (even flipping a globally `"
 or vice versa, for just the matching files).
 
 `entries` is an optional list of entry-document paths, relative to the directory containing the
-config file. It's consumed by the LSP (see "project mode" below) and by `oasis lint` when run with
-no entry arguments (see above); `oasis lint`/`oasis bundle` given an explicit entry on the command
-line ignore this field, and `oasis bundle` never reads it (it always takes exactly one entry). An
-entry that doesn't exist on disk produces a config warning diagnostic rather than a crash; the
-field can be omitted entirely with no change in behavior.
+config file. An entry may also be a glob pattern (any string containing `*`, `?`, `[`, or `{`,
+e.g. `"apis/**/openapi.yaml"`), expanded against the config file's directory; symlinked
+directories are not followed, and hidden (dot) directories and `node_modules` never match. Files
+matched by more than one entry — literal or glob — are linted once. `entries` is consumed by the
+LSP (see "project mode" below) and by `oasis lint` when run with no entry arguments (see above);
+`oasis lint`/`oasis bundle` given an explicit entry on the command line ignore this field, and
+`oasis bundle` never reads it (it always takes exactly one entry). A literal entry that doesn't
+exist on disk, or a glob that matches no files, produces a config warning diagnostic rather than a
+crash; the field can be omitted entirely with no change in behavior.
 
 ### `oasis bundle <entry>`
 
@@ -326,7 +379,14 @@ bun test            # all package tests
 bunx tsc --noEmit   # typecheck (packages only; the extension has its own tsconfig)
 bun run build:bin   # compile the self-contained dist/oasis binary
 bun run test:bin    # exercise the compiled binary (lint/bundle/lsp), rebuilding it if missing
+bun run bench       # benchmark lint/bundle on synthetic multi-MB/multi-file specs
 ```
+
+`bun run bench` (`scripts/bench.ts`) generates two deterministic synthetic workloads into a temp
+directory — a large single-file spec (hundreds of paths, deep `allOf`/`oneOf` schema chains) and a
+100+ file `$ref`-linked workspace — then reports median wall-clock time for parse+graph load, a
+full lint, and a bundle. Use it after touching hot paths in `packages/core` or
+`packages/linter`'s rule engine to check for regressions on large documents.
 
 The VS Code extension is built separately with npm — see [editors/vscode/README.md](editors/vscode/README.md).
 
