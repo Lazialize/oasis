@@ -132,13 +132,8 @@ describe("bundle --dereference", () => {
     expect(errors).toEqual([]);
   });
 
-  test("determinism: bundling twice produces byte-identical output", async () => {
-    const graph1 = await loadFixture("deref-mixed");
-    const result1 = bundle(graph1, { dereference: true }).output;
-    const graph2 = await loadFixture("deref-mixed");
-    const result2 = bundle(graph2, { dereference: true }).output;
-    expect(result1).toBe(result2);
-  });
+  // Determinism (repeated bundles, key order, generated names) is covered comprehensively in
+  // determinism.test.ts, including a --dereference/YAML case using this same "deref-mixed" fixture.
 
   test("JSON output format round-trips", async () => {
     const graph = await loadFixture("deref-simple");

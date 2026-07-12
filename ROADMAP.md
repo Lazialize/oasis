@@ -56,8 +56,9 @@ Make "oasis lint passes" mean something strong.
 - `--dereference` mode: fully inline all refs into a self-contained document
   (cycles are an error, or truncated with a diagnostic).
 - Guarantee deterministic output (key order, generated component names) with tests.
-- Decide whether 3.1 output may optionally lift path items into `components/pathItems`
-  (inline-in-place stays the default either way).
+- Decided against optionally lifting 3.1 path items into `components/pathItems`: inline-in-place
+  remains the only strategy through 1.0, for uniform 3.0/3.1 behavior and zero added config
+  surface right before the API freeze (see DESIGN.md's bundler section). Revisit post-1.0.
 
 ## v0.7 — LSP & VS Code polish
 
