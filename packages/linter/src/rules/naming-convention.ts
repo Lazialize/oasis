@@ -1,7 +1,7 @@
 import { isMap, isNode, isScalar, isSeq } from "yaml";
 import type { Node } from "yaml";
 import type { OasisDocument } from "@oasis/core";
-import { iterateOperations, iteratePathItems } from "../openapi-walk.ts";
+import { iterateOperations, iteratePathItems, iterateSchemas } from "../openapi-walk.ts";
 import { childAt, keyToString, resolveMaybeRef } from "../util.ts";
 import type { Rule, RuleContext } from "../types.ts";
 
@@ -52,7 +52,7 @@ export function matchesCase(name: string, style: CasingStyle): boolean {
 }
 
 function checkOperationIds(ctx: RuleContext, style: CasingStyle): void {
-  for (const op of iterateOperations(ctx.graph, ctx.entryDoc)) {
+  for (const op of iterateOperations(ctx.graph, ctx.entryDoc, ctx.version)) {
     const idNode = childAt(op.node, "operationId");
     if (!idNode || !isScalar(idNode) || typeof idNode.value !== "string" || idNode.value === "") continue;
 
@@ -115,11 +115,11 @@ function collectParameterObjects(ctx: RuleContext): ParameterObject[] {
     });
   }
 
-  for (const pathItem of iteratePathItems(ctx.graph, ctx.entryDoc)) {
+  for (const pathItem of iteratePathItems(ctx.graph, ctx.entryDoc, ctx.version)) {
     if (!isMap(pathItem.node)) continue;
     addFromArray(pathItem.doc, childAt(pathItem.node, "parameters"), `${pathItem.pointer}/parameters`);
   }
-  for (const op of iterateOperations(ctx.graph, ctx.entryDoc)) {
+  for (const op of iterateOperations(ctx.graph, ctx.entryDoc, ctx.version)) {
     if (!isMap(op.node)) continue;
     addFromArray(op.doc, childAt(op.node, "parameters"), `${op.pointer}/parameters`);
   }
@@ -196,30 +196,25 @@ function walkSchemas(node: Node, visit: (schema: Node) => void, seen: Set<Node> 
 }
 
 function checkPropertyNames(ctx: RuleContext, style: CasingStyle): void {
-  for (const doc of ctx.documents) {
-    const root = doc.yamlDoc.contents;
-    if (!root || !isMap(root)) continue;
-    const componentsNode = childAt(root, "components");
-    if (!componentsNode || !isMap(componentsNode)) continue;
-    const schemasNode = childAt(componentsNode, "schemas");
-    if (!schemasNode || !isMap(schemasNode)) continue;
-
-    for (const pair of schemasNode.items) {
-      if (!isNode(pair.value)) continue;
-      walkSchemas(pair.value, (schema) => {
+  const seen = new Set<Node>();
+  for (const site of iterateSchemas(ctx.graph, ctx.entryDoc, ctx.documents, ctx.version)) {
+    walkSchemas(
+      site.node,
+      (schema) => {
         const properties = childAt(schema, "properties");
         if (!isMap(properties)) return;
         for (const propPair of properties.items) {
           const name = keyToString(propPair.key);
           if (!matchesCase(name, style)) {
             ctx.report(
-              { doc, node: isNode(propPair.key) ? propPair.key : properties },
+              { doc: site.doc, node: isNode(propPair.key) ? propPair.key : properties },
               `Property "${name}" is not ${style}.`,
             );
           }
         }
-      });
-    }
+      },
+      seen,
+    );
   }
 }
 

@@ -56,7 +56,7 @@ export const securityDefined: Rule = {
       if (rootSecurity) checkSecurityNode(ctx, ctx.entryDoc, rootSecurity, defined, "The document's root");
     }
 
-    for (const op of iterateOperations(ctx.graph, ctx.entryDoc)) {
+    for (const op of iterateOperations(ctx.graph, ctx.entryDoc, ctx.version)) {
       const opSecurity = childAt(op.node, "security");
       if (!opSecurity) continue;
       const label = `Operation "${op.method.toUpperCase()} ${op.pathItem.template}"`;

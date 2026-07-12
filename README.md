@@ -73,11 +73,11 @@ Exit code is `1` if any error-severity diagnostic is reported, `0` otherwise, `2
 | `structure/openapi-version` | error | `openapi` is a valid `3.0.x` / `3.1.x` string |
 | `structure/field-types` | error | Common objects have the right shapes (paths, operations, parameters, responses, components…) |
 | `structure/http-methods` | error | Only valid HTTP verbs / metadata keys under a path item |
-| `structure/schema-nullable` | error | 3.0: no `type` arrays / `null` type; 3.1: no `nullable` |
+| `structure/schema-nullable` | error | 3.0: no `type` arrays / `null` type; 3.1: no `nullable` — in every schema, including inline ones |
 | `no-duplicate-keys` | error | Duplicate mapping keys in YAML/JSON |
 | `no-unresolved-ref` | error | Every `$ref` resolves (missing files *and* missing pointers) |
 | `no-ref-cycle` | warn | Cross-file reference cycles |
-| `operation-operationId` | error | `operationId` present and unique across the workspace |
+| `operation-operationId` | error | `operationId` present and unique across the workspace (including 3.1 `webhooks`) |
 | `operation-tags` | warn | Operations have at least one tag |
 | `operation-description` | warn | Operations have a `description` or `summary` |
 | `operation-success-response` | warn | Operations have at least one 2xx/3xx response (`default` alone doesn't count) |
@@ -89,6 +89,13 @@ Exit code is `1` if any error-severity diagnostic is reported, `0` otherwise, `2
 | `no-unused-tags` | warn | Root `tags` list entries are used by at least one operation |
 | `naming-convention` | off | Configurable casing for operationIds, component names, parameter names, schema property names (see below) |
 | `example-schema-match` | warn | `example`/`examples[].value` values conform to their schema (Schema Object, Media Type Object, Parameter Object), version-aware |
+
+Operation-level rules (`operation-*`, `security-defined`, `tags-defined`, `naming-convention`,
+`example-schema-match`) also cover operations under the root `webhooks` map on 3.1 documents.
+Path-shaped rules (`path-params-defined`, `no-duplicate-paths`) apply to `paths` only — webhook
+keys are arbitrary names, not URL templates. Schema rules (`structure/schema-nullable`,
+`naming-convention` property names, `example-schema-match`) check every schema site: `components`
+entries plus inline request/response media types, parameters and headers.
 
 Syntax errors are always reported as errors and cannot be disabled.
 
