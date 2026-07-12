@@ -32,7 +32,13 @@ import type { WorkspaceSymbolKind } from "./handlers/workspace-symbol.ts";
 import { getDiagnosticsByFile, toLspRange } from "./diagnostics.ts";
 import { routeDocument } from "./document-routing.ts";
 import { OverlayFileSystem } from "./overlay-fs.ts";
-import { isConfigFilePath, loadConfigFilesFromInit, loadProjectAtPath, scanWorkspaceRootsForProjects } from "./project.ts";
+import {
+  isConfigFilePath,
+  loadConfigFilesFromInit,
+  loadProjectAtPath,
+  resolveConfigForEntry,
+  scanWorkspaceRootsForProjects,
+} from "./project.ts";
 import { createServerContext, invalidateGraph } from "./workspace.ts";
 
 const DEBOUNCE_MS = 250;
@@ -110,6 +116,10 @@ export function startServer(): Connection {
 
   const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const lastPublishedFiles = new Map<string, Set<string>>();
+  // The config path a standalone (non-project-member) entry last had a config warning published
+  // against, so a later validate() that resolves to no warning (or a different config path) can
+  // clear the stale one rather than leaving it to linger (see `resolveConfigForEntry`).
+  const standaloneConfigWarningPaths = new Map<string, string>();
 
   async function validate(entryPath: string): Promise<void> {
     const byFile = await getDiagnosticsByFile(ctx, entryPath);
@@ -123,6 +133,23 @@ export function startServer(): Connection {
       connection.sendDiagnostics({ uri: pathToUri(file), diagnostics });
     }
     lastPublishedFiles.set(entryPath, new Set(byFile.keys()));
+
+    // Standalone entries have no project registration to hang a config warning off of
+    // (`reloadProjectAtConfigPath` only runs for project config paths), so surface/clear the
+    // nearest-config resolution's own warnings (e.g. a parse error) here instead.
+    const resolved = await resolveConfigForEntry(ctx, entryPath);
+    const prevWarningPath = standaloneConfigWarningPaths.get(entryPath);
+    if (prevWarningPath && prevWarningPath !== resolved.configPath) {
+      publishConfigWarnings(prevWarningPath, []);
+      standaloneConfigWarningPaths.delete(entryPath);
+    }
+    if (resolved.configPath && resolved.warnings.length > 0) {
+      publishConfigWarnings(resolved.configPath, resolved.warnings);
+      standaloneConfigWarningPaths.set(entryPath, resolved.configPath);
+    } else if (resolved.configPath && prevWarningPath === resolved.configPath) {
+      publishConfigWarnings(resolved.configPath, []);
+      standaloneConfigWarningPaths.delete(entryPath);
+    }
   }
 
   /** Clear previously-published diagnostics for an entry whose project was unloaded (config
@@ -174,10 +201,16 @@ export function startServer(): Connection {
    * (`initializationOptions.configFiles`, e.g. VSCode's `findFiles`). Both dedupe naturally since
    * projects are keyed by resolved config path. */
   async function initializeProjects(): Promise<void> {
-    await scanWorkspaceRootsForProjects(ctx, workspaceRoots);
-    await loadConfigFilesFromInit(ctx, initConfigFiles);
-    for (const project of ctx.projects.values()) {
-      publishConfigWarnings(project.configPath, project.warnings);
+    const scanned = await scanWorkspaceRootsForProjects(ctx, workspaceRoots);
+    const fromInit = await loadConfigFilesFromInit(ctx, initConfigFiles);
+    // Publish warnings for every config `loadProjectAtPath` produced a state for, including
+    // configs that never registered as a project (e.g. a first-ever parse error, or an
+    // override-only config with no `entries`) — see `loadProjectAtPath`'s synthetic-state case.
+    const seen = new Set<string>();
+    for (const state of [...scanned, ...fromInit]) {
+      if (seen.has(state.configPath)) continue;
+      seen.add(state.configPath);
+      publishConfigWarnings(state.configPath, state.warnings);
     }
     await publishAllProjects();
   }
@@ -204,6 +237,16 @@ export function startServer(): Connection {
       for (const entryPath of after.entryPaths) {
         await validate(entryPath);
       }
+    }
+
+    // A config change/create/delete can also change which config governs a standalone
+    // (non-project-member) document — including an override-only config (no `entries`) that never
+    // registers as a project at all, so the `after`-driven loop above never touches it.
+    // `loadProjectAtPath` already invalidated `ctx.standaloneConfigCache`; re-validate every
+    // currently-open standalone document so the new resolution takes effect immediately rather
+    // than waiting for an unrelated edit.
+    for (const entryPath of ctx.openStandaloneEntries) {
+      await validate(entryPath);
     }
   }
 
@@ -278,6 +321,7 @@ export function startServer(): Connection {
   documents.onDidClose((event) => {
     const path = uriToPath(event.document.uri);
     invalidateGraph(ctx, path);
+    ctx.openStandaloneEntries.delete(path);
     const timer = debounceTimers.get(path);
     if (timer) {
       clearTimeout(timer);
@@ -375,8 +419,8 @@ export function startServer(): Connection {
     return links.map((link) => ({ range: toLspRange(link.range), target: pathToUri(link.targetPath) }));
   });
 
-  connection.onWorkspaceSymbol((params): SymbolInformation[] => {
-    const results = getWorkspaceSymbols(ctx, params.query);
+  connection.onWorkspaceSymbol(async (params): Promise<SymbolInformation[]> => {
+    const results = await getWorkspaceSymbols(ctx, params.query);
     return results.map(
       (result): SymbolInformation => ({
         name: result.name,

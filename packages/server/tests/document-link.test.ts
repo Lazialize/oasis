@@ -81,6 +81,37 @@ describe("getDocumentLinks", () => {
     expect(links).toEqual([]);
   });
 
+  test("finding 9: a double-quoted $ref with an escape sequence in the file part still links only the file portion", async () => {
+    // The raw source (`paths/pets.yaml`, a `t` unicode escape for 't', 20 chars) is
+    // longer than the parsed value (`paths/pets.yaml`, 15 chars): the old implementation computed
+    // the link's end offset as `valueStart + filePart.length` (the *parsed* string's length),
+    // which would land short of the actual '#' in the raw source for any such escape. Locating
+    // '#' directly in the raw source slice fixes it regardless of how escapes shift the parsed
+    // length.
+    const path = "/repo/entry.yaml";
+    const fragPath = "/repo/paths/pets.yaml";
+    const rawRefFilePart = "pa\\u0074hs/pets.yaml"; // literal source text: paths/pets.yaml
+    const text = [
+      "openapi: 3.1.0",
+      "info:",
+      "  title: Test API",
+      '  version: "1.0.0"',
+      "paths:",
+      "  /pets:",
+      `    $ref: "${rawRefFilePart}#/get"`,
+      "",
+    ].join("\n");
+    const fragText = ["get:", "  operationId: listPets", "  responses:", "    '200':", "      description: OK", ""].join("\n");
+
+    const ctx = createServerContext(new InMemoryFileSystem({ [path]: text, [fragPath]: fragText }));
+    const links = await getDocumentLinks(ctx, { path });
+
+    expect(links).toHaveLength(1);
+    const link = links[0]!;
+    expect(link.targetPath).toBe(fragPath);
+    expect(text.slice(link.range.startOffset, link.range.endOffset)).toBe(rawRefFilePart);
+  });
+
   test("an unresolvable relative path still produces a link (target existence is not checked)", async () => {
     const path = "/repo/entry.yaml";
     const text = [

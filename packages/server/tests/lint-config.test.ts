@@ -4,9 +4,10 @@ import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { InMemoryFileSystem } from "@oasis/core";
 import { getDiagnosticsByFile } from "../src/diagnostics.ts";
+import { routeDocument } from "../src/document-routing.ts";
 import { OverlayFileSystem } from "../src/overlay-fs.ts";
-import { loadProjectAtPath, scanWorkspaceRootsForProjects } from "../src/project.ts";
-import { createServerContext, invalidateGraph } from "../src/workspace.ts";
+import { findNearestConfigFile, loadProjectAtPath, resolveConfigForEntry, scanWorkspaceRootsForProjects } from "../src/project.ts";
+import { createServerContext, findOwningEntry, findProjectForEntry, invalidateGraph } from "../src/workspace.ts";
 
 // v0.7 work package: honor v0.3 features (suppression comments, per-glob overrides) through the
 // LSP, and harden project-config reload. These tests exercise `getDiagnosticsByFile` (and the
@@ -299,5 +300,139 @@ describe("robust re-lint on config edits", () => {
     const diag = (byFile.get(CFG_ENTRY_PATH) ?? []).find((d) => d.code === "operation-operationId");
     expect(diag).toBeDefined();
     expect(diag?.severity).toBe(1); // DiagnosticSeverity.Error: the last edit's severity.
+  });
+});
+
+// Regression tests for the v0.7 review findings: config resolution had two divergent, partly
+// cached answers to "which config governs file X" (project.ts's `findNearestConfigFile` /
+// `findProjectForEntry` vs. diagnostics.ts's own duplicate logic). These exercise the
+// consolidated `resolveConfigForEntry` (the single source of truth both now share) directly, plus
+// the specific defects the review found along the way.
+describe("resolveConfigForEntry: single source of truth for config resolution", () => {
+  const RES_ROOT = "/resolve-config";
+  const RES_ENTRY_PATH = `${RES_ROOT}/openapi.yaml`;
+
+  test("finding 2: a nearer config that fails to parse is not skipped in favor of an ancestor's config", async () => {
+    // Nested dirs: /resolve-config (has a *valid* config) -> /resolve-config/sub (has a *broken*
+    // config) -> /resolve-config/sub/openapi.yaml (the document). The broken nested config must
+    // win (as "nearest existing"), not the valid ancestor one.
+    const outerConfigPath = `${RES_ROOT}/oasis.config.jsonc`;
+    const innerConfigPath = `${RES_ROOT}/sub/oasis.config.jsonc`;
+    const docPath = `${RES_ROOT}/sub/openapi.yaml`;
+    const ctx = createServerContext(
+      new InMemoryFileSystem({
+        [outerConfigPath]: `{ "lint": { "rules": { "operation-operationId": "off" } } }`,
+        [innerConfigPath]: `{ "lint": { "rules": {,,, } }`, // invalid JSONC
+        [docPath]: `openapi: 3.1.0\ninfo:\n  title: T\n  version: "1.0.0"\npaths: {}\n`,
+      }),
+    );
+
+    const nearest = await findNearestConfigFile(ctx, docPath);
+    expect(nearest?.configPath).toBe(innerConfigPath);
+    expect(nearest?.warning).toBeDefined();
+    expect(nearest?.configFile).toEqual({}); // empty fallback, not the outer config's rules
+
+    const resolved = await resolveConfigForEntry(ctx, docPath);
+    expect(resolved.configPath).toBe(innerConfigPath);
+    expect(resolved.warnings.length).toBe(1);
+  });
+
+  test("finding 3: a config whose first-ever load is a parse error still surfaces a warning", async () => {
+    const configPath = `${RES_ROOT}/first-load-broken/oasis.config.jsonc`;
+    const ctx = createServerContext(new InMemoryFileSystem({ [configPath]: `{ "entries": [,,,] }` }));
+
+    // Never previously registered as a project (this is its first load), so the old behavior
+    // returned undefined here with no warning at all.
+    const state = await loadProjectAtPath(ctx, configPath);
+    expect(state).toBeDefined();
+    expect(state?.entryPaths).toEqual([]);
+    expect(state?.warnings.length).toBe(1);
+    expect(ctx.projects.has(configPath)).toBe(false); // still not registered as a real project
+  });
+
+  test("finding 6: findOwningEntry and findProjectForEntry agree on which project owns an entry declared by more than one", async () => {
+    // Two configs, in a directory order that sorts differently than insertion order, both
+    // (unusually) declaring the same entry path.
+    const sharedEntryPath = `${RES_ROOT}/ordering/shared-entry.yaml`;
+    const configZPath = `${RES_ROOT}/ordering/z/oasis.config.jsonc`;
+    const configAPath = `${RES_ROOT}/ordering/a/oasis.config.jsonc`;
+    const entryText = `openapi: 3.1.0\ninfo:\n  title: T\n  version: "1.0.0"\npaths: {}\n`;
+    const ctx = createServerContext(
+      new InMemoryFileSystem({
+        [sharedEntryPath]: entryText,
+        [configZPath]: JSON.stringify({ entries: ["../shared-entry.yaml"] }),
+        [configAPath]: JSON.stringify({ entries: ["../shared-entry.yaml"] }),
+      }),
+    );
+
+    // Insertion order is Z then A (deliberately the reverse of sorted config-path order).
+    await loadProjectAtPath(ctx, configZPath);
+    await loadProjectAtPath(ctx, configAPath);
+
+    const owningEntry = await findOwningEntry(ctx, sharedEntryPath);
+    const owningProject = findProjectForEntry(ctx, sharedEntryPath);
+    expect(owningEntry).toBe(sharedEntryPath);
+    // Both should pick the same (sorted-first) project's config path.
+    expect(owningProject?.configPath).toBe(configAPath);
+  });
+
+  test("finding 7: standalone config resolution is cached per entry path", async () => {
+    const configPath = `${RES_ROOT}/cache/oasis.config.jsonc`;
+    const docPath = `${RES_ROOT}/cache/openapi.yaml`;
+    const fs = new InMemoryFileSystem({
+      [configPath]: `{ "lint": { "rules": { "operation-operationId": "off" } } }`,
+      [docPath]: `openapi: 3.1.0\ninfo:\n  title: T\n  version: "1.0.0"\npaths: {}\n`,
+    });
+    const ctx = createServerContext(fs);
+
+    const first = await resolveConfigForEntry(ctx, docPath);
+    expect(ctx.standaloneConfigCache.has(docPath)).toBe(true);
+
+    // Rewrite the config directly on the filesystem without going through `loadProjectAtPath` (no
+    // didChange simulated): the cache should still serve the stale, already-resolved answer.
+    fs.writeFile(configPath, `{ "lint": { "rules": { "operation-operationId": "error" } } }`);
+    const second = await resolveConfigForEntry(ctx, docPath);
+    expect(second).toBe(first); // same cached object, not re-read
+
+    // Once a config load event happens (as `didChange`/`didChangeWatchedFiles` would trigger),
+    // the cache must be invalidated so the next resolution picks up the edit.
+    await loadProjectAtPath(ctx, configPath);
+    expect(ctx.standaloneConfigCache.has(docPath)).toBe(false);
+    const third = await resolveConfigForEntry(ctx, docPath);
+    expect(third.configFile).toEqual({ lint: { rules: { "operation-operationId": "error" } } });
+  });
+
+  test("finding 1: editing an override-only config (no `entries`) is tracked for standalone re-validation via openStandaloneEntries", async () => {
+    // An override-only config never registers as a project (`loadProjectAtPath` returns a
+    // synthetic, unregistered state for it), so the old `reloadProjectAtConfigPath` had nothing to
+    // re-lint. `routeDocument` now records every standalone document it routes so a config reload
+    // can find them again regardless of project registration.
+    const overrideConfigPath = `${RES_ROOT}/override-only/oasis.config.jsonc`;
+    const standalonePath = `${RES_ROOT}/override-only/openapi.yaml`;
+    const standaloneText = `openapi: 3.1.0\ninfo:\n  title: T\n  version: "1.0.0"\npaths:\n  /pets:\n    get:\n      tags: [pets]\n      description: List pets.\n      responses:\n        '200':\n          description: OK\n`;
+    const ctx = createServerContext(
+      new InMemoryFileSystem({
+        [overrideConfigPath]: `{ "lint": { "rules": { "operation-operationId": "off" } } }`,
+        [standalonePath]: standaloneText,
+      }),
+    );
+
+    const route = await routeDocument(ctx, standalonePath, standaloneText);
+    expect(route).toEqual({ kind: "standalone", entryPath: standalonePath });
+    expect(ctx.openStandaloneEntries.has(standalonePath)).toBe(true);
+
+    let byFile = await getDiagnosticsByFile(ctx, standalonePath);
+    expect((byFile.get(standalonePath) ?? []).some((d) => d.code === "operation-operationId")).toBe(false);
+
+    // The config file itself changes (as `didChange`/`didChangeWatchedFiles` on it would drive);
+    // loadProjectAtPath returns undefined (still no entries), but the standalone doc's cached
+    // resolution must still be invalidated.
+    (ctx.fileSystem as InMemoryFileSystem).writeFile(overrideConfigPath, `{ "lint": { "rules": { "operation-operationId": "error" } } }`);
+    const after = await loadProjectAtPath(ctx, overrideConfigPath);
+    expect(after).toBeUndefined(); // still no entries: not a registered project
+    expect(ctx.standaloneConfigCache.has(standalonePath)).toBe(false); // invalidated regardless
+
+    byFile = await getDiagnosticsByFile(ctx, standalonePath);
+    expect((byFile.get(standalonePath) ?? []).some((d) => d.code === "operation-operationId")).toBe(true);
   });
 });

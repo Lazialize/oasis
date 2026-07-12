@@ -47,15 +47,25 @@ export async function getDocumentLinks(ctx: ServerContext, params: DocumentLinkP
 
 /**
  * Locate the file-path portion's own range within the raw source, inside the scalar's full
- * (quote-inclusive) range. `filePart` is assumed to appear verbatim right after any opening quote
- * (true for plain/single/double-quoted YAML scalars as long as the path itself needs no escaping,
- * which holds for ordinary relative file paths).
+ * (quote-inclusive) range. Finds the `#` fragment separator directly in the *raw* source slice
+ * (not by adding the parsed `filePart`'s length to the value start), so this stays correct for
+ * double-quoted scalars containing escape sequences (`\\`, `\"`, `\uXXXX`, ...), where the raw
+ * source is longer or shorter than the parsed string value. When there's no `#` in the raw slice
+ * (a whole-file ref with no fragment), the file part spans the whole scalar content.
  */
 function filePartRange(doc: OasisDocument, scalarRange: Range, filePart: string): Range | undefined {
+  if (filePart === "") return undefined;
   const raw = doc.text.slice(scalarRange.startOffset, scalarRange.endOffset);
   const quoteChar = raw[0] === "'" || raw[0] === '"' ? raw[0] : undefined;
-  const valueStart = scalarRange.startOffset + (quoteChar ? 1 : 0);
-  const valueEnd = valueStart + filePart.length;
-  if (valueEnd > scalarRange.endOffset) return undefined;
+  const contentStart = quoteChar ? 1 : 0;
+  const contentEnd = quoteChar ? raw.length - 1 : raw.length;
+  if (contentEnd < contentStart) return undefined;
+
+  const hashIdx = raw.indexOf("#", contentStart);
+  const fileEndInRaw = hashIdx !== -1 && hashIdx <= contentEnd ? hashIdx : contentEnd;
+
+  const valueStart = scalarRange.startOffset + contentStart;
+  const valueEnd = scalarRange.startOffset + fileEndInRaw;
+  if (valueEnd < valueStart || valueEnd > scalarRange.endOffset) return undefined;
   return rangeFromOffsets(doc.filePath, doc.lineCounter, valueStart, valueEnd);
 }

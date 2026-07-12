@@ -1,10 +1,10 @@
 import { lint, resolveConfig } from "@oasis/linter";
-import type { LintConfigFile, LintDiagnostic, LintDiagnosticSeverity } from "@oasis/linter";
+import type { LintDiagnostic, LintDiagnosticSeverity } from "@oasis/linter";
 import type { Range } from "@oasis/core";
 import { DiagnosticSeverity } from "vscode-languageserver";
 import type { Diagnostic as LspDiagnostic } from "vscode-languageserver";
-import { findNearestConfigFile } from "./project.ts";
-import { findProjectForEntry, getGraph } from "./workspace.ts";
+import { resolveConfigForEntry } from "./project.ts";
+import { getGraph } from "./workspace.ts";
 import type { ServerContext } from "./workspace.ts";
 
 const SEVERITY_MAP: Record<LintDiagnosticSeverity, DiagnosticSeverity> = {
@@ -28,32 +28,19 @@ export function toLspRange(range: Range): { start: { line: number; character: nu
 }
 
 /**
- * Resolve the `lint.rules`/`lint.overrides` config that applies to `entryPath`: the config of the
- * project it belongs to (already loaded, overlay-aware — see `findProjectForEntry`) if it's a
- * project entry, otherwise the nearest `oasis.config.jsonc` found by walking upward through
- * `ctx.fileSystem` (so unsaved edits to the config file itself are honored either way, without
- * requiring a save or a second, disk-only config read).
- */
-async function loadEffectiveConfig(
-  ctx: ServerContext,
-  entryPath: string,
-): Promise<{ configFile: LintConfigFile; configPath: string | undefined }> {
-  const project = findProjectForEntry(ctx, entryPath);
-  if (project) return { configFile: project.configFile, configPath: project.configPath };
-
-  const nearest = await findNearestConfigFile(ctx, entryPath);
-  return { configFile: nearest?.configFile ?? {}, configPath: nearest?.configPath };
-}
-
-/**
  * Lint the workspace graph rooted at `entryPath` and group the resulting diagnostics by file, so
  * the caller can `publishDiagnostics` per-file (including files referenced by, but not the same
  * as, the open entry document).
+ *
+ * The `lint.rules`/`lint.overrides` config that applies is resolved through the single shared
+ * `resolveConfigForEntry` (project config if `entryPath` is a project member, otherwise the
+ * nearest `oasis.config.jsonc` found upward, cached — see `project.ts`), so this always agrees
+ * with `connection.ts`'s config-warning publishing about which config governs a given entry.
  */
 export async function getDiagnosticsByFile(ctx: ServerContext, entryPath: string): Promise<Map<string, LspDiagnostic[]>> {
   const graph = await getGraph(ctx, entryPath);
 
-  const loaded = await loadEffectiveConfig(ctx, entryPath);
+  const loaded = await resolveConfigForEntry(ctx, entryPath);
   const resolved = resolveConfig(loaded.configFile);
 
   const diagnostics = lint(graph, resolved, { configPath: loaded.configPath });

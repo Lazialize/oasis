@@ -323,12 +323,13 @@ function lineEndOffsetInclusive(doc: OasisDocument, offset: number): number {
 }
 
 /**
- * Find `child`'s own `Pair` within map `node`, by value identity (works since `childAt`/lookups
- * hand back a map's own `pair.value` node references, never copies).
+ * Find `child`'s own key `Node` within map `node`, by value identity (works since `childAt`/
+ * lookups hand back a map's own `pair.value` node references, never copies).
  */
-function pairForValue(node: Node, child: Node): { key: unknown; value: unknown } | undefined {
+function keyNodeForValue(node: Node, child: Node): Node | undefined {
   if (!isMap(node)) return undefined;
-  return node.items.find((p) => p.value === child);
+  const pair = node.items.find((p) => p.value === child);
+  return pair && isNode(pair.key) ? pair.key : undefined;
 }
 
 function buildRemoveUnusedComponent(doc: OasisDocument, diag: CodeActionDiagnosticInput, index: number): CodeActionResult | undefined {
@@ -337,14 +338,14 @@ function buildRemoveUnusedComponent(doc: OasisDocument, diag: CodeActionDiagnost
   if (!isNode(root) || !isMap(root)) return undefined;
   const componentsNode = childAt(root, "components");
   if (!componentsNode || !isMap(componentsNode)) return undefined;
-  const componentsPair = pairForValue(root, componentsNode);
-  if (!componentsPair || !isNode(componentsPair.key) || !componentsPair.key.range) return undefined;
+  const componentsKeyNode = keyNodeForValue(root, componentsNode);
+  if (!componentsKeyNode || !componentsKeyNode.range) return undefined;
 
   for (const category of COMPONENT_CATEGORIES) {
     const categoryNode = childAt(componentsNode, category);
     if (!categoryNode || !isMap(categoryNode)) continue;
-    const categoryPair = pairForValue(componentsNode, categoryNode);
-    if (!categoryPair || !isNode(categoryPair.key) || !categoryPair.key.range) continue;
+    const categoryKeyNode = keyNodeForValue(componentsNode, categoryNode);
+    if (!categoryKeyNode || !categoryKeyNode.range) continue;
 
     for (const pair of categoryNode.items) {
       const value = pair.value;
@@ -355,25 +356,24 @@ function buildRemoveUnusedComponent(doc: OasisDocument, diag: CodeActionDiagnost
       if (!isNode(keyNode) || !keyNode.range) return undefined;
       const name = keyToString(keyNode);
 
-      let deleteStart: number;
-      let deleteEnd: number;
-      if (categoryNode.items.length === 1) {
-        // Sole entry in its section: the section itself would be left empty, so remove the
-        // section key (`schemas:`, `parameters:`, ...) too — the inverse of how extract-to-component
-        // creates that key when it's missing.
-        if (componentsNode.items.length === 1) {
-          // Sole section under `components`: removing it would leave `components: {}`, so remove
-          // `components:` itself too — the inverse of extract-to-component's from-scratch case.
-          deleteStart = lineStartOffset(doc, componentsPair.key.range[0]);
-          deleteEnd = lineEndOffsetInclusive(doc, componentsNode.range?.[1] ?? value.range[1]);
-        } else {
-          deleteStart = lineStartOffset(doc, categoryPair.key.range[0]);
-          deleteEnd = lineEndOffsetInclusive(doc, categoryNode.range?.[1] ?? value.range[1]);
-        }
-      } else {
-        deleteStart = lineStartOffset(doc, keyNode.range[0]);
-        deleteEnd = lineEndOffsetInclusive(doc, value.range[1]);
+      // Climb ancestors while the entry being removed is the sole item of its parent map: leaving
+      // an empty `components/<category>: {}` (or `components: {}`) behind would be pointless, so
+      // remove the parent's own key too — the inverse of how extract-to-component creates that key
+      // when it's missing. Stops climbing at the first ancestor with more than one item, since
+      // removing the target alone is then enough.
+      let deleteKeyNode = keyNode;
+      let deleteEndNode: Node = value;
+      for (const ancestor of [
+        { node: categoryNode as Node, keyNode: categoryKeyNode },
+        { node: componentsNode as Node, keyNode: componentsKeyNode },
+      ]) {
+        if (!isMap(ancestor.node) || ancestor.node.items.length !== 1) break;
+        deleteKeyNode = ancestor.keyNode;
+        deleteEndNode = ancestor.node;
       }
+
+      const deleteStart = lineStartOffset(doc, deleteKeyNode.range![0]);
+      const deleteEnd = lineEndOffsetInclusive(doc, deleteEndNode.range?.[1] ?? value.range[1]);
 
       return {
         title: `Remove unused component '${name}'`,

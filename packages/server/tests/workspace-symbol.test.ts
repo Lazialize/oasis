@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { InMemoryFileSystem } from "@oasis/core";
 import { getWorkspaceSymbols } from "../src/handlers/workspace-symbol.ts";
 import { scanWorkspaceRootsForProjects } from "../src/project.ts";
-import { createServerContext, getGraph } from "../src/workspace.ts";
+import { createServerContext, getGraph, invalidateGraph } from "../src/workspace.ts";
 
 const ROOT_A = "/w/projA";
 const ROOT_B = "/w/projB";
@@ -125,7 +125,7 @@ describe("getWorkspaceSymbols", () => {
   test("empty query returns symbols from every loaded graph, including operations and standalone documents", async () => {
     const ctx = await contextWithEverythingLoaded();
 
-    const results = getWorkspaceSymbols(ctx, "");
+    const results = await getWorkspaceSymbols(ctx, "");
     const names = results.map((r) => r.name);
 
     expect(names).toContain("PetA");
@@ -138,7 +138,7 @@ describe("getWorkspaceSymbols", () => {
 
   test("component kinds are mapped per section", async () => {
     const ctx = await contextWithEverythingLoaded();
-    const results = getWorkspaceSymbols(ctx, "");
+    const results = await getWorkspaceSymbols(ctx, "");
     const byName = (name: string) => results.find((r) => r.name === name)!;
 
     expect(byName("PetA").kind).toBe("class");
@@ -152,7 +152,7 @@ describe("getWorkspaceSymbols", () => {
 
   test("operation symbols use operationId as name and the path template / webhook key as containerName", async () => {
     const ctx = await contextWithEverythingLoaded();
-    const results = getWorkspaceSymbols(ctx, "");
+    const results = await getWorkspaceSymbols(ctx, "");
 
     const listWidgets = results.find((r) => r.name === "listWidgets")!;
     expect(listWidgets.kind).toBe("method");
@@ -165,7 +165,7 @@ describe("getWorkspaceSymbols", () => {
 
   test("a document reachable from more than one graph contributes its symbols only once", async () => {
     const ctx = await contextWithEverythingLoaded();
-    const results = getWorkspaceSymbols(ctx, "");
+    const results = await getWorkspaceSymbols(ctx, "");
 
     // "Shared" is defined once (in the fragment loaded by both project A and B), not per-graph.
     expect(results.filter((r) => r.name === "Shared")).toHaveLength(1);
@@ -174,14 +174,98 @@ describe("getWorkspaceSymbols", () => {
   test("query filters case-insensitively by substring", async () => {
     const ctx = await contextWithEverythingLoaded();
 
-    const results = getWorkspaceSymbols(ctx, "pet");
+    const results = await getWorkspaceSymbols(ctx, "pet");
     const names = results.map((r) => r.name).sort();
 
     expect(names).toEqual(["PetA", "PetB", "PetResponse", "PetsItem", "listPets", "onPetCreated"].sort());
   });
 
-  test("empty projects/graphCache yields no symbols", () => {
+  test("empty projects/graphCache yields no symbols", async () => {
     const ctx = createServerContext(new InMemoryFileSystem({}));
-    expect(getWorkspaceSymbols(ctx, "")).toEqual([]);
+    expect(await getWorkspaceSymbols(ctx, "")).toEqual([]);
+  });
+
+  // Regression test for finding 4: `invalidateGraph` (called e.g. from `connection.ts`'s
+  // `onDidClose` for an unrelated document) evicts a whole project's graph from `ctx.graphCache`
+  // with no refill. Workspace symbols used to silently omit that project until some unrelated
+  // edit happened to rebuild its graph; `getWorkspaceSymbols` must now lazily refill any loaded
+  // project's graph that's missing from the cache before walking it.
+  test("finding 4: a project whose graph was evicted from the cache is lazily refilled, not omitted", async () => {
+    const ctx = await contextWithEverythingLoaded();
+
+    // Simulate `onDidClose` evicting project A's graph (e.g. closing some unrelated open buffer
+    // that happened to be a member of it), without anything reopening/re-warming it afterward.
+    invalidateGraph(ctx, ENTRY_A_PATH);
+    expect(ctx.graphCache.has(ENTRY_A_PATH)).toBe(false);
+
+    const results = await getWorkspaceSymbols(ctx, "");
+    const names = results.map((r) => r.name);
+    expect(names).toContain("PetA");
+    expect(names).toContain("listPets");
+    // The refill also re-populates the cache for subsequent callers (definition/hover/etc.).
+    expect(ctx.graphCache.has(ENTRY_A_PATH)).toBe(true);
+  });
+
+  // Regression test for finding 5: the old hand-rolled `collectOperations` walked each document's
+  // own `paths`/`webhooks` map directly, so an operation reached only through a $ref'd path item
+  // (a whole path item behind `$ref`, not just the fragment loaded via a plain path entry) never
+  // surfaced. Using `@oasis/linter`'s `iterateOperations` (which resolves $ref'd path items) fixes
+  // this, and attributes the symbol to the file the operation actually lives in.
+  test("finding 5: an operation behind a $ref'd path item (not just a $ref'd fragment) is found", async () => {
+    const root = "/w/refPathItem";
+    const entryPath = `${root}/openapi.yaml`;
+    const fragmentPath = `${root}/paths/widgets.yaml`;
+    const entryText = `openapi: 3.1.0
+info:
+  title: Ref Path Item
+  version: "1.0.0"
+paths:
+  /widgets:
+    $ref: './paths/widgets.yaml'
+`;
+    const fragmentText = `get:
+  operationId: listWidgetsViaRefPathItem
+  responses:
+    '200':
+      description: OK
+`;
+    const ctx = createServerContext(new InMemoryFileSystem({ [entryPath]: entryText, [fragmentPath]: fragmentText }));
+    await getGraph(ctx, entryPath);
+
+    const results = await getWorkspaceSymbols(ctx, "");
+    const op = results.find((r) => r.name === "listWidgetsViaRefPathItem");
+    expect(op).toBeDefined();
+    expect(op?.kind).toBe("method");
+    expect(op?.containerName).toBe("/widgets"); // the path template, not the fragment's own key
+    expect(op?.filePath).toBe(fragmentPath); // attributed to the file it actually lives in
+  });
+
+  // Regression test for the range-overshoot fix (shared `nodeRange` helper in `yaml-helpers.ts`
+  // now uses `range[1]`, the end of the node's own content, instead of `range[2]`, which also
+  // covers trailing whitespace/comments up to the next sibling).
+  test("symbol ranges end at the node's own content, not at trailing whitespace/comments before the next sibling", async () => {
+    const path = "/w/rangeCheck/openapi.yaml";
+    const text = `openapi: 3.1.0
+info:
+  title: Range Check
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Pet:
+      type: object
+
+    # a comment that belongs to nobody in particular
+    Owner:
+      type: object
+`;
+    const ctx = createServerContext(new InMemoryFileSystem({ [path]: text }));
+    await getGraph(ctx, path);
+
+    const results = await getWorkspaceSymbols(ctx, "");
+    const pet = results.find((r) => r.name === "Pet")!;
+    const petSlice = text.slice(pet.range.startOffset, pet.range.endOffset);
+    expect(petSlice.trim()).toBe("type: object");
+    expect(petSlice.includes("comment")).toBe(false);
   });
 });

@@ -2,7 +2,8 @@ import { dirname, join, resolve as pathResolve, sep } from "node:path";
 import { parse as parseJsonc, type ParseError } from "jsonc-parser";
 import { CONFIG_FILE_NAME, expandGlobEntry, isGlobPattern } from "@oasis/linter";
 import type { LintConfigFile } from "@oasis/linter";
-import type { ProjectState, ServerContext } from "./workspace.ts";
+import type { ProjectState, ResolvedConfig, ServerContext } from "./workspace.ts";
+import { findProjectForEntry } from "./workspace.ts";
 
 // Reads through `ctx.fileSystem` (the overlay FS) rather than node:fs directly, so this works
 // uniformly against real disk and against InMemoryFileSystem in tests, and so unsaved edits to
@@ -103,15 +104,28 @@ function unloadProject(ctx: ServerContext, configPath: string): void {
  *   project's entries/diagnostics while the user is still typing. The returned `ProjectState` in
  *   this case carries the parse error as its only warning (for `publishConfigWarnings`) without
  *   persisting that warning into `ctx.projects`, so it clears automatically once the file is valid
- *   again. If there was no previously-loaded project, this is a no-op that returns undefined.
+ *   again. If there was no previously-loaded project (including: this config never had entries, so
+ *   it never registered one), a synthetic, unregistered `ProjectState` (empty `entryPaths`) is
+ *   still returned so the parse-error warning reaches `publishConfigWarnings` instead of being
+ *   silently dropped.
  *
- * Returns the resulting `ProjectState`, or undefined if no project is loaded at this path.
+ * Returns the resulting `ProjectState` (registered or, for a warning-only result, synthetic), or
+ * undefined if there is nothing to report (no config, and nothing was ever loaded here).
  *
  * Safe to call for a path that was never a project (e.g. probing during upward discovery, or a
  * root-of-workspace scan where no config exists there): it's then a no-op.
+ *
+ * Always clears `ctx.standaloneConfigCache`: this function only runs in response to a config file
+ * being created, changed, deleted, or newly discovered, and any of those can change which config
+ * governs a standalone (non-project-member) entry — even one that resolves to a *different*
+ * config file than `configPath`, e.g. when this file previously blocked upward discovery by
+ * existing-but-being-broken and now no longer does. A full clear is simpler than tracking which
+ * standalone entries this specific config affects, and reloads are rare enough that the cost is
+ * negligible.
  */
 export async function loadProjectAtPath(ctx: ServerContext, rawConfigPath: string): Promise<ProjectState | undefined> {
   const configPath = pathResolve(rawConfigPath);
+  ctx.standaloneConfigCache.clear();
   const result = await readConfigFile(ctx, configPath);
 
   if (!result.ok) {
@@ -122,14 +136,17 @@ export async function loadProjectAtPath(ctx: ServerContext, rawConfigPath: strin
     // Parse error: keep the last-good project untouched, but surface the parse error as a
     // one-off warning on the returned (not stored) state.
     const existing = ctx.projects.get(configPath);
-    if (!existing) return undefined;
-    return { ...existing, warnings: [result.message] };
+    if (existing) return { ...existing, warnings: [result.message] };
+    // Never previously registered as a project (e.g. its first-ever load is already broken, or it
+    // only ever set `lint.rules`/`lint.overrides` with no `entries`): still surface the warning.
+    return { configPath, configDir: dirname(configPath), entryPaths: [], configFile: {}, warnings: [result.message] };
   }
 
   const { entries, warnings } = await resolveProjectEntries(ctx, configPath, result.configFile);
   if (entries.length === 0) {
     unloadProject(ctx, configPath);
-    return undefined;
+    if (warnings.length === 0) return undefined;
+    return { configPath, configDir: dirname(configPath), entryPaths: [], configFile: result.configFile, warnings };
   }
 
   const state: ProjectState = {
@@ -154,28 +171,40 @@ export async function loadProjectAtPath(ctx: ServerContext, rawConfigPath: strin
  * both dedupe naturally since projects are keyed by resolved config path. Also records
  * `workspaceRoots` on the context so upward discovery (`discoverProjectUpward`) knows where to
  * stop walking.
+ *
+ * Returns every non-undefined `ProjectState` `loadProjectAtPath` produced (including synthetic,
+ * unregistered ones carrying only a parse-error warning — see `loadProjectAtPath`), so callers can
+ * publish config warnings even for configs that never register as a project.
  */
-export async function scanWorkspaceRootsForProjects(ctx: ServerContext, workspaceRoots: string[]): Promise<void> {
+export async function scanWorkspaceRootsForProjects(ctx: ServerContext, workspaceRoots: string[]): Promise<ProjectState[]> {
   ctx.workspaceRoots = workspaceRoots;
+  const results: ProjectState[] = [];
   for (const root of workspaceRoots) {
-    await loadProjectAtPath(ctx, join(root, CONFIG_FILE_NAME));
+    const state = await loadProjectAtPath(ctx, join(root, CONFIG_FILE_NAME));
+    if (state) results.push(state);
   }
+  return results;
 }
 
 /**
  * Eagerly load projects for config file paths the client discovered via a deep workspace scan
  * (passed as `initializationOptions.configFiles`). Non-string entries are ignored; entries
  * containing `node_modules` are skipped; the list is capped to avoid pathological workspaces.
+ *
+ * Returns every non-undefined `ProjectState` produced, same as `scanWorkspaceRootsForProjects`.
  */
-export async function loadConfigFilesFromInit(ctx: ServerContext, configFiles: unknown): Promise<void> {
-  if (!Array.isArray(configFiles)) return;
+export async function loadConfigFilesFromInit(ctx: ServerContext, configFiles: unknown): Promise<ProjectState[]> {
+  if (!Array.isArray(configFiles)) return [];
   const MAX_CONFIG_FILES = 20;
   const candidates = configFiles
     .filter((p): p is string => typeof p === "string" && !p.includes("node_modules"))
     .slice(0, MAX_CONFIG_FILES);
+  const results: ProjectState[] = [];
   for (const raw of candidates) {
-    await loadProjectAtPath(ctx, raw);
+    const state = await loadProjectAtPath(ctx, raw);
+    if (state) results.push(state);
   }
+  return results;
 }
 
 /** Whether `dir` is at or under `root`. */
@@ -234,20 +263,29 @@ export function isConfigFilePath(path: string): boolean {
   return path.endsWith(`/${CONFIG_FILE_NAME}`) || path === CONFIG_FILE_NAME;
 }
 
+export interface NearestConfigResult {
+  configPath: string;
+  configFile: LintConfigFile;
+  /** Set when this config file exists but fails to parse as JSONC: `configFile` is then `{}` (an
+   * empty fallback), not a stale or partial parse. */
+  warning?: string;
+}
+
 /**
  * Find the nearest `oasis.config.jsonc` above `startPath` (read through `ctx.fileSystem`, so
  * unsaved edits to the config are honored), for entries that are *not* part of a loaded project
  * (see `findProjectForEntry` in `workspace.ts` for the project case). Unlike `discoverProjectUpward`,
  * this doesn't require a non-empty `entries` field and doesn't register a project — a config that
  * only sets `lint.rules`/`lint.overrides` with no `entries` still applies to a standalone open
- * document, mirroring `oasis lint`'s own upward config discovery. A config that exists but fails to
- * parse is treated like "no config found" here (there's no project state to fall back to for a
- * standalone entry).
+ * document, mirroring `oasis lint`'s own upward config discovery.
+ *
+ * Mirrors the CLI's `findConfigUpward` (`packages/linter/src/config.ts`): stops at the nearest
+ * *existing* config file, whether or not it parses. A config file that exists but fails to parse
+ * (e.g. mid-edit) is not skipped in favor of an ancestor's config — that would silently apply the
+ * wrong rules/overrides — it's reported back as a warning with an empty fallback config, the same
+ * way `oasis lint` would fail loudly rather than fall back further up the tree.
  */
-export async function findNearestConfigFile(
-  ctx: ServerContext,
-  startPath: string,
-): Promise<{ configPath: string; configFile: LintConfigFile } | undefined> {
+export async function findNearestConfigFile(ctx: ServerContext, startPath: string): Promise<NearestConfigResult | undefined> {
   const boundary = enclosingWorkspaceRoot(ctx, startPath);
   let dir = dirname(pathResolve(startPath));
 
@@ -255,6 +293,11 @@ export async function findNearestConfigFile(
     const candidate = join(dir, CONFIG_FILE_NAME);
     const result = await readConfigFile(ctx, candidate);
     if (result.ok) return { configPath: candidate, configFile: result.configFile };
+    if (result.reason === "parse-error") {
+      // Nearest EXISTING config file: stop here rather than walking past it to an ancestor's
+      // (possibly unrelated) config.
+      return { configPath: candidate, configFile: {}, warning: result.message };
+    }
 
     if (boundary && dir === boundary) break;
     const parent = dirname(dir);
@@ -263,4 +306,33 @@ export async function findNearestConfigFile(
   }
 
   return undefined;
+}
+
+/**
+ * The single source of truth for "which `lint.rules`/`lint.overrides` config governs `entryPath`":
+ * the config of the project it belongs to (already loaded, overlay-aware — see
+ * `findProjectForEntry`) if it's a project entry, otherwise the nearest `oasis.config.jsonc` found
+ * by walking upward through `ctx.fileSystem` (`findNearestConfigFile`, so unsaved edits to the
+ * config file itself are honored either way, without requiring a save or a second, disk-only
+ * config read).
+ *
+ * The standalone (non-project-member) branch is cached per entry path in
+ * `ctx.standaloneConfigCache`, since resolving it re-walks directories and re-parses JSONC —
+ * `loadProjectAtPath` clears the cache on every config load/reload, so a config file
+ * create/change/delete is always picked up on the next resolution. The project branch is not
+ * cached here: `findProjectForEntry` is a cheap in-memory lookup already.
+ */
+export async function resolveConfigForEntry(ctx: ServerContext, entryPath: string): Promise<ResolvedConfig> {
+  const project = findProjectForEntry(ctx, entryPath);
+  if (project) return { configFile: project.configFile, configPath: project.configPath, warnings: [] };
+
+  const cached = ctx.standaloneConfigCache.get(entryPath);
+  if (cached) return cached;
+
+  const nearest = await findNearestConfigFile(ctx, entryPath);
+  const resolved: ResolvedConfig = nearest
+    ? { configFile: nearest.configFile, configPath: nearest.configPath, warnings: nearest.warning ? [nearest.warning] : [] }
+    : { configFile: {}, configPath: undefined, warnings: [] };
+  ctx.standaloneConfigCache.set(entryPath, resolved);
+  return resolved;
 }

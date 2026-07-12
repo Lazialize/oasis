@@ -40,6 +40,17 @@ export interface ProjectState {
  * from the client) or lazily (walking upward from an opened/changed document's directory; see
  * `discoverProjectUpward` in `packages/server/src/project.ts`).
  */
+/** The `lint.rules`/`lint.overrides` config that governs a given entry path, plus where it came
+ * from (see `resolveConfigForEntry` in `project.ts`, the single place this is computed). */
+export interface ResolvedConfig {
+  configFile: LintConfigFile;
+  /** Absolute path of the config file this came from, or undefined if none was found. */
+  configPath: string | undefined;
+  /** Warnings to surface for this resolution (e.g. the nearest config file exists but fails to
+   * parse as JSONC). Empty when nothing needs surfacing. */
+  warnings: string[];
+}
+
 export interface ServerContext {
   fileSystem: FileSystem;
   graphCache: Map<string, WorkspaceGraph>;
@@ -54,6 +65,20 @@ export interface ServerContext {
    * since that can change the answer for previously-missed directories.
    */
   upwardMissCache: Set<string>;
+  /**
+   * `resolveConfigForEntry` results for standalone (non-project-member) entries, keyed by entry
+   * path, so repeated diagnostics publishes don't re-walk directories and re-parse JSONC on every
+   * request. Cleared whenever a config file is loaded/reloaded (see `loadProjectAtPath`), since
+   * that can change the answer for any standalone entry that resolves through it.
+   */
+  standaloneConfigCache: Map<string, ResolvedConfig>;
+  /**
+   * Paths of currently-open documents routed as standalone OpenAPI entries (see `routeDocument` in
+   * `document-routing.ts`), so a config file change/delete can re-validate every standalone
+   * document that might be governed by it — including override-only configs (no `entries` field)
+   * that never register as a project and so wouldn't otherwise trigger a re-lint.
+   */
+  openStandaloneEntries: Set<string>;
 }
 
 export function createServerContext(fileSystem: FileSystem): ServerContext {
@@ -63,6 +88,8 @@ export function createServerContext(fileSystem: FileSystem): ServerContext {
     projects: new Map(),
     workspaceRoots: [],
     upwardMissCache: new Set(),
+    standaloneConfigCache: new Map(),
+    openStandaloneEntries: new Set(),
   };
 }
 
@@ -91,18 +118,22 @@ export function getDocument(graph: WorkspaceGraph, path: string): OasisDocument 
   return graph.documents.get(path);
 }
 
+/** Loaded projects in a deterministic order (by config path), so callers that need to pick a
+ * single "owning" project among several candidates all agree on which one wins. Single source for
+ * that ordering: `findOwningEntry` and `findProjectForEntry` both delegate to this. */
+function sortedProjects(ctx: ServerContext): ProjectState[] {
+  return [...ctx.projects.keys()].sort().map((configPath) => ctx.projects.get(configPath)!);
+}
+
 /**
  * If `path` is a member of any loaded project's entry graph, return that entry's absolute path
  * (loading the entry's graph, from cache if possible, to check membership). Projects are checked
- * in a deterministic order (by config path); within a project, entries are checked in declaration
- * order. The first graph containing `path` wins when a file belongs to more than one. Returns
- * undefined when no project is loaded, or when `path` belongs to no project graph.
+ * in a deterministic order (`sortedProjects`); within a project, entries are checked in
+ * declaration order. The first graph containing `path` wins when a file belongs to more than one.
+ * Returns undefined when no project is loaded, or when `path` belongs to no project graph.
  */
 export async function findOwningEntry(ctx: ServerContext, path: string): Promise<string | undefined> {
-  const configPaths = [...ctx.projects.keys()].sort();
-  for (const configPath of configPaths) {
-    const project = ctx.projects.get(configPath);
-    if (!project) continue;
+  for (const project of sortedProjects(ctx)) {
     for (const entryPath of project.entryPaths) {
       const graph = await getGraph(ctx, entryPath);
       if (graph.documents.has(path)) return entryPath;
@@ -116,9 +147,13 @@ export async function findOwningEntry(ctx: ServerContext, path: string): Promise
  * transitively-`$ref`'d member — see `findOwningEntry` for that), if any. Used to resolve the
  * `lint.rules`/`lint.overrides` that should apply when linting this entry's graph, straight from
  * already-loaded, overlay-aware project state rather than a second, disk-only config read.
+ *
+ * Uses the same deterministic project ordering as `findOwningEntry` (`sortedProjects`), so the two
+ * never disagree about which project "owns" an entry that (in some unusual config) is declared by
+ * more than one.
  */
 export function findProjectForEntry(ctx: ServerContext, entryPath: string): ProjectState | undefined {
-  for (const project of ctx.projects.values()) {
+  for (const project of sortedProjects(ctx)) {
     if (project.entryPaths.includes(entryPath)) return project;
   }
   return undefined;
