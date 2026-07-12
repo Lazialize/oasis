@@ -247,7 +247,7 @@ export function startServer(): Connection {
         documentSymbolProvider: true,
         referencesProvider: true,
         renameProvider: { prepareProvider: true },
-        codeActionProvider: { codeActionKinds: ["quickfix", "refactor.extract"] },
+        codeActionProvider: { codeActionKinds: ["quickfix", "refactor.extract", "refactor.inline"] },
         documentLinkProvider: {},
         workspaceSymbolProvider: true,
       },
