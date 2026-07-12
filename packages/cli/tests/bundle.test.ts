@@ -80,6 +80,24 @@ describe("oasis bundle CLI", () => {
     }
   });
 
+  test("--dereference fully inlines refs, dropping the lifted components section", async () => {
+    const result = await runCli(["bundle", `${fixturesRoot}/bundle/entry.yaml`, "--dereference"]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).not.toContain("$ref");
+    expect(result.stdout).not.toContain("shared.yaml");
+    expect(result.stdout).not.toContain("components:");
+    expect(result.stdout).toContain("type: object");
+  });
+
+  test("--dereference keeps a minimal components entry for a reference cycle and warns", async () => {
+    const result = await runCli(["bundle", `${fixturesRoot}/bundle/deref-cycle.yaml`, "--dereference"]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toContain("warning:");
+    expect(result.stdout).toContain("components:");
+    expect(result.stdout).toContain("Node:");
+    expect(result.stdout).toContain("#/components/schemas/Node");
+  });
+
   test("exits 2 on usage error (no entry given)", async () => {
     const result = await runCli(["bundle"]);
     expect(result.exitCode).toBe(2);

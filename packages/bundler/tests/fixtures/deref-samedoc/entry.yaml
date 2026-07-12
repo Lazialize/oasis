@@ -1,0 +1,24 @@
+openapi: 3.0.3
+info:
+  title: Dereference Same Document
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      tags: [pets]
+      description: List pets.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+components:
+  schemas:
+    Pet:
+      type: object
+      properties:
+        name:
+          type: string

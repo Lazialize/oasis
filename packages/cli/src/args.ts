@@ -43,13 +43,16 @@ export interface ParsedBundleArgs {
   outPath?: string;
   /** Explicit `--format`, if given; undefined means "infer from --out extension, default yaml". */
   format?: "yaml" | "json";
+  /** `--dereference`: fully inline every `$ref` instead of lifting external refs into `components/*`. */
+  dereference: boolean;
 }
 
-/** Parse arguments for `oasis bundle <entry> [-o|--out path] [--format yaml|json]`. */
+/** Parse arguments for `oasis bundle <entry> [-o|--out path] [--format yaml|json] [--dereference]`. */
 export function parseBundleArgs(args: string[]): ParseResult<ParsedBundleArgs> {
   let entry: string | undefined;
   let outPath: string | undefined;
   let format: "yaml" | "json" | undefined;
+  let dereference = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -63,6 +66,8 @@ export function parseBundleArgs(args: string[]): ParseResult<ParsedBundleArgs> {
         return { ok: false, error: '--format must be "yaml" or "json"' };
       }
       format = value;
+    } else if (arg === "--dereference") {
+      dereference = true;
     } else if (arg?.startsWith("-")) {
       return { ok: false, error: `Unknown flag "${arg}"` };
     } else if (arg && !entry) {
@@ -76,5 +81,5 @@ export function parseBundleArgs(args: string[]): ParseResult<ParsedBundleArgs> {
     return { ok: false, error: "An entry file is required" };
   }
 
-  return { ok: true, value: { entry, outPath, format } };
+  return { ok: true, value: { entry, outPath, format, dereference } };
 }
