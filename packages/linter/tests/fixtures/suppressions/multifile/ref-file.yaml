@@ -1,0 +1,7 @@
+# oasis-disable-file operation-tags
+RefPath:
+  get:
+    operationId: getRef
+    responses:
+      '200':
+        description: OK

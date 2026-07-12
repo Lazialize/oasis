@@ -1,0 +1,13 @@
+openapi: 3.0.3
+info:
+  title: T
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      tags: [a]
+      description: x
+      responses:
+        '404':
+          description: Not found

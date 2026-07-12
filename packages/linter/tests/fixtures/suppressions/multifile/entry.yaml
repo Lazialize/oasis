@@ -1,0 +1,13 @@
+openapi: 3.0.3
+info:
+  title: Suppressions Multifile
+  version: "1.0.0"
+paths:
+  /entry:
+    get:
+      operationId: getEntry
+      responses:
+        '200':
+          description: OK
+  /ref:
+    $ref: './ref-file.yaml#/RefPath'

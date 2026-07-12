@@ -80,10 +80,96 @@ Exit code is `1` if any error-severity diagnostic is reported, `0` otherwise, `2
 | `operation-operationId` | error | `operationId` present and unique across the workspace |
 | `operation-tags` | warn | Operations have at least one tag |
 | `operation-description` | warn | Operations have a `description` or `summary` |
+| `operation-success-response` | warn | Operations have at least one 2xx/3xx response (`default` alone doesn't count) |
 | `path-params-defined` | error | `{param}` templates ↔ `in: path` parameters agree; path params are `required` |
 | `no-unused-components` | warn | Components nothing references |
+| `no-duplicate-paths` | error | Path templates that are equivalent up to parameter names (`/users/{id}` vs `/users/{userId}`) |
+| `security-defined` | error | `security` requirement scheme names exist in `components/securitySchemes` |
+| `tags-defined` | off | Operation tags are declared in the root `tags` list |
+| `no-unused-tags` | warn | Root `tags` list entries are used by at least one operation |
+| `naming-convention` | off | Configurable casing for operationIds, component names, parameter names, schema property names (see below) |
+| `example-schema-match` | warn | `example`/`examples[].value` values conform to their schema (Schema Object, Media Type Object, Parameter Object), version-aware |
 
 Syntax errors are always reported as errors and cannot be disabled.
+
+##### `example-schema-match` validation subset
+
+This rule hand-rolls a small subset of JSON Schema / OpenAPI Schema Object validation rather than
+pulling in a full validator dependency, to keep the binary lean. It checks `type` (version-aware:
+3.0 `nullable` vs 3.1 type arrays / `"null"`), `enum`, `const` (3.1), `required`/`properties`,
+`additionalProperties: false`, `items` (+ 3.1 `prefixItems`), `minItems`/`maxItems`,
+`minimum`/`maximum`/`exclusiveMinimum`/`exclusiveMaximum` (version-aware boolean vs numeric
+exclusive bounds), `minLength`/`maxLength`/`pattern`, and `allOf` (every branch must pass) /
+`oneOf`/`anyOf` (at least one branch must pass — `oneOf`'s exclusivity is deliberately not
+enforced). Schemas using `not`, `discriminator`, or containing an unresolved `$ref` are skipped
+entirely (no diagnostic) rather than risk a false positive. `externalValue` examples are skipped
+since there's no local value to check.
+
+##### `naming-convention` options
+
+Off by default and a no-op until configured — pass an options object naming at least one target and
+the casing style to enforce for it:
+
+```jsonc
+{
+  "lint": {
+    "rules": {
+      "naming-convention": [
+        "warn",
+        {
+          "operationId": "camelCase",
+          "componentName": "PascalCase",
+          "parameterName": "camelCase",
+          "propertyName": "camelCase"
+        }
+      ]
+    }
+  }
+}
+```
+
+- All four keys are optional; only the ones present are checked. Supported styles: `camelCase`,
+  `PascalCase`, `snake_case`, `kebab-case`, `SCREAMING_SNAKE_CASE`.
+- `componentName` checks the keys under every `components/*` group (`schemas`, `responses`,
+  `parameters`, `examples`, `requestBodies`, `headers`, `securitySchemes`, `links`, `callbacks`, and
+  3.1's `pathItems`).
+- `parameterName` checks parameter objects' `name` field, from path items, operations, and
+  `components/parameters`. `in: header` parameters are exempt — HTTP header names are conventionally
+  kebab/mixed case and case-insensitive on the wire, so enforcing a body/query-style casing on them
+  doesn't make sense.
+- `propertyName` checks keys directly under a schema's `properties` map, recursing into nested
+  schemas reachable via `properties`/`items`/`additionalProperties`/`allOf`/`oneOf`/`anyOf` (so a
+  nested object's own `properties` are checked too). 3.1's `patternProperties` is not traversed at
+  all — its keys are regexes, not property names.
+
+#### Inline suppression
+
+Individual diagnostics can be suppressed with comments in the YAML source, similar to
+`eslint-disable`:
+
+```yaml
+paths:
+  /pets:
+    get:
+      # oasis-disable-next-line operation-tags
+      operationId: listPets
+      responses:
+        '200':
+          description: OK
+```
+
+- `# oasis-disable-next-line <rule> [<rule>...]` suppresses the listed rules for any diagnostic
+  whose range starts on the line immediately following the comment. With no rule names, it
+  suppresses every rule on that line.
+- `# oasis-disable-file <rule> [<rule>...]` suppresses the listed rules (or every rule, with no
+  names given) for the whole file. It can be placed anywhere in the file; convention is to put it
+  at the top.
+
+Rule names are separated by whitespace and/or commas. Unknown rule names are ignored rather than
+treated as errors. Suppression is per-file: a directive in a file reached only via `$ref` only
+suppresses diagnostics attributed to that file. Syntax errors are never suppressible. JSON
+documents don't support comments, so inline suppression isn't available for them — use
+`lint.rules`/`lint.overrides` in `oasis.config.jsonc` instead.
 
 #### Configuration
 
@@ -94,14 +180,31 @@ Place an `oasis.config.jsonc` at your project root (discovered upward from the w
   "lint": {
     "rules": {
       "operation-tags": "off",
-      "no-unused-components": "error"
-    }
+      "no-unused-components": "error",
+      "example-rule": ["warn", { "option": "value" }]
+    },
+    "overrides": [
+      {
+        "files": ["paths/**/*.yaml"],
+        "rules": { "operation-tags": "off" }
+      }
+    ]
   },
   "entries": ["openapi.yaml"]
 }
 ```
 
-Severities: `"error"` | `"warn"` | `"info"` | `"off"`.
+Severities: `"error"` | `"warn"` | `"info"` | `"off"`. A rule can also be given as
+`["severity", { ...options }]` to pass it an options object; rules that support options validate
+them and document their shape individually (a config warning is emitted for options an enabled
+rule rejects, or that are given for a rule that doesn't take any).
+
+`lint.overrides` applies rule config (either severity form) to files matching a glob, on top of
+`lint.rules`. Each `files` glob is matched against the diagnostic's file path relative to the
+directory containing the config file — including files reached only via `$ref` from the entry
+document, not just the entry itself. Later overrides win over earlier ones for the same rule, and
+overrides win over `lint.rules` wherever they match (even flipping a globally `"off"` rule back on,
+or vice versa, for just the matching files).
 
 `entries` is an optional list of entry-document paths, relative to the directory containing the
 config file. It's consumed by the LSP (see "project mode" below) and by `oasis lint` when run with

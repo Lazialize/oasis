@@ -1,8 +1,10 @@
+import { dirname } from "node:path";
 import type { Node } from "yaml";
-import { detectVersion, nodeAtPointer, rangeFromOffsets, zeroRange } from "@oasis/core";
-import type { Range, WorkspaceGraph } from "@oasis/core";
+import { detectVersion, extractSuppressions, isSuppressed, nodeAtPointer, rangeFromOffsets, zeroRange } from "@oasis/core";
+import type { FileSuppressions, Range, WorkspaceGraph } from "@oasis/core";
 import { rules } from "./rules/index.ts";
 import type { LintDiagnostic, LintDiagnosticSeverity, ReportLocation, Rule, RuleContext, RuleSeverity } from "./types.ts";
+import { effectiveRuleConfig } from "./config.ts";
 import type { ResolvedLintConfig } from "./config.ts";
 
 export interface LintOptions {
@@ -33,7 +35,12 @@ function resolveLocation(location: ReportLocation): Range | undefined {
  * syntax errors are always emitted as errors and cannot be disabled; the rest are surfaced by the
  * `no-duplicate-keys` / `no-unresolved-ref` / `no-ref-cycle` rules and are subject to config.
  */
-export function lint(graph: WorkspaceGraph, config: ResolvedLintConfig, options: LintOptions = {}): LintDiagnostic[] {
+export function lint(
+  graph: WorkspaceGraph,
+  config: ResolvedLintConfig,
+  options: LintOptions = {},
+  ruleList: Rule[] = rules as Rule[],
+): LintDiagnostic[] {
   const diagnostics: LintDiagnostic[] = [];
   const entryDoc = graph.documents.get(graph.entryPath);
   const documents = [...graph.documents.values()];
@@ -66,20 +73,34 @@ export function lint(graph: WorkspaceGraph, config: ResolvedLintConfig, options:
 
   if (!entryDoc) return sortDiagnostics(diagnostics);
 
-  for (const rule of rules as Rule[]) {
-    const severity = config.rules[rule.name] ?? rule.defaultSeverity;
-    if (severity === "off") continue;
+  const configDir = options.configPath ? dirname(options.configPath) : undefined;
+
+  // Inline `# oasis-disable-*` comment directives, per file. Syntax-error diagnostics above are
+  // pushed directly (not through `report()`) and are therefore never subject to suppression.
+  const suppressionsByFile = new Map<string, FileSuppressions>();
+  for (const doc of documents) suppressionsByFile.set(doc.filePath, extractSuppressions(doc.text));
+
+  for (const rule of ruleList) {
+    const base = config.rules[rule.name] ?? { severity: rule.defaultSeverity, options: rule.defaultOptions };
+    // An override can enable a globally-off rule (or vice versa) for specific files, so only skip
+    // running the rule entirely when nothing could possibly turn it on for any file.
+    const hasOverrideForRule = config.overrides.some((o) => rule.name in o.rules);
+    if (base.severity === "off" && !hasOverrideForRule) continue;
 
     const ctx: RuleContext = {
       graph,
       entryDoc,
       documents,
       version: detectVersion(entryDoc),
+      options: base.options,
       report(location, message, opts) {
-        const effectiveSeverity = opts?.severity ?? severity;
-        if (effectiveSeverity === "off") return;
         const range = resolveLocation(location);
         if (!range) return;
+        const effective = effectiveRuleConfig(config, rule.name, range.filePath, configDir);
+        const effectiveSeverity = opts?.severity ?? effective.severity;
+        if (effectiveSeverity === "off") return;
+        const suppressions = suppressionsByFile.get(range.filePath);
+        if (suppressions && isSuppressed(suppressions, rule.name, range.start.line)) return;
         diagnostics.push({ rule: rule.name, severity: toDiagnosticSeverity(effectiveSeverity), message, range });
       },
     };

@@ -1,0 +1,20 @@
+openapi: 3.0.3
+info:
+  title: Suppressions
+  version: "1.0.0"
+paths:
+  /a:
+    get:
+      # oasis-disable-next-line operation-tags
+      operationId: getA
+      description: Get A.
+      responses:
+        '200':
+          description: OK
+  /b:
+    get:
+      operationId: getB
+      description: Get B.
+      responses:
+        '200':
+          description: OK

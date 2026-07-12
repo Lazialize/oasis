@@ -1,0 +1,25 @@
+openapi: 3.0.3
+info:
+  title: Suppressions
+  version: "1.0.0"
+paths:
+  /comma:
+    get:
+      # oasis-disable-next-line operation-tags,operation-description
+      operationId: getComma
+      responses:
+        '200':
+          description: OK
+  /space:
+    get:
+      # oasis-disable-next-line operation-tags operation-description
+      operationId: getSpace
+      responses:
+        '200':
+          description: OK
+  /none-suppressed:
+    get:
+      operationId: getNoneSuppressed
+      responses:
+        '200':
+          description: OK

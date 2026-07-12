@@ -22,6 +22,9 @@ export { allDiagnostics, loadWorkspaceGraph } from "./graph.ts";
 
 export { offsetAtPosition, positionAtOffset, rangeFromOffsets, zeroRange } from "./position.ts";
 
+export type { FileSuppressions, SuppressedRules } from "./suppressions.ts";
+export { extractSuppressions, isSuppressed } from "./suppressions.ts";
+
 export { childAt, keyToString } from "./walk.ts";
 
 export type { ComponentSection } from "./components.ts";

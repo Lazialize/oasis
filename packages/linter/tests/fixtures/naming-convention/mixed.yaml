@@ -1,0 +1,42 @@
+openapi: 3.0.3
+info:
+  title: Naming
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      operationId: get_pet_list
+      parameters:
+        - name: pet_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: X-Request-Id
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/pet_response'
+components:
+  schemas:
+    pet_response:
+      type: object
+      properties:
+        petName:
+          type: string
+        pet_age:
+          type: integer
+        nested:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              extra_field:
+                type: string

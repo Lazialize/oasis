@@ -1,0 +1,33 @@
+openapi: 3.0.3
+info:
+  title: T
+  version: "1.0.0"
+paths:
+  /users/{id}:
+    get:
+      operationId: getUserById
+      tags: [a]
+      description: x
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+  /users/{userId}:
+    get:
+      operationId: getUserByUserId
+      tags: [a]
+      description: x
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
