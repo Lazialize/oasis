@@ -379,7 +379,14 @@ bun test            # all package tests
 bunx tsc --noEmit   # typecheck (packages only; the extension has its own tsconfig)
 bun run build:bin   # compile the self-contained dist/oasis binary
 bun run test:bin    # exercise the compiled binary (lint/bundle/lsp), rebuilding it if missing
+bun run bench       # benchmark lint/bundle on synthetic multi-MB/multi-file specs
 ```
+
+`bun run bench` (`scripts/bench.ts`) generates two deterministic synthetic workloads into a temp
+directory — a large single-file spec (hundreds of paths, deep `allOf`/`oneOf` schema chains) and a
+100+ file `$ref`-linked workspace — then reports median wall-clock time for parse+graph load, a
+full lint, and a bundle. Use it after touching hot paths in `packages/core` or
+`packages/linter`'s rule engine to check for regressions on large documents.
 
 The VS Code extension is built separately with npm — see [editors/vscode/README.md](editors/vscode/README.md).
 

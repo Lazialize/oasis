@@ -25,11 +25,24 @@ export interface FoundRef {
   range: Range;
 }
 
+/**
+ * Cache of `findRefs` results, keyed by document identity. A full AST walk over a large document
+ * is not free, and several independent lint rules (plus graph loading itself) each call
+ * `findRefs` on every document in the workspace; memoizing avoids re-walking the same document
+ * repeatedly within (and across) a single lint run. Keyed by the `OasisDocument` object itself,
+ * so a re-parsed document (e.g. after an LSP edit) naturally gets a fresh, uncached entry.
+ */
+const findRefsCache = new WeakMap<OasisDocument, FoundRef[]>();
+
 /** Find every `$ref: "..."` occurrence within a document's AST. */
 export function findRefs(doc: OasisDocument): FoundRef[] {
+  const cached = findRefsCache.get(doc);
+  if (cached) return cached;
+
   const results: FoundRef[] = [];
   const root = doc.yamlDoc.contents;
   if (isNode(root)) walk(root);
+  findRefsCache.set(doc, results);
   return results;
 
   function walk(node: Node): void {
