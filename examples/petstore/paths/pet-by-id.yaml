@@ -3,7 +3,7 @@ get:
   tags: [pets]
   description: Get a single pet by id.
   # `petId` is missing from parameters — oasis lint will report
-  # path-params-defined here.
+  # paths/params-defined here.
   responses:
     '200':
       description: The pet.

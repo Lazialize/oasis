@@ -1,4 +1,4 @@
-# oasis-disable-file operation-tags
+# oasis-disable-file operation/tags
 RefPath:
   get:
     operationId: getRef

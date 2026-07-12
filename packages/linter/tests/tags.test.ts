@@ -13,37 +13,37 @@ async function lintFixture(relativePath: string, configFile?: Parameters<typeof 
   return lint(graph, config);
 }
 
-describe("tags-defined", () => {
+describe("tags/defined", () => {
   test("is off by default", async () => {
     const diagnostics = await lintFixture("tags/undeclared-tag.yaml");
-    expect(diagnostics.some((d) => d.rule === "tags-defined")).toBe(false);
+    expect(diagnostics.some((d) => d.rule === "tags/defined")).toBe(false);
   });
 
   test("flags an operation tag not declared at the root, when enabled", async () => {
-    const diagnostics = await lintFixture("tags/undeclared-tag.yaml", { lint: { rules: { "tags-defined": "error" } } });
-    const d = diagnostics.find((d) => d.rule === "tags-defined");
+    const diagnostics = await lintFixture("tags/undeclared-tag.yaml", { lint: { rules: { "tags/defined": "error" } } });
+    const d = diagnostics.find((d) => d.rule === "tags/defined");
     expect(d).toBeDefined();
     expect(d?.severity).toBe("error");
     expect(d?.message).toContain("reptiles");
   });
 
   test("valid fixture passes when enabled", async () => {
-    const diagnostics = await lintFixture("valid/openapi.yaml", { lint: { rules: { "tags-defined": "error" } } });
-    expect(diagnostics.some((d) => d.rule === "tags-defined")).toBe(false);
+    const diagnostics = await lintFixture("valid/openapi.yaml", { lint: { rules: { "tags/defined": "error" } } });
+    expect(diagnostics.some((d) => d.rule === "tags/defined")).toBe(false);
   });
 });
 
-describe("no-unused-tags", () => {
+describe("tags/no-unused", () => {
   test("flags a root tag not used by any operation", async () => {
     const diagnostics = await lintFixture("tags/unused-tag.yaml");
-    const d = diagnostics.find((d) => d.rule === "no-unused-tags");
+    const d = diagnostics.find((d) => d.rule === "tags/no-unused");
     expect(d).toBeDefined();
-    expect(d?.severity).toBe("warning");
+    expect(d?.severity).toBe("warn");
     expect(d?.message).toContain("reptiles");
   });
 
   test("valid fixture passes", async () => {
     const diagnostics = await lintFixture("valid/openapi.yaml");
-    expect(diagnostics.some((d) => d.rule === "no-unused-tags")).toBe(false);
+    expect(diagnostics.some((d) => d.rule === "tags/no-unused")).toBe(false);
   });
 });

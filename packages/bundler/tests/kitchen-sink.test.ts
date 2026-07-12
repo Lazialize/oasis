@@ -22,8 +22,8 @@ describe("bundle: kitchen-sink corpus", () => {
       const bundledGraph = await loadWorkspaceGraph(bundledFs, bundledPath);
       expect(bundledGraph.documents.size).toBe(1); // no external files pulled in
 
-      const diagnostics = lint(bundledGraph, resolveConfig({ lint: { rules: { "no-unused-components": "off" } } }));
-      const unresolvedRefs = diagnostics.filter((d) => d.rule === "no-unresolved-ref");
+      const diagnostics = lint(bundledGraph, resolveConfig({ lint: { rules: { "components/no-unused": "off" } } }));
+      const unresolvedRefs = diagnostics.filter((d) => d.rule === "refs/no-unresolved");
       expect(unresolvedRefs).toEqual([]);
       const structureErrors = diagnostics.filter((d) => d.rule.startsWith("structure/") && d.severity === "error");
       expect(structureErrors).toEqual([]);

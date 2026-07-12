@@ -9,7 +9,7 @@ import type { ServerContext } from "./workspace.ts";
 
 const SEVERITY_MAP: Record<LintDiagnosticSeverity, DiagnosticSeverity> = {
   error: DiagnosticSeverity.Error,
-  warning: DiagnosticSeverity.Warning,
+  warn: DiagnosticSeverity.Warning,
   info: DiagnosticSeverity.Information,
 };
 

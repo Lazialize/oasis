@@ -17,7 +17,7 @@ function collectDeclaredTags(root: Node | undefined): Set<string> {
 }
 
 export const tagsDefined: Rule = {
-  name: "tags-defined",
+  name: "tags/defined",
   description: 'Requires every tag used by an operation to be declared in the root "tags" list.',
   defaultSeverity: "off",
   check(ctx) {

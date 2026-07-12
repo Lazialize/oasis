@@ -7,7 +7,7 @@ import type { Rule } from "../types.ts";
 const SUCCESS_STATUS = /^[23](\d{2}|XX)$/;
 
 export const operationSuccessResponse: Rule = {
-  name: "operation-success-response",
+  name: "operation/success-response",
   description: 'Requires every operation to declare at least one 2xx or 3xx response (a lone "default" does not count).',
   defaultSeverity: "warn",
   check(ctx) {

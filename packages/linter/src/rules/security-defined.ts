@@ -44,7 +44,7 @@ function checkSecurityNode(
 }
 
 export const securityDefined: Rule = {
-  name: "security-defined",
+  name: "security/defined",
   description: 'Requires every scheme name referenced in a "security" requirement to exist in "components/securitySchemes".',
   defaultSeverity: "error",
   check(ctx) {

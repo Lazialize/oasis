@@ -1,8 +1,9 @@
 import type { LintDiagnostic } from "@oasis/linter";
+import { toRelativeFilePath } from "./paths.ts";
 
 export interface JsonDiagnostic {
   rule: string;
-  severity: "error" | "warning" | "info";
+  severity: "error" | "warn" | "info";
   message: string;
   file: string;
   range: {
@@ -16,12 +17,12 @@ export interface JsonReport {
   summary: { errors: number; warnings: number; infos: number };
 }
 
-export function toJsonReport(diagnostics: LintDiagnostic[]): JsonReport {
+export function toJsonReport(diagnostics: LintDiagnostic[], cwd: string = process.cwd()): JsonReport {
   const jsonDiagnostics: JsonDiagnostic[] = diagnostics.map((d) => ({
     rule: d.rule,
     severity: d.severity,
     message: d.message,
-    file: d.range.filePath,
+    file: toRelativeFilePath(d.range.filePath, cwd),
     range: { start: d.range.start, end: d.range.end },
   }));
 
@@ -34,12 +35,12 @@ export function summarize(diagnostics: LintDiagnostic[]): { errors: number; warn
   let infos = 0;
   for (const d of diagnostics) {
     if (d.severity === "error") errors++;
-    else if (d.severity === "warning") warnings++;
+    else if (d.severity === "warn") warnings++;
     else infos++;
   }
   return { errors, warnings, infos };
 }
 
-export function renderJson(diagnostics: LintDiagnostic[]): string {
-  return JSON.stringify(toJsonReport(diagnostics), null, 2);
+export function renderJson(diagnostics: LintDiagnostic[], cwd: string = process.cwd()): string {
+  return JSON.stringify(toJsonReport(diagnostics, cwd), null, 2);
 }

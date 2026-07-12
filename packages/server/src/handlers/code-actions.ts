@@ -185,7 +185,7 @@ function buildAddDescription(
 }
 
 // ---------------------------------------------------------------------------
-// 3: Add parameter definition (path-params-defined)
+// 3: Add parameter definition (paths/params-defined)
 // ---------------------------------------------------------------------------
 
 function buildParamItemLines(propColumn: number, name: string): string {
@@ -639,8 +639,8 @@ function buildInlineRef(graph: WorkspaceGraph, entryDoc: OasisDocument, doc: Oas
 
 /**
  * Compute code actions for `params`: quickfixes for the oasis lint diagnostics reported in
- * `params.diagnostics` (operation-operationId, operation-description, path-params-defined,
- * no-unused-components), plus a refactor.extract action when the cursor sits inside an
+ * `params.diagnostics` (operation/operation-id, operation/description, paths/params-defined,
+ * components/no-unused), plus a refactor.extract action when the cursor sits inside an
  * extractable inline schema, plus a refactor.inline action when the cursor sits on a `$ref`.
  * Returns [] rather than a broken edit whenever the AST no longer matches what a diagnostic
  * describes (a stale diagnostic from an outdated publish).
@@ -660,16 +660,16 @@ export async function getCodeActions(ctx: ServerContext, params: CodeActionsPara
   params.diagnostics.forEach((diag, index) => {
     let action: CodeActionResult | undefined;
     switch (diag.code) {
-      case "operation-operationId":
+      case "operation/operation-id":
         action = buildAddOperationId(graph, entryDoc, doc, diag, index);
         break;
-      case "operation-description":
+      case "operation/description":
         action = buildAddDescription(graph, entryDoc, doc, diag, index);
         break;
-      case "path-params-defined":
+      case "paths/params-defined":
         action = buildAddPathParam(graph, entryDoc, doc, diag, index);
         break;
-      case "no-unused-components":
+      case "components/no-unused":
         action = buildRemoveUnusedComponent(doc, diag, index);
         break;
       default:

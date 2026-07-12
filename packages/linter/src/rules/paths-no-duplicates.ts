@@ -13,7 +13,7 @@ function normalizeTemplate(template: string): string {
 }
 
 export const noDuplicatePaths: Rule = {
-  name: "no-duplicate-paths",
+  name: "paths/no-duplicates",
   description: "Flags path templates that are equivalent up to parameter names (e.g. /users/{id} vs /users/{userId}).",
   defaultSeverity: "error",
   check(ctx) {

@@ -17,7 +17,7 @@ function collectUsedTags(ctx: RuleContext): Set<string> {
 }
 
 export const noUnusedTags: Rule = {
-  name: "no-unused-tags",
+  name: "tags/no-unused",
   description: 'Requires every tag declared in the root "tags" list to be used by at least one operation.',
   defaultSeverity: "warn",
   check(ctx) {

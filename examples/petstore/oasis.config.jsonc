@@ -3,7 +3,7 @@
     "rules": {
       // Path files intentionally $ref back into the entry document
       // (for the shared Error schema) — that file-level cycle is fine here.
-      "no-ref-cycle": "off"
+      "refs/no-cycle": "off"
     }
   },
   // LSP "project mode": the server builds this entry's workspace graph at startup and publishes

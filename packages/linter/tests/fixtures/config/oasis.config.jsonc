@@ -2,8 +2,8 @@
   // severity override, a disabled rule, and an unknown rule name (should warn, not crash)
   "lint": {
     "rules": {
-      "operation-description": "info",
-      "operation-tags": "off",
+      "operation/description": "info",
+      "operation/tags": "off",
       "no-such-rule": "error",
     },
   },

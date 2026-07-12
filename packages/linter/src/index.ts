@@ -33,4 +33,4 @@ export { HTTP_METHODS, iterateOperations, iteratePathItems, iterateSchemas, PATH
 export type { ResolvedLocation } from "./util.ts";
 export { childAt, isRefObject, keyToString, nodeAt, resolveMaybeRef } from "./util.ts";
 
-export { COMPONENT_CATEGORIES } from "./rules/no-unused-components.ts";
+export { COMPONENT_CATEGORIES } from "./rules/components-no-unused.ts";

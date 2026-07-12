@@ -8,7 +8,7 @@ function hasNonEmptyString(node: ReturnType<typeof childAt>): boolean {
 }
 
 export const operationDescription: Rule = {
-  name: "operation-description",
+  name: "operation/description",
   description: "Requires every operation to have a description or summary.",
   defaultSeverity: "warn",
   check(ctx) {

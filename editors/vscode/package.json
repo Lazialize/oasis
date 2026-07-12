@@ -4,7 +4,6 @@
   "description": "Lint, navigate, and get IntelliSense for OpenAPI documents via the Oasis language server.",
   "version": "0.7.0",
   "publisher": "lazialize",
-  "private": true,
   "license": "MIT",
   "repository": {
     "type": "git",

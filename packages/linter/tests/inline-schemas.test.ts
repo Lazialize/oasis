@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { InMemoryFileSystem, loadWorkspaceGraph } from "@oasis/core";
 import { lint } from "../src/engine.ts";
 import { resolveConfig } from "../src/config.ts";
-import { namingConvention } from "../src/rules/naming-convention.ts";
+import { namingConvention } from "../src/rules/style-naming-convention.ts";
 
 async function lintFiles(files: Record<string, string>, entry = "/virtual/entry.yaml") {
   const fs = new InMemoryFileSystem(files);
@@ -99,7 +99,7 @@ components:
   });
 });
 
-describe("naming-convention propertyName on inline schemas", () => {
+describe("style/naming-convention propertyName on inline schemas", () => {
   test("fires on properties of an inline request body schema", async () => {
     const doc = `
 openapi: 3.0.3
@@ -125,14 +125,14 @@ paths:
     const fs = new InMemoryFileSystem({ "/virtual/entry.yaml": doc });
     const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
     const ruleList = [namingConvention];
-    const config = resolveConfig({ lint: { rules: { "naming-convention": ["warn", { propertyName: "camelCase" }] } } }, ruleList);
+    const config = resolveConfig({ lint: { rules: { "style/naming-convention": ["warn", { propertyName: "camelCase" }] } } }, ruleList);
     const diagnostics = lint(graph, config, {}, ruleList);
     expect(diagnostics.length).toBe(1);
     expect(diagnostics[0]?.message).toContain('Property "bad_name" is not camelCase');
   });
 });
 
-describe("example-schema-match on inline schemas", () => {
+describe("examples/schema-match on inline schemas", () => {
   test("fires on a schema-level example inside a components-level requestBody (previously missed)", async () => {
     const doc = `
 openapi: 3.0.3
@@ -150,7 +150,7 @@ components:
             example: "not an integer"
 `;
     const diagnostics = await lintFiles({ "/virtual/entry.yaml": doc });
-    const d = diagnostics.filter((x) => x.rule === "example-schema-match");
+    const d = diagnostics.filter((x) => x.rule === "examples/schema-match");
     expect(d.length).toBe(1);
     expect(d[0]?.message).toContain("got string");
   });
@@ -177,7 +177,7 @@ paths:
                 example: "not an integer"
 `;
     const diagnostics = await lintFiles({ "/virtual/entry.yaml": doc });
-    const d = diagnostics.filter((x) => x.rule === "example-schema-match");
+    const d = diagnostics.filter((x) => x.rule === "examples/schema-match");
     expect(d.length).toBe(1);
   });
 
@@ -219,7 +219,7 @@ components:
       example: "not an integer"
 `;
     const diagnostics = await lintFiles({ "/virtual/entry.yaml": doc });
-    const d = diagnostics.filter((x) => x.rule === "example-schema-match");
+    const d = diagnostics.filter((x) => x.rule === "examples/schema-match");
     expect(d.length).toBe(1);
   });
 });

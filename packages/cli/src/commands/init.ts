@@ -78,8 +78,8 @@ ${entriesLines}
     "rules": {
       // Override built-in rule severities ("error" | "warn" | "info" | "off") or pass
       // options; see the README "Built-in rules" table for the full list. For example:
-      // "operation-tags": "off",
-      // "naming-convention": ["warn", { "operationId": "camelCase" }],
+      // "operation/tags": "off",
+      // "style/naming-convention": ["warn", { "operationId": "camelCase" }],
     },
   },
 }

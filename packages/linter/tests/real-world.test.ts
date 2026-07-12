@@ -14,7 +14,7 @@ async function lintFixture(relativePath: string, configFile?: Parameters<typeof 
   return lint(graph, config);
 }
 
-/** Error-severity diagnostics from `structure/*` rules only; style rules (operation-tags, etc.) may legitimately warn. */
+/** Error-severity diagnostics from `structure/*` rules only; style rules (operation/tags, etc.) may legitimately warn. */
 function structureErrors(diagnostics: LintDiagnostic[]): LintDiagnostic[] {
   return diagnostics.filter((d) => d.rule.startsWith("structure/") && d.severity === "error");
 }

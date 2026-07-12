@@ -1,6 +1,6 @@
-import { relative } from "node:path";
 import type { LintDiagnostic, LintDiagnosticSeverity } from "@oasis/linter";
 import packageJson from "../../package.json" with { type: "json" };
+import { toRelativeFilePath } from "./paths.ts";
 
 const SARIF_INFORMATION_URI = "https://github.com/Lazialize/oasis";
 
@@ -44,10 +44,11 @@ export interface SarifLog {
   }>;
 }
 
-/** Map a lint diagnostic severity to a SARIF result level. */
+/** Map a lint diagnostic severity to a SARIF result level. SARIF's "warning" token is fixed by the
+ * spec and is unrelated to our own "warn" severity token. */
 function toSarifLevel(severity: LintDiagnosticSeverity): "error" | "warning" | "note" {
   if (severity === "error") return "error";
-  if (severity === "warning") return "warning";
+  if (severity === "warn") return "warning";
   return "note";
 }
 
@@ -57,9 +58,8 @@ function toSarifLevel(severity: LintDiagnosticSeverity): "error" | "warning" | "
  * repository root, but diagnostics can point outside `cwd` (e.g. a `$ref`'d file elsewhere).
  */
 function toArtifactUri(filePath: string, cwd: string): string {
-  const rel = relative(cwd, filePath);
-  if (rel.startsWith("..") || rel === "") return `file://${filePath}`;
-  return rel.split("\\").join("/");
+  const rel = toRelativeFilePath(filePath, cwd);
+  return rel === filePath ? `file://${filePath}` : rel;
 }
 
 /** Internal ranges are 0-based (line and character); SARIF regions are 1-based. */

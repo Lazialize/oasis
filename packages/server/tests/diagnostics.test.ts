@@ -29,12 +29,12 @@ describe("getDiagnosticsByFile", () => {
     const byFile = await getDiagnosticsByFile(ctx, ENTRY_PATH);
     const diagnostics = byFile.get(ENTRY_PATH) ?? [];
 
-    const unresolvedRef = diagnostics.find((d) => d.code === "no-unresolved-ref");
+    const unresolvedRef = diagnostics.find((d) => d.code === "refs/no-unresolved");
     expect(unresolvedRef).toBeDefined();
     expect(unresolvedRef?.severity).toBe(DiagnosticSeverity.Error);
     expect(unresolvedRef?.source).toBe("oasis");
 
-    const missingOperationId = diagnostics.find((d) => d.code === "operation-operationId");
+    const missingOperationId = diagnostics.find((d) => d.code === "operation/operation-id");
     expect(missingOperationId).toBeDefined();
   });
 

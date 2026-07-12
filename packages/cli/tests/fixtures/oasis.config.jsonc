@@ -1,7 +1,7 @@
 {
   "lint": {
     "rules": {
-      "operation-operationId": "off",
+      "operation/operation-id": "off",
     },
   },
 }

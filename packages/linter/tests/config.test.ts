@@ -44,9 +44,9 @@ describe("resolveConfig", () => {
 
   test("applies overrides and reports unknown rule names as warnings, not crashes", () => {
     const resolved = resolveConfig({
-      lint: { rules: { "operation-tags": "off", "no-such-rule": "error" } },
+      lint: { rules: { "operation/tags": "off", "no-such-rule": "error" } },
     });
-    expect(resolved.rules["operation-tags"]?.severity).toBe("off");
+    expect(resolved.rules["operation/tags"]?.severity).toBe("off");
     expect(resolved.configWarnings.some((w) => w.includes("no-such-rule"))).toBe(true);
   });
 
@@ -120,27 +120,27 @@ describe("lint.overrides", () => {
   test("effectiveRuleConfig: overrides win over top-level rules, later overrides win, matched relative to configDir", () => {
     const config = resolveConfig({
       lint: {
-        rules: { "operation-tags": "warn" },
+        rules: { "operation/tags": "warn" },
         overrides: [
-          { files: ["paths/**/*.yaml"], rules: { "operation-tags": "off" } },
-          { files: ["**/*.yaml"], rules: { "operation-tags": "info" } },
+          { files: ["paths/**/*.yaml"], rules: { "operation/tags": "off" } },
+          { files: ["**/*.yaml"], rules: { "operation/tags": "info" } },
         ],
       },
     });
 
     // Matches only the second (broader) override.
-    expect(effectiveRuleConfig(config, "operation-tags", "/root/entry.yaml", "/root").severity).toBe("info");
+    expect(effectiveRuleConfig(config, "operation/tags", "/root/entry.yaml", "/root").severity).toBe("info");
     // Matches both; the later override (declared second) wins.
-    expect(effectiveRuleConfig(config, "operation-tags", "/root/paths/pets.yaml", "/root").severity).toBe("info");
+    expect(effectiveRuleConfig(config, "operation/tags", "/root/paths/pets.yaml", "/root").severity).toBe("info");
     // No configDir (no config file loaded): overrides never apply.
-    expect(effectiveRuleConfig(config, "operation-tags", "/root/paths/pets.yaml", undefined).severity).toBe("warn");
+    expect(effectiveRuleConfig(config, "operation/tags", "/root/paths/pets.yaml", undefined).severity).toBe("warn");
     // A rule the overrides don't mention keeps its top-level/default resolution.
-    expect(effectiveRuleConfig(config, "operation-operationId", "/root/paths/pets.yaml", "/root").severity).toBe("error");
+    expect(effectiveRuleConfig(config, "operation/operation-id", "/root/paths/pets.yaml", "/root").severity).toBe("error");
   });
 
   test("invalid \"files\" in an override produces a config warning and the override is skipped", () => {
     const config = resolveConfig({
-      lint: { overrides: [{ files: "not-an-array" as never, rules: { "operation-tags": "off" } }] },
+      lint: { overrides: [{ files: "not-an-array" as never, rules: { "operation/tags": "off" } }] },
     });
     expect(config.overrides).toEqual([]);
     expect(config.configWarnings.some((w) => w.includes("overrides[0]"))).toBe(true);
@@ -154,9 +154,9 @@ describe("lint.overrides", () => {
     const resolved = resolveConfig(configFile);
     const diagnostics = lint(graph, resolved, { configPath: path });
 
-    // operation-operationId is off at the top level, but re-enabled (error) by the "paths/**" override.
+    // operation/operation-id is off at the top level, but re-enabled (error) by the "paths/**" override.
     // The violation is attributed to the $ref'd file, paths/pets.yaml, not the entry document.
-    const opIdDiags = diagnostics.filter((d) => d.rule === "operation-operationId");
+    const opIdDiags = diagnostics.filter((d) => d.rule === "operation/operation-id");
     expect(opIdDiags.length).toBe(1);
     expect(opIdDiags[0]?.severity).toBe("error");
     expect(opIdDiags[0]?.range.filePath).toBe(`${fixturesRoot}/overrides/paths/pets.yaml`);
@@ -165,9 +165,9 @@ describe("lint.overrides", () => {
     // only targets paths/**, so it stays off there.
     expect(opIdDiags.some((d) => d.range.filePath === entry)).toBe(false);
 
-    // operation-tags: default warn, "off" under paths/** (override 1), then "info" for every yaml
+    // operation/tags: default warn, "off" under paths/** (override 1), then "info" for every yaml
     // file (override 2, declared later) — override 2 wins wherever both match, i.e. everywhere.
-    const tagDiags = diagnostics.filter((d) => d.rule === "operation-tags");
+    const tagDiags = diagnostics.filter((d) => d.rule === "operation/tags");
     expect(tagDiags.length).toBe(2); // both /pets (in paths/pets.yaml) and /widgets (in entry.yaml)
     expect(tagDiags.every((d) => d.severity === "info")).toBe(true);
   });
@@ -177,13 +177,13 @@ describe("loadConfig", () => {
   test("loads an explicit --config path", async () => {
     const { configFile, path } = await loadConfig({ configPath: `${fixturesRoot}/config/oasis.config.jsonc` });
     expect(path).toBe(`${fixturesRoot}/config/oasis.config.jsonc`);
-    expect(configFile.lint?.rules?.["operation-tags"]).toBe("off");
+    expect(configFile.lint?.rules?.["operation/tags"]).toBe("off");
   });
 
   test("discovers oasis.config.jsonc upward from a nested cwd", async () => {
     const { configFile, path } = await loadConfig({ cwd: `${fixturesRoot}/config/nested/subdir` });
     expect(path).toBe(`${fixturesRoot}/config/oasis.config.jsonc`);
-    expect(configFile.lint?.rules?.["operation-description"]).toBe("info");
+    expect(configFile.lint?.rules?.["operation/description"]).toBe("info");
   });
 
   test("returns an empty config when none is found", async () => {
@@ -202,16 +202,16 @@ describe("end-to-end config application", () => {
     const resolved = resolveConfig(configFile);
     const diagnostics = lint(graph, resolved, { configPath: path });
 
-    // operation-tags is "off": no diagnostic despite the fixture having no tags.
-    expect(diagnostics.some((d) => d.rule === "operation-tags")).toBe(false);
+    // operation/tags is "off": no diagnostic despite the fixture having no tags.
+    expect(diagnostics.some((d) => d.rule === "operation/tags")).toBe(false);
 
-    // operation-description is overridden to "info".
-    const descDiag = diagnostics.find((d) => d.rule === "operation-description");
+    // operation/description is overridden to "info".
+    const descDiag = diagnostics.find((d) => d.rule === "operation/description");
     expect(descDiag).toBeDefined();
     expect(descDiag?.severity).toBe("info");
 
     // unknown rule name surfaces as a config warning diagnostic, not a crash.
-    const configDiag = diagnostics.find((d) => d.rule === "config");
+    const configDiag = diagnostics.find((d) => d.rule === "oasis/config");
     expect(configDiag).toBeDefined();
     expect(configDiag?.message).toContain("no-such-rule");
   });

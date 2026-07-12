@@ -13,10 +13,10 @@ async function lintFixture(relativePath: string) {
   return lint(graph, config);
 }
 
-describe("security-defined", () => {
+describe("security/defined", () => {
   test("flags an undefined scheme referenced at the document root", async () => {
     const diagnostics = await lintFixture("security/undefined-root.yaml");
-    const d = diagnostics.find((d) => d.rule === "security-defined");
+    const d = diagnostics.find((d) => d.rule === "security/defined");
     expect(d).toBeDefined();
     expect(d?.severity).toBe("error");
     expect(d?.message).toContain("apiKey");
@@ -24,25 +24,25 @@ describe("security-defined", () => {
 
   test("flags an undefined scheme referenced at the operation level", async () => {
     const diagnostics = await lintFixture("security/undefined-operation.yaml");
-    const d = diagnostics.find((d) => d.rule === "security-defined");
+    const d = diagnostics.find((d) => d.rule === "security/defined");
     expect(d).toBeDefined();
     expect(d?.message).toContain("oauth2");
   });
 
   test('accepts a defined scheme and an empty "{}" (optional) requirement', async () => {
     const diagnostics = await lintFixture("security/valid.yaml");
-    expect(diagnostics.some((d) => d.rule === "security-defined")).toBe(false);
+    expect(diagnostics.some((d) => d.rule === "security/defined")).toBe(false);
   });
 
   test("flags a violation in a referenced (non-entry) file", async () => {
     const diagnostics = await lintFixture("security/multifile/entry.yaml");
-    const d = diagnostics.find((d) => d.rule === "security-defined");
+    const d = diagnostics.find((d) => d.rule === "security/defined");
     expect(d).toBeDefined();
     expect(d?.range.filePath).toBe(`${fixturesRoot}/security/multifile/paths-pets.yaml`);
   });
 
   test("valid fixture passes", async () => {
     const diagnostics = await lintFixture("valid/openapi.yaml");
-    expect(diagnostics.some((d) => d.rule === "security-defined")).toBe(false);
+    expect(diagnostics.some((d) => d.rule === "security/defined")).toBe(false);
   });
 });

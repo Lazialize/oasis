@@ -5,14 +5,14 @@ info:
 paths:
   /comma:
     get:
-      # oasis-disable-next-line operation-tags,operation-description
+      # oasis-disable-next-line operation/tags,operation/description
       operationId: getComma
       responses:
         '200':
           description: OK
   /space:
     get:
-      # oasis-disable-next-line operation-tags operation-description
+      # oasis-disable-next-line operation/tags operation/description
       operationId: getSpace
       responses:
         '200':

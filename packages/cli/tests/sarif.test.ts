@@ -61,7 +61,7 @@ describe("oasis lint --format sarif", () => {
     expect(result.exitCode).toBe(1);
     const log = JSON.parse(result.stdout) as SarifLog;
     const result0 = log.runs[0]?.results[0];
-    expect(result0).toMatchObject({ ruleId: "operation-operationId", level: "error" });
+    expect(result0).toMatchObject({ ruleId: "operation/operation-id", level: "error" });
   });
 
   test("dedupes the rules array to rules that actually produced results, across a combined multi-entry run", async () => {
@@ -78,15 +78,15 @@ describe("oasis lint --format sarif", () => {
     // Single combined run for both entries.
     expect(log.runs).toHaveLength(1);
 
-    // "operation-operationId" fires for both entry.yaml and second.yaml but appears once in rules.
+    // "operation/operation-id" fires for both entry.yaml and second.yaml but appears once in rules.
     const ruleIds = log.runs[0]?.tool.driver.rules.map((r) => r.id) ?? [];
-    expect(ruleIds.filter((id) => id === "operation-operationId")).toHaveLength(1);
+    expect(ruleIds.filter((id) => id === "operation/operation-id")).toHaveLength(1);
     expect(ruleIds).toContain("structure/schema-nullable");
     for (const rule of log.runs[0]?.tool.driver.rules ?? []) {
       expect(rule.shortDescription.text).toBe(rule.id);
     }
 
-    const operationIdResults = log.runs[0]?.results.filter((r) => r.ruleId === "operation-operationId") ?? [];
+    const operationIdResults = log.runs[0]?.results.filter((r) => r.ruleId === "operation/operation-id") ?? [];
     expect(operationIdResults).toHaveLength(2);
   });
 
@@ -164,8 +164,8 @@ describe("toSarifLog (unit)", () => {
     expect(log.runs[0]?.results[0]?.level).toBe("note");
   });
 
-  test("maps warning severity to warning level", () => {
-    const log = toSarifLog([diagnostic({ severity: "warning" })], "/repo");
+  test("maps warn severity to warning level", () => {
+    const log = toSarifLog([diagnostic({ severity: "warn" })], "/repo");
     expect(log.runs[0]?.results[0]?.level).toBe("warning");
   });
 });
