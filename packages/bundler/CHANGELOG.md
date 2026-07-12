@@ -1,5 +1,12 @@
 # @oasis/bundler
 
+## 0.5.0
+
+### Patch Changes
+
+- Updated dependencies [[`8175852`](https://github.com/Lazialize/oasis/commit/8175852fc9fa327e685f2254d11afacbb844e48f)]:
+  - @oasis/core@0.5.0
+
 ## 0.4.0
 
 ### Patch Changes
