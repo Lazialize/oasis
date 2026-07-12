@@ -1,0 +1,19 @@
+openapi: 3.0.3
+info:
+  title: T
+  version: "1.0.0"
+security:
+  - apiKeyAuth: []
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          description: OK
+components:
+  securitySchemes:
+    apiKeyAuth:
+      type: apiKey
+      name: X-API-Key
+      in: header

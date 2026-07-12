@@ -140,7 +140,7 @@ separate step afterwards that re-runs `oasis lint` (or checks its exit code) to 
 | `operation-description` | warn | Operations have a `description` or `summary` |
 | `operation-success-response` | warn | Operations have at least one 2xx/3xx response (`default` alone doesn't count) |
 | `path-params-defined` | error | `{param}` templates ↔ `in: path` parameters agree; path params are `required` |
-| `no-unused-components` | warn | Components nothing references |
+| `no-unused-components` | warn | Components nothing references, by `$ref` or by name (`security` requirement scheme names, `discriminator.mapping` values) |
 | `no-duplicate-paths` | error | Path templates that are equivalent up to parameter names (`/users/{id}` vs `/users/{userId}`) |
 | `security-defined` | error | `security` requirement scheme names exist in `components/securitySchemes` |
 | `tags-defined` | off | Operation tags are declared in the root `tags` list |

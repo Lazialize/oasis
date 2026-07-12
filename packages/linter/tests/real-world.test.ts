@@ -39,18 +39,14 @@ describe("real-world vendored specs", () => {
 
 describe("kitchen-sink synthetic specs", () => {
   // Crafted to be fully valid across every structural feature the structure/* rules inspect, so
-  // these assert zero diagnostics of any severity. `no-unused-components` is disabled because it
-  // only tracks $ref usage and (by design, not a v0.4 rule bug) doesn't consider a security scheme
-  // "used" via a `security` requirement entry (which references it by name, not by $ref).
-  const kitchenSinkConfig = { lint: { rules: { "no-unused-components": "off" as const } } };
-
+  // these assert zero diagnostics of any severity.
   test("30/entry.yaml: zero diagnostics", async () => {
-    const diagnostics = await lintFixture("kitchen-sink/30/entry.yaml", kitchenSinkConfig);
+    const diagnostics = await lintFixture("kitchen-sink/30/entry.yaml");
     expect(diagnostics).toEqual([]);
   });
 
   test("31/entry.yaml: zero diagnostics", async () => {
-    const diagnostics = await lintFixture("kitchen-sink/31/entry.yaml", kitchenSinkConfig);
+    const diagnostics = await lintFixture("kitchen-sink/31/entry.yaml");
     expect(diagnostics).toEqual([]);
   });
 });

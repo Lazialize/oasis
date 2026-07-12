@@ -1,14 +1,85 @@
-import { isMap } from "yaml";
+import { isMap, isNode, isScalar, isSeq } from "yaml";
+import type { Node } from "yaml";
 import { COMPONENT_SECTIONS, findRefs, resolveRef } from "@oasis/core";
+import type { OasisDocument } from "@oasis/core";
+import { iterateOperations } from "../openapi-walk.ts";
 import { childAt, keyToString } from "../util.ts";
-import type { Rule } from "../types.ts";
+import type { Rule, RuleContext } from "../types.ts";
 
 // Unused-detection for `pathItems` (3.1-only) isn't supported yet, so it's excluded here.
 export const COMPONENT_CATEGORIES = COMPONENT_SECTIONS.filter((section) => section !== "pathItems");
 
+/** Mapping/URL-ish values (absolute URIs) are external targets; skip resolution for those. */
+function isUrlLike(value: string): boolean {
+  return /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(value) || value.startsWith("//");
+}
+
+/** Collect security scheme names referenced by name in a `security` requirement array node. */
+function collectSecurityNames(securityNode: Node | undefined, into: Set<string>): void {
+  if (!securityNode || !isSeq(securityNode)) return;
+  for (const requirement of securityNode.items) {
+    if (!isNode(requirement) || !isMap(requirement)) continue;
+    for (const pair of requirement.items) into.add(keyToString(pair.key));
+  }
+}
+
+/** Every security scheme name referenced by any `security` requirement (root or operation, including 3.1 webhooks). */
+function collectUsedSecuritySchemeNames(ctx: RuleContext): Set<string> {
+  const names = new Set<string>();
+  const root = ctx.entryDoc.yamlDoc.contents;
+  if (root && isMap(root)) collectSecurityNames(childAt(root, "security"), names);
+  for (const op of iterateOperations(ctx.graph, ctx.entryDoc, ctx.version)) {
+    collectSecurityNames(childAt(op.node, "security"), names);
+  }
+  return names;
+}
+
+/** Every `discriminator.mapping` value found anywhere in `doc`, regardless of whether the enclosing schema is reachable. */
+function collectDiscriminatorMappingValues(doc: OasisDocument): string[] {
+  const values: string[] = [];
+  const root = doc.yamlDoc.contents;
+  if (isNode(root)) walk(root);
+  return values;
+
+  function walk(node: Node): void {
+    if (isMap(node)) {
+      for (const pair of node.items) {
+        if (isScalar(pair.key) && pair.key.value === "discriminator" && isNode(pair.value) && isMap(pair.value)) {
+          const mappingNode = childAt(pair.value, "mapping");
+          if (isMap(mappingNode)) {
+            for (const mappingPair of mappingNode.items) {
+              if (isNode(mappingPair.value) && isScalar(mappingPair.value) && typeof mappingPair.value.value === "string") {
+                values.push(mappingPair.value.value);
+              }
+            }
+          }
+        }
+        if (isNode(pair.value)) walk(pair.value);
+      }
+    } else if (isSeq(node)) {
+      for (const item of node.items) {
+        if (isNode(item)) walk(item);
+      }
+    }
+  }
+}
+
+/** Mark components resolved from `discriminator.mapping` values (pointer or bare-name form) as used. */
+function collectDiscriminatorMappingUsage(ctx: RuleContext, used: Set<string>): void {
+  for (const doc of ctx.documents) {
+    for (const value of collectDiscriminatorMappingValues(doc)) {
+      if (isUrlLike(value)) continue; // external target, not a workspace component
+      const refString = value.includes("#") ? value : `#/components/schemas/${value}`;
+      const result = resolveRef(ctx.graph, doc, refString);
+      if (result.ok) used.add(`${result.doc.filePath}::${result.pointer}`);
+    }
+  }
+}
+
 export const noUnusedComponents: Rule = {
   name: "no-unused-components",
-  description: "Flags components that are defined but never referenced by any $ref in the workspace.",
+  description:
+    "Flags components that are defined but never referenced by any $ref in the workspace, and never referenced by name (security scheme names in a \"security\" requirement, or discriminator mapping values).",
   defaultSeverity: "warn",
   check(ctx) {
     const used = new Set<string>();
@@ -18,6 +89,8 @@ export const noUnusedComponents: Rule = {
         if (result.ok) used.add(`${result.doc.filePath}::${result.pointer}`);
       }
     }
+    collectDiscriminatorMappingUsage(ctx, used);
+    const usedSecuritySchemeNames = collectUsedSecuritySchemeNames(ctx);
 
     for (const doc of ctx.documents) {
       const root = doc.yamlDoc.contents;
@@ -33,6 +106,7 @@ export const noUnusedComponents: Rule = {
           const name = keyToString(pair.key);
           const pointer = `/components/${category}/${name}`;
           if (used.has(`${doc.filePath}::${pointer}`)) continue;
+          if (category === "securitySchemes" && usedSecuritySchemeNames.has(name)) continue;
 
           ctx.report({ doc, pointer }, `Component "${name}" in "components/${category}" is not used anywhere in the workspace.`);
         }

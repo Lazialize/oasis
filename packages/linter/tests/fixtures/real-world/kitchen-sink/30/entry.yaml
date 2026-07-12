@@ -93,12 +93,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Pet'
+              examples:
+                default:
+                  $ref: '#/components/examples/PetExample'
         default:
           $ref: '#/components/responses/NotFound'
     delete:
       operationId: deletePet
       tags: [pets]
       description: Delete a pet.
+      security:
+        - basicAuth: []
+        - oauth2Auth: [write:pets]
       parameters:
         - name: petId
           in: path
@@ -130,6 +136,12 @@ paths:
       responses:
         '201':
           description: Subscription created.
+        '400':
+          description: Invalid subscription request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
       callbacks:
         onPetEvent:
           $ref: '#/components/callbacks/onPetEvent'
