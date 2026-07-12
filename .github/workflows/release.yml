@@ -165,3 +165,118 @@ jobs:
           tag_name: ${{ inputs.tag || github.ref_name }}
           files: release/*
           generate_release_notes: true
+
+      - name: Upload SHASUMS256.txt
+        uses: actions/upload-artifact@v4
+        with:
+          name: oasis-shasums
+          path: release/SHASUMS256.txt
+          if-no-files-found: error
+
+  publish-extension:
+    name: Publish VSCode extension to Marketplace
+    needs: [build-extension, release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Download VSIX artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: oasis-vscode-vsix
+          path: vsix
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Check for VSCE_PAT secret
+        id: check-secret
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [ -z "$VSCE_PAT" ]; then
+            echo "::notice title=Marketplace publish skipped::VSCE_PAT secret is not configured; skipping VS Code Marketplace publish. See docs/releasing.md to enable it."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to Marketplace
+        if: steps.check-secret.outputs.skip != 'true'
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          vsix=$(find vsix -name '*.vsix' -print -quit)
+          if [ -z "$vsix" ]; then
+            echo "::error::No .vsix file found in the downloaded artifact"
+            exit 1
+          fi
+          npx --yes @vscode/vsce@2 publish --packagePath "$vsix"
+
+  update-homebrew-tap:
+    name: Update Homebrew tap
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Check for HOMEBREW_TAP_TOKEN secret
+        id: check-secret
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
+            echo "::notice title=Homebrew tap update skipped::HOMEBREW_TAP_TOKEN secret is not configured; skipping the Lazialize/homebrew-oasis update. See docs/releasing.md to enable it."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download SHASUMS256.txt
+        if: steps.check-secret.outputs.skip != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: oasis-shasums
+          path: release-artifacts
+
+      - name: Generate formula
+        if: steps.check-secret.outputs.skip != 'true'
+        run: |
+          mkdir -p tap/Formula
+          tag="${{ inputs.tag || github.ref_name }}"
+          bun run scripts/homebrew/generate-formula.ts \
+            --version "$tag" \
+            --shasums release-artifacts/SHASUMS256.txt \
+            --out tap/Formula/oasis.rb
+
+      - name: Push formula to Lazialize/homebrew-oasis
+        if: steps.check-secret.outputs.skip != 'true'
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/Lazialize/homebrew-oasis.git" tap-repo
+          mkdir -p tap-repo/Formula
+          cp tap/Formula/oasis.rb tap-repo/Formula/oasis.rb
+          cd tap-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- Formula/oasis.rb; then
+            echo "Formula unchanged, nothing to commit."
+            exit 0
+          fi
+          git add Formula/oasis.rb
+          git commit -m "chore: update oasis to ${tag#v}"
+          git push origin HEAD
