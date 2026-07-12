@@ -310,6 +310,216 @@ describe("structure/examples", () => {
   });
 });
 
+describe("structure/discriminator", () => {
+  test("flags a discriminator with no oneOf/anyOf/allOf", async () => {
+    const diagnostics = await lintFixture("structure/discriminator-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/discriminator" && d.message.includes("none of"),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags a missing propertyName", async () => {
+    const diagnostics = await lintFixture("structure/discriminator-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/discriminator" && d.message.includes("missing required field \"propertyName\""),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags an unresolvable mapping target", async () => {
+    const diagnostics = await lintFixture("structure/discriminator-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/discriminator" && d.message.includes("NoSuchSchema"),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("does not flag a resolvable mapping target", async () => {
+    const diagnostics = await lintFixture("structure/discriminator-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/discriminator" && d.message.includes('"cat"'),
+    );
+    expect(d).toBeUndefined();
+  });
+
+  test("flags a oneOf branch missing the discriminator property", async () => {
+    const diagnostics = await lintFixture("structure/discriminator-bad.yaml");
+    // NoPropertyBranch (lines 68-72, 1-indexed) is the branch missing "petType".
+    const d = diagnostics.find(
+      (d) =>
+        d.rule === "structure/discriminator" &&
+        d.message.includes("is not defined in") &&
+        d.range.start.line >= 67 &&
+        d.range.start.line <= 71,
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags a 3.0 branch where the discriminator property is not required", async () => {
+    const diagnostics = await lintFixture("structure/discriminator-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/discriminator" && d.message.includes("must be listed in \"required\""),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("does not require the discriminator property to be required in 3.1", async () => {
+    const diagnostics = await lintFixture("structure/discriminator-31-required-ok.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/discriminator" && d.message.includes("required"),
+    );
+    expect(d).toBeUndefined();
+  });
+
+  test("valid fixture passes", async () => {
+    const diagnostics = await lintFixture("valid/openapi.yaml");
+    expect(diagnostics.some((d) => d.rule === "structure/discriminator")).toBe(false);
+  });
+});
+
+describe("structure/callbacks", () => {
+  test("flags a callback expression that doesn't look like a runtime expression or URL", async () => {
+    const diagnostics = await lintFixture("structure/callbacks-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/callbacks" && d.message.includes("notAnExpression"),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags an invalid key in a callback path item", async () => {
+    const diagnostics = await lintFixture("structure/callbacks-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/callbacks" && d.message.includes('"fetch"'),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags a callback operation missing responses", async () => {
+    const diagnostics = await lintFixture("structure/callbacks-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/callbacks" && d.message.includes("missingResponses") && d.message.includes("responses"),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("does not flag a well-formed callback", async () => {
+    const diagnostics = await lintFixture("structure/callbacks-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/callbacks" && d.message.includes("onData"),
+    );
+    expect(d).toBeUndefined();
+  });
+
+  test("checks components/callbacks too", async () => {
+    const diagnostics = await lintFixture("structure/callbacks-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/callbacks" && d.message.includes("ReusableCallback"),
+    );
+    expect(d).toBeUndefined();
+  });
+
+  test("valid fixture passes", async () => {
+    const diagnostics = await lintFixture("valid/openapi.yaml");
+    expect(diagnostics.some((d) => d.rule === "structure/callbacks")).toBe(false);
+  });
+});
+
+describe("structure/links", () => {
+  test("flags both operationRef and operationId set", async () => {
+    const diagnostics = await lintFixture("structure/links-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/links" && d.message.includes("BothSet") && d.message.includes("must not set both"),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags neither operationRef nor operationId set", async () => {
+    const diagnostics = await lintFixture("structure/links-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/links" && d.message.includes("NeitherSet") && d.message.includes("exactly one"),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags an operationId that doesn't exist", async () => {
+    const diagnostics = await lintFixture("structure/links-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/links" && d.message.includes("doesNotExist"),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags an unresolvable local operationRef", async () => {
+    const diagnostics = await lintFixture("structure/links-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/links" && d.message.includes("BadRef") && d.message.includes("does not resolve"),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("does not flag a resolvable local operationRef", async () => {
+    const diagnostics = await lintFixture("structure/links-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/links" && d.message.includes("GoodRef"),
+    );
+    expect(d).toBeUndefined();
+  });
+
+  test("flags an unknown key", async () => {
+    const diagnostics = await lintFixture("structure/links-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/links" && d.message.includes("notAKey"),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("checks components/links too", async () => {
+    const diagnostics = await lintFixture("structure/links-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/links" && d.message.includes("alsoDoesNotExist"),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("valid fixture passes", async () => {
+    const diagnostics = await lintFixture("valid/openapi.yaml");
+    expect(diagnostics.some((d) => d.rule === "structure/links")).toBe(false);
+  });
+});
+
+describe("structure/discriminator and structure/links across $ref'd multi-file documents", () => {
+  test("flags an unresolvable discriminator mapping target and an unresolvable link operationId, each in the file that defines them", async () => {
+    const fs = new NodeFileSystem();
+    const entry = `${fixturesRoot}/structure-multifile-v2/entry.yaml`;
+    const graph = await loadWorkspaceGraph(fs, entry);
+    const config = resolveConfig(undefined);
+    const diagnostics = lint(graph, config);
+
+    const mappingDiag = diagnostics.find(
+      (d) => d.rule === "structure/discriminator" && d.message.includes("MissingDog"),
+    );
+    expect(mappingDiag).toBeDefined();
+    expect(mappingDiag?.range.filePath).toContain("entry.yaml");
+
+    const okMappingDiag = diagnostics.find(
+      (d) => d.rule === "structure/discriminator" && d.message.includes('"cat"'),
+    );
+    expect(okMappingDiag).toBeUndefined();
+
+    const linkDiag = diagnostics.find(
+      (d) => d.rule === "structure/links" && d.message.includes("unknownOperation"),
+    );
+    expect(linkDiag).toBeDefined();
+    expect(linkDiag?.range.filePath).toContain("responses.yaml");
+
+    const goodLinkDiag = diagnostics.find(
+      (d) => d.rule === "structure/links" && d.message.includes("GetPet") && d.message.includes("does not match"),
+    );
+    expect(goodLinkDiag).toBeUndefined();
+  });
+});
+
 describe("structure rules across $ref'd multi-file documents", () => {
   test("flags a $ref'd security scheme and a $ref'd example", async () => {
     const fs = new NodeFileSystem();

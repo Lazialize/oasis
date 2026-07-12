@@ -1,0 +1,7 @@
+PetResponse:
+  description: OK
+  links:
+    GetPet:
+      operationId: listPets
+    BadLink:
+      operationId: unknownOperation

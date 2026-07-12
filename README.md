@@ -79,6 +79,9 @@ Exit code is `1` if any error-severity diagnostic is reported, `0` otherwise, `2
 | `structure/encoding` | error | Media Type Object `encoding` keys match schema properties (when resolvable to an inline object); `contentType`/`style`/`explode`/`allowReserved` have the right shapes |
 | `structure/xml` | error | Schema Object `xml` field: allowed keys, correct primitive types, `namespace` looks like an absolute URI |
 | `structure/examples` | error | Example Objects in `components/examples` and inline `examples` maps: `value`/`externalValue` are mutually exclusive, only known keys are used |
+| `structure/discriminator` | error | Discriminator Objects: required `propertyName`, `mapping` targets resolve in-workspace, a discriminator requires `oneOf`/`anyOf`/`allOf`, and `propertyName` is a property of (and, in 3.0, required by) each resolvable `oneOf`/`anyOf` branch schema |
+| `structure/callbacks` | error | Callback Objects (operation-level `callbacks` and `components/callbacks`): expression keys look like runtime expressions or URLs, mapped Path Item Objects have valid keys, and their operations declare `responses` |
+| `structure/links` | error | Link Objects (Response Object `links` and `components/links`): exactly one of `operationRef`/`operationId`, `operationId` matches a workspace operationId, local `operationRef` pointers resolve |
 | `no-duplicate-keys` | error | Duplicate mapping keys in YAML/JSON |
 | `no-unresolved-ref` | error | Every `$ref` resolves (missing files *and* missing pointers) |
 | `no-ref-cycle` | warn | Cross-file reference cycles |

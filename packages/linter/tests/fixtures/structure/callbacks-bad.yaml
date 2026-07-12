@@ -1,0 +1,48 @@
+openapi: 3.0.3
+info:
+  title: T
+  version: "1.0.0"
+paths:
+  /subscribe:
+    post:
+      operationId: subscribe
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: OK
+      callbacks:
+        onData:
+          '{$request.body#/callbackUrl}':
+            post:
+              operationId: onDataCallback
+              responses:
+                '200':
+                  description: OK
+        badExpr:
+          notAnExpression:
+            post:
+              responses:
+                '200':
+                  description: OK
+        badShape:
+          '{$request.body#/url}':
+            fetch:
+              responses:
+                '200':
+                  description: OK
+        missingResponses:
+          '{$request.body#/url}':
+            post:
+              operationId: noResponses
+components:
+  callbacks:
+    ReusableCallback:
+      '{$request.body#/url}':
+        post:
+          responses:
+            '200':
+              description: OK
