@@ -1,10 +1,8 @@
 import { isMap, isScalar, isNode } from "yaml";
 import type { Node } from "yaml";
-import { rangeFromOffsets } from "@oasis/core";
 import type { OasisDocument, Range } from "@oasis/core";
-import { getChildNode } from "../yaml-helpers.ts";
-
-const HTTP_METHODS = ["get", "put", "post", "delete", "options", "head", "patch", "trace"];
+import { HTTP_METHODS } from "@oasis/linter";
+import { getChildNode, nodeRange } from "../yaml-helpers.ts";
 
 export type SymbolNodeKind = "namespace" | "operation" | "object" | "info";
 
@@ -36,7 +34,7 @@ export function getDocumentSymbols(doc: OasisDocument): SymbolResult[] {
         for (const opPair of pair.value.items) {
           if (!isScalar(opPair.key) || !isNode(opPair.value)) continue;
           const method = String(opPair.key.value);
-          if (!HTTP_METHODS.includes(method)) continue;
+          if (!(HTTP_METHODS as readonly string[]).includes(method)) continue;
           opChildren.push(makeSymbol(method.toUpperCase(), "operation", opPair.value, doc, []));
         }
       }
@@ -67,8 +65,5 @@ export function getDocumentSymbols(doc: OasisDocument): SymbolResult[] {
 }
 
 function makeSymbol(name: string, kind: SymbolNodeKind, node: Node, doc: OasisDocument, children: SymbolResult[]): SymbolResult {
-  const range = node.range
-    ? rangeFromOffsets(doc.filePath, doc.lineCounter, node.range[0], node.range[2] ?? node.range[1])
-    : rangeFromOffsets(doc.filePath, doc.lineCounter, 0, 0);
-  return { name, kind, range, children };
+  return { name, kind, range: nodeRange(doc, node), children };
 }

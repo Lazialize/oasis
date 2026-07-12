@@ -31,9 +31,18 @@ export async function routeDocument(ctx: ServerContext, path: string, text: stri
   if (!owner && (await discoverProjectUpward(ctx, path))) {
     owner = await findOwningEntry(ctx, path);
   }
-  if (owner) return { kind: "project-member", entryPath: owner };
+  if (owner) {
+    // No longer standalone (if it ever was): drop it from the set `connection.ts` re-validates on
+    // config file changes (see `ServerContext.openStandaloneEntries`).
+    ctx.openStandaloneEntries.delete(path);
+    return { kind: "project-member", entryPath: owner };
+  }
 
-  if (!looksLikeOpenApi(text)) return { kind: "ignored" };
+  if (!looksLikeOpenApi(text)) {
+    ctx.openStandaloneEntries.delete(path);
+    return { kind: "ignored" };
+  }
 
+  ctx.openStandaloneEntries.add(path);
   return { kind: "standalone", entryPath: path };
 }

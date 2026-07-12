@@ -1,16 +1,28 @@
 import { isMap, isNode, isScalar, isSeq } from "yaml";
 import type { Node } from "yaml";
 import {
+  detectVersion,
   formatPointer,
   nodeAtPointer,
   nodeAtPosition,
   offsetAtPosition,
   parsePointer,
+  parseRefString,
   positionAtOffset,
   rangeFromOffsets,
+  resolveRef,
 } from "@oasis/core";
 import type { OasisDocument, Position, Range, WorkspaceGraph } from "@oasis/core";
-import { COMPONENT_CATEGORIES, HTTP_METHODS, childAt, isRefObject, iterateOperations, iteratePathItems, resolveMaybeRef } from "@oasis/linter";
+import {
+  COMPONENT_CATEGORIES,
+  HTTP_METHODS,
+  childAt,
+  isRefObject,
+  iterateOperations,
+  iteratePathItems,
+  keyToString,
+  resolveMaybeRef,
+} from "@oasis/linter";
 import { relativeRefPath } from "../ref-target-path.ts";
 import { getDocument, getGraph, resolveEntryForPath } from "../workspace.ts";
 import type { ServerContext } from "../workspace.ts";
@@ -40,7 +52,7 @@ export interface CodeActionsParams {
 
 export interface CodeActionResult {
   title: string;
-  kind: "quickfix" | "refactor.extract";
+  kind: "quickfix" | "refactor.extract" | "refactor.inline";
   edits: CodeActionFileEdit[];
   /** Index into `params.diagnostics`, when this action resolves one of them. */
   diagnosticIndex?: number;
@@ -310,16 +322,30 @@ function lineEndOffsetInclusive(doc: OasisDocument, offset: number): number {
   return idx === -1 ? doc.text.length : idx + 1;
 }
 
+/**
+ * Find `child`'s own key `Node` within map `node`, by value identity (works since `childAt`/
+ * lookups hand back a map's own `pair.value` node references, never copies).
+ */
+function keyNodeForValue(node: Node, child: Node): Node | undefined {
+  if (!isMap(node)) return undefined;
+  const pair = node.items.find((p) => p.value === child);
+  return pair && isNode(pair.key) ? pair.key : undefined;
+}
+
 function buildRemoveUnusedComponent(doc: OasisDocument, diag: CodeActionDiagnosticInput, index: number): CodeActionResult | undefined {
   const { start, end } = toRangeOffsets(doc, diag.range);
   const root = doc.yamlDoc.contents;
   if (!isNode(root) || !isMap(root)) return undefined;
   const componentsNode = childAt(root, "components");
   if (!componentsNode || !isMap(componentsNode)) return undefined;
+  const componentsKeyNode = keyNodeForValue(root, componentsNode);
+  if (!componentsKeyNode || !componentsKeyNode.range) return undefined;
 
   for (const category of COMPONENT_CATEGORIES) {
     const categoryNode = childAt(componentsNode, category);
     if (!categoryNode || !isMap(categoryNode)) continue;
+    const categoryKeyNode = keyNodeForValue(componentsNode, categoryNode);
+    if (!categoryKeyNode || !categoryKeyNode.range) continue;
 
     for (const pair of categoryNode.items) {
       const value = pair.value;
@@ -328,11 +354,29 @@ function buildRemoveUnusedComponent(doc: OasisDocument, diag: CodeActionDiagnost
 
       const keyNode = pair.key;
       if (!isNode(keyNode) || !keyNode.range) return undefined;
+      const name = keyToString(keyNode);
 
-      const deleteStart = lineStartOffset(doc, keyNode.range[0]);
-      const deleteEnd = lineEndOffsetInclusive(doc, value.range[1]);
+      // Climb ancestors while the entry being removed is the sole item of its parent map: leaving
+      // an empty `components/<category>: {}` (or `components: {}`) behind would be pointless, so
+      // remove the parent's own key too — the inverse of how extract-to-component creates that key
+      // when it's missing. Stops climbing at the first ancestor with more than one item, since
+      // removing the target alone is then enough.
+      let deleteKeyNode = keyNode;
+      let deleteEndNode: Node = value;
+      for (const ancestor of [
+        { node: categoryNode as Node, keyNode: categoryKeyNode },
+        { node: componentsNode as Node, keyNode: componentsKeyNode },
+      ]) {
+        if (!isMap(ancestor.node) || ancestor.node.items.length !== 1) break;
+        deleteKeyNode = ancestor.keyNode;
+        deleteEndNode = ancestor.node;
+      }
+
+      const deleteStart = lineStartOffset(doc, deleteKeyNode.range![0]);
+      const deleteEnd = lineEndOffsetInclusive(doc, deleteEndNode.range?.[1] ?? value.range[1]);
+
       return {
-        title: "Remove unused component",
+        title: `Remove unused component '${name}'`,
         kind: "quickfix",
         edits: [{ filePath: doc.filePath, range: rangeFromOffsets(doc.filePath, doc.lineCounter, deleteStart, deleteEnd), newText: "" }],
         diagnosticIndex: index,
@@ -502,6 +546,94 @@ function buildExtractToComponent(graph: WorkspaceGraph, entryDoc: OasisDocument,
 }
 
 // ---------------------------------------------------------------------------
+// 6: Inline a $ref (refactor.inline, no diagnostic)
+// ---------------------------------------------------------------------------
+
+/** The `$ref` mapping (its node + JSON Pointer) at `offset`, if the cursor sits on one. Matches
+ * both a click on the `$ref` key/value pair itself and anywhere else inside the (one-key) map. */
+function findRefObjectAtPosition(doc: OasisDocument, offset: number): { node: Node; pointer: string } | undefined {
+  const found = nodeAtPosition(doc, offset);
+  if (!found) return undefined;
+  if (isRefObject(found.node)) return { node: found.node, pointer: found.pointer };
+
+  const segments = parsePointer(found.pointer);
+  if (segments[segments.length - 1] !== "$ref") return undefined;
+  const parentPointer = formatPointer(segments.slice(0, -1));
+  const parent = nodeAtPointer(doc, parentPointer);
+  if (!parent || !isRefObject(parent.node)) return undefined;
+  return { node: parent.node, pointer: parentPointer };
+}
+
+/** Whether any `$ref` nested inside `node` points at another file (a non-empty file part). Such
+ * refs are relative to the *target's* file; copying them verbatim into a different file's
+ * directory could silently point somewhere else (or nowhere). Rewriting them is more machinery
+ * than this action is worth, so cross-file inlining is simply not offered when this is true. */
+function subtreeHasExternalRef(node: Node): boolean {
+  if (isMap(node)) {
+    for (const pair of node.items) {
+      if (isScalar(pair.key) && pair.key.value === "$ref" && isScalar(pair.value) && typeof pair.value.value === "string") {
+        if (parseRefString(pair.value.value).filePart !== "") return true;
+      }
+      if (isNode(pair.value) && subtreeHasExternalRef(pair.value)) return true;
+    }
+    return false;
+  }
+  if (isSeq(node)) {
+    return node.items.some((item) => isNode(item) && subtreeHasExternalRef(item));
+  }
+  return false;
+}
+
+function buildInlineRef(graph: WorkspaceGraph, entryDoc: OasisDocument, doc: OasisDocument, position: Position): CodeActionResult | undefined {
+  const offset = offsetAtPosition(doc.lineCounter, position);
+  const found = findRefObjectAtPosition(doc, offset);
+  if (!found) return undefined;
+  const { node: refNode, pointer } = found;
+  if (!isMap(refNode) || !refNode.range) return undefined;
+
+  // 3.1 (JSON Schema) gives siblings of `$ref` meaning; 3.0 ignores them. Only offer the action
+  // when inlining can't silently drop sibling keys.
+  const version = detectVersion(entryDoc);
+  if (version === "3.1" && refNode.items.length > 1) return undefined;
+
+  // A whole Path Item behind a $ref (a direct entry of `paths`/`webhooks`) is large/structural;
+  // not supported for now.
+  const segments = parsePointer(pointer);
+  if (segments.length === 2 && (segments[0] === "paths" || segments[0] === "webhooks")) return undefined;
+
+  const refPair = refNode.items.find((p) => keyToString(p.key) === "$ref");
+  if (!refPair || !isScalar(refPair.value) || typeof refPair.value.value !== "string") return undefined;
+
+  const result = resolveRef(graph, doc, refPair.value.value);
+  if (!result.ok || !result.node.range) return undefined; // unresolved target: not offered
+
+  // Cycle check: would inlining loop back into one of the ref's own ancestors? Same-document only
+  // (a simple ancestor-pointer check, not a full cross-file cycle search).
+  if (result.doc.filePath === doc.filePath) {
+    const targetSegs = parsePointer(result.pointer);
+    const targetIsAncestor = targetSegs.length <= segments.length && targetSegs.every((seg, i) => seg === segments[i]);
+    if (targetIsAncestor) return undefined;
+  }
+
+  if (result.doc.filePath !== doc.filePath && subtreeHasExternalRef(result.node)) return undefined;
+
+  const sliceEnd = trimTrailingWhitespaceEnd(result.doc.text, result.node.range[0], result.node.range[1]);
+  const sliceText = result.doc.text.slice(result.node.range[0], sliceEnd);
+  const oldBaseIndent = columnAt(result.doc, result.node.range[0]);
+  const newBaseIndent = columnAt(doc, refNode.range[0]);
+  const newText = reindentBlock(sliceText, oldBaseIndent, newBaseIndent);
+
+  const replaceEnd = trimTrailingWhitespaceEnd(doc.text, refNode.range[0], refNode.range[1]);
+  const replaceRange = rangeFromOffsets(doc.filePath, doc.lineCounter, refNode.range[0], replaceEnd);
+
+  return {
+    title: "Inline reference",
+    kind: "refactor.inline",
+    edits: [{ filePath: doc.filePath, range: replaceRange, newText }],
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
@@ -509,8 +641,9 @@ function buildExtractToComponent(graph: WorkspaceGraph, entryDoc: OasisDocument,
  * Compute code actions for `params`: quickfixes for the oasis lint diagnostics reported in
  * `params.diagnostics` (operation-operationId, operation-description, path-params-defined,
  * no-unused-components), plus a refactor.extract action when the cursor sits inside an
- * extractable inline schema. Returns [] rather than a broken edit whenever the AST no longer
- * matches what a diagnostic describes (a stale diagnostic from an outdated publish).
+ * extractable inline schema, plus a refactor.inline action when the cursor sits on a `$ref`.
+ * Returns [] rather than a broken edit whenever the AST no longer matches what a diagnostic
+ * describes (a stale diagnostic from an outdated publish).
  *
  * YAML documents only: JSON/JSONC documents (detected by file extension) get no code actions,
  * since robust JSON-aware insertion (comma/formatting bookkeeping) is out of scope for now.
@@ -547,6 +680,9 @@ export async function getCodeActions(ctx: ServerContext, params: CodeActionsPara
 
   const extract = buildExtractToComponent(graph, entryDoc, doc, params.position);
   if (extract) results.push(extract);
+
+  const inlineRef = buildInlineRef(graph, entryDoc, doc, params.position);
+  if (inlineRef) results.push(inlineRef);
 
   return results;
 }
