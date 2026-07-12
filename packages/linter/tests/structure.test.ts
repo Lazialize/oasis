@@ -92,3 +92,242 @@ describe("structure/schema-nullable", () => {
     expect(diagnostics.some((d) => d.rule === "structure/schema-nullable")).toBe(false);
   });
 });
+
+describe("structure/security-schemes", () => {
+  test("flags a missing type", async () => {
+    const diagnostics = await lintFixture("structure/security-schemes-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/security-schemes" && d.message.includes('"NoType"') && d.message.includes("missing required field \"type\""),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags an unrecognized type", async () => {
+    const diagnostics = await lintFixture("structure/security-schemes-bad.yaml");
+    const d = diagnostics.find((d) => d.rule === "structure/security-schemes" && d.message.includes('"BadType"'));
+    expect(d?.message).toContain("madeUpType");
+  });
+
+  test("flags apiKey missing name", async () => {
+    const diagnostics = await lintFixture("structure/security-schemes-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/security-schemes" && d.message.includes('"BadApiKey"') && d.message.includes('"name"'),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags http missing scheme", async () => {
+    const diagnostics = await lintFixture("structure/security-schemes-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/security-schemes" && d.message.includes('"BadHttp"') && d.message.includes('"scheme"'),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags oauth2 with no flows defined", async () => {
+    const diagnostics = await lintFixture("structure/security-schemes-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/security-schemes" && d.message.includes('"BadOAuth2NoFlows"') && d.message.includes('"flows"'),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags an oauth2 implicit flow missing authorizationUrl", async () => {
+    const diagnostics = await lintFixture("structure/security-schemes-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/security-schemes" && d.message.includes('"BadOAuth2Flow"') && d.message.includes("authorizationUrl"),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags openIdConnect missing openIdConnectUrl", async () => {
+    const diagnostics = await lintFixture("structure/security-schemes-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/security-schemes" && d.message.includes('"BadOpenIdConnect"') && d.message.includes("openIdConnectUrl"),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("accepts mutualTLS in OpenAPI 3.1", async () => {
+    const diagnostics = await lintFixture("structure/security-schemes-mutualtls-31.yaml");
+    expect(diagnostics.some((d) => d.rule === "structure/security-schemes")).toBe(false);
+  });
+
+  test("rejects mutualTLS in OpenAPI 3.0", async () => {
+    const diagnostics = await lintFixture("structure/security-schemes-mutualtls-30.yaml");
+    const d = diagnostics.find((d) => d.rule === "structure/security-schemes");
+    expect(d?.message).toContain("mutualTLS");
+  });
+
+  test("valid fixture passes", async () => {
+    const diagnostics = await lintFixture("valid/openapi.yaml");
+    expect(diagnostics.some((d) => d.rule === "structure/security-schemes")).toBe(false);
+  });
+});
+
+describe("structure/server-variables", () => {
+  test("flags a url variable with no matching declaration", async () => {
+    const diagnostics = await lintFixture("structure/server-variables-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/server-variables" && d.message.includes("missingVar"),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags a default not listed in enum", async () => {
+    const diagnostics = await lintFixture("structure/server-variables-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/server-variables" && d.message.includes('"basePath"') && d.message.includes("enum"),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("warns about a declared variable unused by the url", async () => {
+    const diagnostics = await lintFixture("structure/server-variables-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/server-variables" && d.message.includes('"unused"') && d.message.includes("not referenced"),
+    );
+    expect(d).toBeDefined();
+    expect(d?.severity).toBe("warning");
+  });
+
+  test("flags a variable missing a default", async () => {
+    const diagnostics = await lintFixture("structure/server-variables-missing-default.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/server-variables" && d.message.includes('"host"') && d.message.includes('"default"'),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("valid fixture passes", async () => {
+    const diagnostics = await lintFixture("valid/openapi.yaml");
+    expect(diagnostics.some((d) => d.rule === "structure/server-variables")).toBe(false);
+  });
+});
+
+describe("structure/encoding", () => {
+  test("flags an encoding key with no matching schema property", async () => {
+    const diagnostics = await lintFixture("structure/encoding-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/encoding" && d.message.includes("notAProperty"),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags a wrong-typed contentType", async () => {
+    const diagnostics = await lintFixture("structure/encoding-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/encoding" && d.message.includes('"metadata"') && d.message.includes("contentType"),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags an invalid style value", async () => {
+    const diagnostics = await lintFixture("structure/encoding-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/encoding" && d.message.includes('"metadata"') && d.message.includes('"style"'),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags non-boolean explode/allowReserved", async () => {
+    const diagnostics = await lintFixture("structure/encoding-bad.yaml");
+    const explodeDiag = diagnostics.find(
+      (d) => d.rule === "structure/encoding" && d.message.includes('"metadata"') && d.message.includes('"explode"'),
+    );
+    const allowReservedDiag = diagnostics.find(
+      (d) => d.rule === "structure/encoding" && d.message.includes('"metadata"') && d.message.includes('"allowReserved"'),
+    );
+    expect(explodeDiag).toBeDefined();
+    expect(allowReservedDiag).toBeDefined();
+  });
+
+  test("valid fixture passes", async () => {
+    const diagnostics = await lintFixture("valid/openapi.yaml");
+    expect(diagnostics.some((d) => d.rule === "structure/encoding")).toBe(false);
+  });
+});
+
+describe("structure/xml", () => {
+  test("flags an unknown key", async () => {
+    const diagnostics = await lintFixture("structure/xml-bad.yaml");
+    const d = diagnostics.find((d) => d.rule === "structure/xml" && d.message.includes("unknownKey"));
+    expect(d).toBeDefined();
+  });
+
+  test("flags a wrong-typed name", async () => {
+    const diagnostics = await lintFixture("structure/xml-bad.yaml");
+    const d = diagnostics.find((d) => d.rule === "structure/xml" && d.message.includes("xml.name"));
+    expect(d).toBeDefined();
+  });
+
+  test("flags a namespace that isn't an absolute URI", async () => {
+    const diagnostics = await lintFixture("structure/xml-bad.yaml");
+    const d = diagnostics.find((d) => d.rule === "structure/xml" && d.message.includes("xml.namespace"));
+    expect(d).toBeDefined();
+  });
+
+  test("flags a non-boolean attribute", async () => {
+    const diagnostics = await lintFixture("structure/xml-bad.yaml");
+    const d = diagnostics.find((d) => d.rule === "structure/xml" && d.message.includes("xml.attribute"));
+    expect(d).toBeDefined();
+  });
+
+  test("valid fixture passes", async () => {
+    const diagnostics = await lintFixture("valid/openapi.yaml");
+    expect(diagnostics.some((d) => d.rule === "structure/xml")).toBe(false);
+  });
+});
+
+describe("structure/examples", () => {
+  test("flags value and externalValue together on a component example", async () => {
+    const diagnostics = await lintFixture("structure/examples-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/examples" && d.message.includes('"BadRootExample"') && d.message.includes("must not set both"),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags an unknown key on an inline parameter example", async () => {
+    const diagnostics = await lintFixture("structure/examples-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/examples" && d.message.includes('"bad"') && d.message.includes("unknown key"),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags value and externalValue together on an inline parameter example", async () => {
+    const diagnostics = await lintFixture("structure/examples-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/examples" && d.message.includes('"bad"') && d.message.includes("must not set both"),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("valid fixture passes", async () => {
+    const diagnostics = await lintFixture("valid/openapi.yaml");
+    expect(diagnostics.some((d) => d.rule === "structure/examples")).toBe(false);
+  });
+});
+
+describe("structure rules across $ref'd multi-file documents", () => {
+  test("flags a $ref'd security scheme and a $ref'd example", async () => {
+    const fs = new NodeFileSystem();
+    const entry = `${fixturesRoot}/structure-multifile/entry.yaml`;
+    const graph = await loadWorkspaceGraph(fs, entry);
+    const config = resolveConfig(undefined);
+    const diagnostics = lint(graph, config);
+
+    const schemeDiag = diagnostics.find(
+      (d) => d.rule === "structure/security-schemes" && d.message.includes('"ApiKeyAuth"'),
+    );
+    expect(schemeDiag).toBeDefined();
+    expect(schemeDiag?.range.filePath).toContain("security-schemes.yaml");
+
+    const exampleDiag = diagnostics.find(
+      (d) => d.rule === "structure/examples" && d.message.includes('"pet"') && d.message.includes("must not set both"),
+    );
+    expect(exampleDiag).toBeDefined();
+    expect(exampleDiag?.range.filePath).toContain("examples.yaml");
+  });
+});

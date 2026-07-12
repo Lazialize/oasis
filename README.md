@@ -74,6 +74,11 @@ Exit code is `1` if any error-severity diagnostic is reported, `0` otherwise, `2
 | `structure/field-types` | error | Common objects have the right shapes (paths, operations, parameters, responses, components…) |
 | `structure/http-methods` | error | Only valid HTTP verbs / metadata keys under a path item |
 | `structure/schema-nullable` | error | 3.0: no `type` arrays / `null` type; 3.1: no `nullable` — in every schema, including inline ones |
+| `structure/security-schemes` | error | `components/securitySchemes` entries have a recognized `type` (apiKey/http/oauth2/openIdConnect, plus 3.1 `mutualTLS`) and that type's required fields |
+| `structure/server-variables` | error | Server Object `variables`: every `{var}` in `url` is declared with a `default`; `enum` (if present) is a non-empty string array containing `default`; warns about unused declared variables |
+| `structure/encoding` | error | Media Type Object `encoding` keys match schema properties (when resolvable to an inline object); `contentType`/`style`/`explode`/`allowReserved` have the right shapes |
+| `structure/xml` | error | Schema Object `xml` field: allowed keys, correct primitive types, `namespace` looks like an absolute URI |
+| `structure/examples` | error | Example Objects in `components/examples` and inline `examples` maps: `value`/`externalValue` are mutually exclusive, only known keys are used |
 | `no-duplicate-keys` | error | Duplicate mapping keys in YAML/JSON |
 | `no-unresolved-ref` | error | Every `$ref` resolves (missing files *and* missing pointers) |
 | `no-ref-cycle` | warn | Cross-file reference cycles |

@@ -1,0 +1,3 @@
+BadExample:
+  value: a literal value
+  externalValue: https://example.com/example.json

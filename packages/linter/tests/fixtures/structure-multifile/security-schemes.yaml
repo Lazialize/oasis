@@ -1,0 +1,3 @@
+BadApiKey:
+  type: apiKey
+  in: query

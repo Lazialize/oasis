@@ -10,11 +10,16 @@ import { operationSuccessResponse } from "./operation-success-response.ts";
 import { operationTags } from "./operation-tags.ts";
 import { pathParamsDefined } from "./path-params-defined.ts";
 import { securityDefined } from "./security-defined.ts";
+import { structureEncoding } from "./structure-encoding.ts";
+import { structureExamples } from "./structure-examples.ts";
 import { structureFieldTypes } from "./structure-field-types.ts";
 import { structureHttpMethods } from "./structure-http-methods.ts";
 import { structureOpenapiVersion } from "./structure-openapi-version.ts";
 import { structureRequiredFields } from "./structure-required-fields.ts";
 import { structureSchemaNullable } from "./structure-schema-nullable.ts";
+import { structureSecuritySchemes } from "./structure-security-schemes.ts";
+import { structureServerVariables } from "./structure-server-variables.ts";
+import { structureXml } from "./structure-xml.ts";
 import { tagsDefined } from "./tags-defined.ts";
 import type { Rule } from "../types.ts";
 
@@ -25,6 +30,11 @@ export const rules: Rule[] = [
   structureFieldTypes,
   structureHttpMethods,
   structureSchemaNullable,
+  structureSecuritySchemes,
+  structureServerVariables,
+  structureEncoding,
+  structureXml,
+  structureExamples,
   noDuplicateKeys,
   noUnresolvedRef,
   noRefCycle,
@@ -57,10 +67,15 @@ export {
   operationTags,
   pathParamsDefined,
   securityDefined,
+  structureEncoding,
+  structureExamples,
   structureFieldTypes,
   structureHttpMethods,
   structureOpenapiVersion,
   structureRequiredFields,
   structureSchemaNullable,
+  structureSecuritySchemes,
+  structureServerVariables,
+  structureXml,
   tagsDefined,
 };

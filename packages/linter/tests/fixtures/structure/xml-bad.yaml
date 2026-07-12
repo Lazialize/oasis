@@ -1,0 +1,31 @@
+openapi: 3.0.3
+info:
+  title: T
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      tags: [a]
+      description: x
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+components:
+  schemas:
+    Pet:
+      type: object
+      xml:
+        name: 5
+        namespace: not-a-uri
+        prefix: pet
+        attribute: maybe
+        wrapped: true
+        unknownKey: oops
+      properties:
+        name:
+          type: string

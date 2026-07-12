@@ -225,3 +225,93 @@ export function iterateSchemas(
 
   return results;
 }
+
+/** A site where a Media Type Object appears: the (possibly $ref-resolved) media type root node. */
+export interface MediaTypeSite {
+  doc: OasisDocument;
+  /** The resolved Media Type Object node (always a YAML map). */
+  node: Node;
+  pointer: string;
+}
+
+/**
+ * Enumerate every Media Type Object under a `content` map: request bodies (operation-level and
+ * `components/requestBodies`) and responses (operation-level and `components/responses`), on
+ * `paths` and, on 3.1, `webhooks`. `$ref`s to request bodies / responses / media types are
+ * resolved through the workspace graph; each resolved site is yielded once, deduplicated by
+ * file + pointer.
+ */
+export function iterateMediaTypes(
+  graph: WorkspaceGraph,
+  entryDoc: OasisDocument,
+  documents: OasisDocument[],
+  version?: OpenApiVersion,
+): MediaTypeSite[] {
+  const seen = new Set<string>();
+  const results: MediaTypeSite[] = [];
+
+  function addFromContent(doc: OasisDocument, contentNode: Node | undefined, pointer: string): void {
+    if (!contentNode || !isMap(contentNode)) return;
+    for (const pair of contentNode.items) {
+      const mediaType = keyToString(pair.key);
+      if (!isNode(pair.value)) continue;
+      const resolved = resolveMaybeRef(graph, doc, pair.value, `${pointer}/${mediaType}`);
+      if (!isMap(resolved.node)) continue;
+      const key = `${resolved.doc.filePath}::${resolved.pointer}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      results.push({ doc: resolved.doc, node: resolved.node, pointer: resolved.pointer });
+    }
+  }
+
+  for (const doc of documents) {
+    const root = doc.yamlDoc.contents;
+    if (!root || !isMap(root)) continue;
+    const components = childAt(root, "components");
+    if (!components || !isMap(components)) continue;
+
+    const eachEntry = (section: string, visit: (doc: OasisDocument, node: Node, pointer: string) => void): void => {
+      const sectionNode = childAt(components, section);
+      if (!sectionNode || !isMap(sectionNode)) return;
+      for (const pair of sectionNode.items) {
+        const name = keyToString(pair.key);
+        if (!isNode(pair.value)) continue;
+        const resolved = resolveMaybeRef(graph, doc, pair.value, `/components/${section}/${name}`);
+        visit(resolved.doc, resolved.node, resolved.pointer);
+      }
+    };
+
+    eachEntry("requestBodies", (d, n, p) => {
+      if (isMap(n)) addFromContent(d, childAt(n, "content"), `${p}/content`);
+    });
+    eachEntry("responses", (d, n, p) => {
+      if (isMap(n)) addFromContent(d, childAt(n, "content"), `${p}/content`);
+    });
+  }
+
+  for (const op of iterateOperations(graph, entryDoc, version)) {
+    if (!isMap(op.node)) continue;
+
+    const rbNode = childAt(op.node, "requestBody");
+    if (rbNode) {
+      const resolved = resolveMaybeRef(graph, op.doc, rbNode, `${op.pointer}/requestBody`);
+      if (isMap(resolved.node)) {
+        addFromContent(resolved.doc, childAt(resolved.node, "content"), `${resolved.pointer}/content`);
+      }
+    }
+
+    const responsesNode = childAt(op.node, "responses");
+    if (isMap(responsesNode)) {
+      for (const pair of responsesNode.items) {
+        const status = keyToString(pair.key);
+        if (!isNode(pair.value)) continue;
+        const resolved = resolveMaybeRef(graph, op.doc, pair.value, `${op.pointer}/responses/${status}`);
+        if (isMap(resolved.node)) {
+          addFromContent(resolved.doc, childAt(resolved.node, "content"), `${resolved.pointer}/content`);
+        }
+      }
+    }
+  }
+
+  return results;
+}

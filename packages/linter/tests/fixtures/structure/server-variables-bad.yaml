@@ -1,0 +1,25 @@
+openapi: 3.0.3
+info:
+  title: T
+  version: "1.0.0"
+servers:
+  - url: https://{host}.example.com/{basePath}/{missingVar}
+    variables:
+      host:
+        default: api
+      basePath:
+        default: v3
+        enum:
+          - v1
+          - v2
+      unused:
+        default: x
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      tags: [a]
+      description: x
+      responses:
+        '200':
+          description: OK
