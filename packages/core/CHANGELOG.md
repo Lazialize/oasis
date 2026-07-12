@@ -1,5 +1,16 @@
 # @oasis/core
 
+## 0.5.0
+
+### Patch Changes
+
+- [#8](https://github.com/Lazialize/oasis/pull/8) [`8175852`](https://github.com/Lazialize/oasis/commit/8175852fc9fa327e685f2254d11afacbb844e48f) Thanks [@Lazialize](https://github.com/Lazialize)! - Lint performance: memoize `$ref` scanning and the `paths`/`webhooks`/`components` traversal
+  helpers (`iteratePathItems`, `iterateOperations`, `iterateSchemas`, `iterateMediaTypes`) so
+  repeated calls from independent rules within a single `lint()` run reuse work instead of
+  re-walking the whole document graph each time; also cache YAML map key lookups so resolving a
+  `$ref` into a large `components/schemas` map is no longer a linear scan per lookup. No behavior
+  change — output is identical, just faster on large/multi-file specs.
+
 ## 0.4.0
 
 ## 0.3.0

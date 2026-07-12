@@ -1,5 +1,36 @@
 # @oasis/cli
 
+## 0.5.0
+
+### Minor Changes
+
+- [#8](https://github.com/Lazialize/oasis/pull/8) [`602a03c`](https://github.com/Lazialize/oasis/commit/602a03c8d6cd614237965523dde2b155dc4b6a1c) Thanks [@Lazialize](https://github.com/Lazialize)! - New `oasis init` command scaffolds an `oasis.config.jsonc` in the current directory: it scans up
+  to 2 levels deep (skipping `node_modules` and hidden directories) for YAML/JSON files whose root
+  has an `openapi:` key and pre-fills `entries` with what it finds, refusing to overwrite an
+  existing config (exit `2`).
+
+  Config `entries` may now be glob patterns (`"entries": ["apis/**/openapi.yaml"]`), expanded
+  relative to the config file's directory. Symlinked directories are not followed, hidden
+  directories and `node_modules` never match, and files matched by more than one entry are deduped.
+  A glob matching no files gets the same warning-diagnostic treatment as a missing literal entry.
+  Applies to both `oasis lint` (no-arg mode) and LSP project mode, which re-expands globs on config
+  reload.
+
+- [#8](https://github.com/Lazialize/oasis/pull/8) [`79dd952`](https://github.com/Lazialize/oasis/commit/79dd952568314b716bbe4ff188a868361bafa55b) Thanks [@Lazialize](https://github.com/Lazialize)! - `oasis lint --format sarif` emits a SARIF 2.1.0 log on stdout, suitable for upload to GitHub Code
+  Scanning via `github/codeql-action/upload-sarif`. Rule severities map to SARIF levels
+  (error/warning/info → error/warning/note), locations use repo-relative (cwd-relative) URIs when
+  possible and fall back to absolute `file://` URIs for diagnostics outside the working directory,
+  and the `rules` array is deduped to only the rules that actually produced results. README documents
+  the recipe under the `oasis lint` command docs.
+
+### Patch Changes
+
+- Updated dependencies [[`602a03c`](https://github.com/Lazialize/oasis/commit/602a03c8d6cd614237965523dde2b155dc4b6a1c), [`8175852`](https://github.com/Lazialize/oasis/commit/8175852fc9fa327e685f2254d11afacbb844e48f), [`9da0fe7`](https://github.com/Lazialize/oasis/commit/9da0fe7dae5d9b5c4a46b51a3eca91872665e18f)]:
+  - @oasis/linter@0.5.0
+  - @oasis/core@0.5.0
+  - @oasis/bundler@0.5.0
+  - @oasis/server@0.5.0
+
 ## 0.4.0
 
 ### Patch Changes
