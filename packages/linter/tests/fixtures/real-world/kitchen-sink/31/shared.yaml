@@ -1,0 +1,20 @@
+# Shared components for the 3.1 kitchen-sink fixture, referenced from entry.yaml via $ref to
+# exercise multi-file resolution.
+Error:
+  type: object
+  required:
+    - code
+    - message
+  properties:
+    code:
+      type: integer
+      format: int32
+    message:
+      type: string
+
+NotFound:
+  description: The requested resource was not found.
+  content:
+    application/json:
+      schema:
+        $ref: './shared.yaml#/Error'
