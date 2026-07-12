@@ -1,5 +1,13 @@
 # @oasis/server
 
+## 0.4.0
+
+### Patch Changes
+
+- Updated dependencies [[`e5667b7`](https://github.com/Lazialize/oasis/commit/e5667b76d865caa63b7d1767c14c1780d1d9844b), [`06f9367`](https://github.com/Lazialize/oasis/commit/06f9367ceb75f747fdb4e11f21adb70c5077c104), [`e5715fa`](https://github.com/Lazialize/oasis/commit/e5715fa7c5233ab6270dab7466bcf5271d5fffc4), [`3dd4215`](https://github.com/Lazialize/oasis/commit/3dd4215685da82dff206aa2905014af5aa5405e5)]:
+  - @oasis/linter@0.4.0
+  - @oasis/core@0.4.0
+
 ## 0.3.0
 
 ### Patch Changes
