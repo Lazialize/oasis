@@ -1,0 +1,270 @@
+# Synthetic "kitchen sink" OpenAPI 3.0 document exercising every feature the structure/* lint
+# rules inspect: security schemes + oauth2 flows, discriminator + mapping, callbacks, links,
+# encoding, xml, server variables, nullable, examples, and a multi-file $ref (./shared.yaml).
+# Crafted to be fully valid: zero diagnostics expected from `structure/*` rules.
+openapi: 3.0.3
+info:
+  title: Kitchen Sink API
+  version: "1.0.0"
+  description: Exercises every OpenAPI 3.0 feature the structure/* rules inspect.
+servers:
+  - url: https://{environment}.example.com/{basePath}
+    description: Main server
+    variables:
+      environment:
+        default: api
+        enum:
+          - api
+          - staging
+      basePath:
+        default: v1
+tags:
+  - name: pets
+    description: Pet operations
+  - name: subscriptions
+    description: Subscription operations
+security:
+  - apiKeyAuth: []
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      tags: [pets]
+      description: List all pets.
+      parameters:
+        - $ref: '#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: A paged array of pets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Animal'
+          links:
+            GetPetByPetId:
+              $ref: '#/components/links/GetPetByPetId'
+        default:
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: createPetForm
+      tags: [pets]
+      description: Create a pet via a multipart form upload.
+      requestBody:
+        description: Pet form data
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UploadForm'
+            encoding:
+              file:
+                contentType: application/octet-stream
+                style: form
+              note:
+                contentType: text/plain
+                allowReserved: false
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+        default:
+          $ref: '#/components/responses/NotFound'
+  /pets/{petId}:
+    get:
+      operationId: showPetById
+      tags: [pets]
+      description: Info for a specific pet.
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          description: The id of the pet to retrieve.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Pet response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+        default:
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: deletePet
+      tags: [pets]
+      description: Delete a pet.
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          description: The id of the pet to delete.
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted.
+  /subscribe:
+    post:
+      operationId: subscribeToPetEvents
+      tags: [subscriptions]
+      description: Subscribe to pet lifecycle events.
+      requestBody:
+        description: Subscription request
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - callbackUrl
+              properties:
+                callbackUrl:
+                  type: string
+                  format: uri
+      responses:
+        '201':
+          description: Subscription created.
+      callbacks:
+        onPetEvent:
+          $ref: '#/components/callbacks/onPetEvent'
+components:
+  schemas:
+    NewPet:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        tag:
+          type: string
+          nullable: true
+    Pet:
+      allOf:
+        - $ref: '#/components/schemas/NewPet'
+        - type: object
+          required:
+            - id
+          properties:
+            id:
+              type: integer
+              format: int64
+      xml:
+        name: pet
+        namespace: 'https://example.com/schema'
+        wrapped: true
+    Animal:
+      type: object
+      discriminator:
+        propertyName: petType
+        mapping:
+          cat: '#/components/schemas/Cat'
+          dog: '#/components/schemas/Dog'
+      oneOf:
+        - $ref: '#/components/schemas/Cat'
+        - $ref: '#/components/schemas/Dog'
+      properties:
+        petType:
+          type: string
+    Cat:
+      type: object
+      required:
+        - petType
+      properties:
+        petType:
+          type: string
+        huntingSkill:
+          type: string
+    Dog:
+      type: object
+      required:
+        - petType
+      properties:
+        petType:
+          type: string
+        packSize:
+          type: integer
+          minimum: 0
+    Error:
+      $ref: './shared.yaml#/Error'
+    UploadForm:
+      type: object
+      required:
+        - file
+      properties:
+        note:
+          type: string
+        file:
+          type: string
+          format: binary
+  securitySchemes:
+    apiKeyAuth:
+      type: apiKey
+      name: X-API-Key
+      in: header
+    basicAuth:
+      type: http
+      scheme: basic
+    oauth2Auth:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://example.com/oauth/authorize
+          tokenUrl: https://example.com/oauth/token
+          scopes:
+            read:pets: Read pets
+            write:pets: Modify pets
+        clientCredentials:
+          tokenUrl: https://example.com/oauth/token
+          scopes:
+            read:pets: Read pets
+  parameters:
+    LimitParam:
+      name: limit
+      in: query
+      required: false
+      description: Maximum number of results to return.
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        maximum: 100
+      examples:
+        default:
+          value: 20
+  examples:
+    PetExample:
+      value:
+        id: 1
+        name: Fido
+  responses:
+    NotFound:
+      $ref: './shared.yaml#/NotFound'
+  links:
+    GetPetByPetId:
+      operationId: showPetById
+      parameters:
+        petId: '$response.body#/id'
+      description: Fetch the pet that was just listed.
+  callbacks:
+    onPetEvent:
+      '{$request.body#/callbackUrl}':
+        post:
+          requestBody:
+            required: true
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    event:
+                      type: string
+          responses:
+            '200':
+              description: Callback received.

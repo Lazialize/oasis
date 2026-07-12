@@ -1,0 +1,28 @@
+openapi: 3.1.0
+info:
+  title: T
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+components:
+  schemas:
+    Pet:
+      discriminator:
+        propertyName: petType
+      oneOf:
+        - $ref: '#/components/schemas/NotRequiredBranch'
+
+    NotRequiredBranch:
+      type: object
+      properties:
+        petType:
+          type: string

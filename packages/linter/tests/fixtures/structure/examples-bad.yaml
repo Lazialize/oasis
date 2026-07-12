@@ -1,0 +1,39 @@
+openapi: 3.0.3
+info:
+  title: T
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      tags: [a]
+      description: x
+      parameters:
+        - name: filter
+          in: query
+          schema:
+            type: string
+          examples:
+            good:
+              value: name=foo
+            bad:
+              value: name=foo
+              externalValue: https://example.com/filter.txt
+              unknownKey: nope
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+              examples:
+                sample:
+                  summary: ok
+                  value:
+                    name: Fido
+components:
+  examples:
+    BadRootExample:
+      value: a
+      externalValue: https://example.com/a.json

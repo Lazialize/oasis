@@ -1,0 +1,30 @@
+openapi: 3.0.3
+info:
+  title: T
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          description: OK
+          links:
+            BothSet:
+              operationId: listPets
+              operationRef: '#/paths/~1pets/get'
+            NeitherSet:
+              description: no op ref or id
+            UnknownOp:
+              operationId: doesNotExist
+            BadRef:
+              operationRef: '#/paths/~1missing/get'
+            GoodRef:
+              operationRef: '#/paths/~1pets/get'
+            UnknownKey:
+              operationId: listPets
+              notAKey: true
+components:
+  links:
+    ReusableBad:
+      operationId: alsoDoesNotExist

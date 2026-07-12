@@ -1,0 +1,6 @@
+Cat:
+  type: object
+  required: [petType]
+  properties:
+    petType:
+      type: string

@@ -73,11 +73,20 @@ Exit code is `1` if any error-severity diagnostic is reported, `0` otherwise, `2
 | `structure/openapi-version` | error | `openapi` is a valid `3.0.x` / `3.1.x` string |
 | `structure/field-types` | error | Common objects have the right shapes (paths, operations, parameters, responses, components…) |
 | `structure/http-methods` | error | Only valid HTTP verbs / metadata keys under a path item |
-| `structure/schema-nullable` | error | 3.0: no `type` arrays / `null` type; 3.1: no `nullable` |
+| `structure/schema-nullable` | error | 3.0: no `type` arrays / `null` type; 3.1: no `nullable` — in every schema, including inline ones |
+| `structure/schema-keywords` | error | Schema Object keywords match the document's dialect (3.1-only keywords like `const`/`prefixItems`/`patternProperties`/`if`-`then`-`else`/`$defs` flagged on 3.0; numeric vs boolean `exclusiveMinimum`/`exclusiveMaximum` per version), value types (`type`, numeric bounds, `pattern`, `required`, `enum`, `items`, `properties`, `additionalProperties`, `format`), internal consistency (min/max contradictions, `required` properties excluded by `additionalProperties: false`), and `$ref` sibling keys (ignored — and flagged — in 3.0, legal in 3.1) |
+| `structure/security-schemes` | error | `components/securitySchemes` entries have a recognized `type` (apiKey/http/oauth2/openIdConnect, plus 3.1 `mutualTLS`) and that type's required fields |
+| `structure/server-variables` | error | Server Object `variables`: every `{var}` in `url` is declared with a `default`; `enum` (if present) is a non-empty string array containing `default`; warns about unused declared variables |
+| `structure/encoding` | error | Media Type Object `encoding` keys match schema properties (when resolvable to an inline object); `contentType`/`style`/`explode`/`allowReserved` have the right shapes |
+| `structure/xml` | error | Schema Object `xml` field: allowed keys, correct primitive types, `namespace` looks like an absolute URI |
+| `structure/examples` | error | Example Objects in `components/examples` and inline `examples` maps: `value`/`externalValue` are mutually exclusive, only known keys are used |
+| `structure/discriminator` | error | Discriminator Objects: required `propertyName`, `mapping` targets resolve in-workspace, a discriminator requires `oneOf`/`anyOf`/`allOf`, and `propertyName` is a property of (and, in 3.0, required by) each resolvable `oneOf`/`anyOf` branch schema |
+| `structure/callbacks` | error | Callback Objects (operation-level `callbacks` and `components/callbacks`): expression keys look like runtime expressions or URLs, mapped Path Item Objects have valid keys, and their operations declare `responses` |
+| `structure/links` | error | Link Objects (Response Object `links` and `components/links`): exactly one of `operationRef`/`operationId`, `operationId` matches a workspace operationId, local `operationRef` pointers resolve |
 | `no-duplicate-keys` | error | Duplicate mapping keys in YAML/JSON |
 | `no-unresolved-ref` | error | Every `$ref` resolves (missing files *and* missing pointers) |
 | `no-ref-cycle` | warn | Cross-file reference cycles |
-| `operation-operationId` | error | `operationId` present and unique across the workspace |
+| `operation-operationId` | error | `operationId` present and unique across the workspace (including 3.1 `webhooks`) |
 | `operation-tags` | warn | Operations have at least one tag |
 | `operation-description` | warn | Operations have a `description` or `summary` |
 | `operation-success-response` | warn | Operations have at least one 2xx/3xx response (`default` alone doesn't count) |
@@ -89,6 +98,14 @@ Exit code is `1` if any error-severity diagnostic is reported, `0` otherwise, `2
 | `no-unused-tags` | warn | Root `tags` list entries are used by at least one operation |
 | `naming-convention` | off | Configurable casing for operationIds, component names, parameter names, schema property names (see below) |
 | `example-schema-match` | warn | `example`/`examples[].value` values conform to their schema (Schema Object, Media Type Object, Parameter Object), version-aware |
+
+Operation-level rules (`operation-*`, `security-defined`, `tags-defined`, `naming-convention`,
+`example-schema-match`) also cover operations under the root `webhooks` map on 3.1 documents.
+Path-shaped rules (`path-params-defined`, `no-duplicate-paths`) apply to `paths` only — webhook
+keys are arbitrary names, not URL templates. Schema rules (`structure/schema-nullable`,
+`structure/schema-keywords`, `naming-convention` property names, `example-schema-match`) check
+every schema site: `components` entries plus inline request/response media types, parameters and
+headers.
 
 Syntax errors are always reported as errors and cannot be disabled.
 

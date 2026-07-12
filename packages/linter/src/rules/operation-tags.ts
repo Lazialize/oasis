@@ -8,7 +8,7 @@ export const operationTags: Rule = {
   description: "Requires every operation to declare at least one non-empty tag.",
   defaultSeverity: "warn",
   check(ctx) {
-    for (const op of iterateOperations(ctx.graph, ctx.entryDoc)) {
+    for (const op of iterateOperations(ctx.graph, ctx.entryDoc, ctx.version)) {
       const tagsNode = childAt(op.node, "tags");
       const label = `${op.method.toUpperCase()} ${op.pathItem.template}`;
 

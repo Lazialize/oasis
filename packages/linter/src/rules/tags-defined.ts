@@ -25,7 +25,7 @@ export const tagsDefined: Rule = {
     if (!root || !isMap(root)) return;
     const declared = collectDeclaredTags(childAt(root, "tags"));
 
-    for (const op of iterateOperations(ctx.graph, ctx.entryDoc)) {
+    for (const op of iterateOperations(ctx.graph, ctx.entryDoc, ctx.version)) {
       const tagsNode = childAt(op.node, "tags");
       if (!tagsNode || !isSeq(tagsNode)) continue;
       const label = `${op.method.toUpperCase()} ${op.pathItem.template}`;

@@ -1,7 +1,7 @@
 import { isMap, isNode, isScalar, isSeq } from "yaml";
 import type { Node } from "yaml";
 import type { OasisDocument } from "@oasis/core";
-import { iterateOperations } from "../openapi-walk.ts";
+import { iterateOperations, iterateSchemas } from "../openapi-walk.ts";
 import { childAt, keyToString, resolveMaybeRef } from "../util.ts";
 import type { Rule, RuleContext } from "../types.ts";
 import { validateExample } from "./validate-example.ts";
@@ -148,20 +148,15 @@ export const exampleSchemaMatch: Rule = {
     const env: ValidateEnv = { graph: ctx.graph, version: ctx.version };
     const seen = new Set<Node>();
 
-    for (const doc of ctx.documents) {
-      const root = doc.yamlDoc.contents;
-      if (!root || !isMap(root)) continue;
-      const components = childAt(root, "components");
-      if (!isMap(components)) continue;
-      const schemas = childAt(components, "schemas");
-      if (!isMap(schemas)) continue;
-      for (const pair of schemas.items) {
-        if (!isNode(pair.value)) continue;
-        walkSchemasForSelfExamples(ctx, env, doc, pair.value, seen);
-      }
+    // Every schema root (components/schemas plus inline request/response/parameter/header
+    // schemas, and 3.1 webhooks): validate nested schema-level `example` keywords. The walker
+    // dedupes $ref-shared schemas, and the shared `seen` set keeps the media-type/parameter pass
+    // below from re-walking the same schema nodes.
+    for (const site of iterateSchemas(ctx.graph, ctx.entryDoc, ctx.documents, ctx.version)) {
+      walkSchemasForSelfExamples(ctx, env, site.doc, site.node, seen);
     }
 
-    for (const op of iterateOperations(ctx.graph, ctx.entryDoc)) {
+    for (const op of iterateOperations(ctx.graph, ctx.entryDoc, ctx.version)) {
       const label = `Operation "${op.method.toUpperCase()} ${op.pathItem.template}"`;
 
       const rbNode = childAt(op.node, "requestBody");

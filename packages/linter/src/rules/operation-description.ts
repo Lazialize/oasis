@@ -12,7 +12,7 @@ export const operationDescription: Rule = {
   description: "Requires every operation to have a description or summary.",
   defaultSeverity: "warn",
   check(ctx) {
-    for (const op of iterateOperations(ctx.graph, ctx.entryDoc)) {
+    for (const op of iterateOperations(ctx.graph, ctx.entryDoc, ctx.version)) {
       const description = childAt(op.node, "description");
       const summary = childAt(op.node, "summary");
       if (!hasNonEmptyString(description) && !hasNonEmptyString(summary)) {

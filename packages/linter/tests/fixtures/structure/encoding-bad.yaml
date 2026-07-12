@@ -1,0 +1,35 @@
+openapi: 3.0.3
+info:
+  title: T
+  version: "1.0.0"
+paths:
+  /upload:
+    post:
+      operationId: upload
+      tags: [a]
+      description: x
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                metadata:
+                  type: object
+            encoding:
+              file:
+                contentType: application/octet-stream
+                explode: true
+              notAProperty:
+                contentType: text/plain
+              metadata:
+                contentType: 5
+                style: bogusStyle
+                explode: yes
+                allowReserved: nope
+      responses:
+        '200':
+          description: OK

@@ -1,0 +1,78 @@
+openapi: 3.0.3
+info:
+  title: T
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+components:
+  schemas:
+    NoCompositionPet:
+      type: object
+      discriminator:
+        propertyName: petType
+      properties:
+        petType:
+          type: string
+
+    MissingPropertyNamePet:
+      discriminator: {}
+      oneOf:
+        - $ref: '#/components/schemas/Cat'
+
+    BadMappingPet:
+      discriminator:
+        propertyName: petType
+        mapping:
+          cat: '#/components/schemas/Cat'
+          dog: '#/components/schemas/NoSuchSchema'
+      oneOf:
+        - $ref: '#/components/schemas/Cat'
+        - $ref: '#/components/schemas/Dog'
+
+    MissingBranchPropertyPet:
+      discriminator:
+        propertyName: petType
+      oneOf:
+        - $ref: '#/components/schemas/Cat'
+        - $ref: '#/components/schemas/NoPropertyBranch'
+
+    MissingRequiredPet:
+      discriminator:
+        propertyName: petType
+      oneOf:
+        - $ref: '#/components/schemas/NotRequiredBranch'
+
+    Cat:
+      type: object
+      required: [petType]
+      properties:
+        petType:
+          type: string
+
+    Dog:
+      type: object
+      required: [petType]
+      properties:
+        petType:
+          type: string
+
+    NoPropertyBranch:
+      type: object
+      properties:
+        name:
+          type: string
+
+    NotRequiredBranch:
+      type: object
+      properties:
+        petType:
+          type: string

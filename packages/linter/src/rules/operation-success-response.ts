@@ -11,7 +11,7 @@ export const operationSuccessResponse: Rule = {
   description: 'Requires every operation to declare at least one 2xx or 3xx response (a lone "default" does not count).',
   defaultSeverity: "warn",
   check(ctx) {
-    for (const op of iterateOperations(ctx.graph, ctx.entryDoc)) {
+    for (const op of iterateOperations(ctx.graph, ctx.entryDoc, ctx.version)) {
       const label = `${op.method.toUpperCase()} ${op.pathItem.template}`;
       const responsesNode = childAt(op.node, "responses");
 

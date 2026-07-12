@@ -1,0 +1,34 @@
+openapi: 3.0.3
+info:
+  title: T
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      tags: [a]
+      description: x
+      responses:
+        '200':
+          description: OK
+components:
+  securitySchemes:
+    NoType:
+      description: missing type
+    BadType:
+      type: madeUpType
+    BadApiKey:
+      type: apiKey
+      in: query
+    BadHttp:
+      type: http
+    BadOAuth2NoFlows:
+      type: oauth2
+    BadOAuth2Flow:
+      type: oauth2
+      flows:
+        implicit:
+          scopes:
+            read: Read access
+    BadOpenIdConnect:
+      type: openIdConnect

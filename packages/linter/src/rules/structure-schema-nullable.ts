@@ -1,6 +1,7 @@
 import { isMap, isNode, isScalar, isSeq } from "yaml";
 import type { Node } from "yaml";
 import type { OasisDocument } from "@oasis/core";
+import { iterateSchemas } from "../openapi-walk.ts";
 import { childAt } from "../util.ts";
 import type { Rule, RuleContext } from "../types.ts";
 
@@ -69,23 +70,14 @@ function checkSchema(ctx: RuleContext, doc: OasisDocument, schema: Node): void {
 
 export const structureSchemaNullable: Rule = {
   name: "structure/schema-nullable",
-  description: 'Checks version-appropriate nullability and "type" usage in components/schemas (3.0 "nullable" vs 3.1 type arrays).',
+  description: 'Checks version-appropriate nullability and "type" usage in every schema, including inline ones (3.0 "nullable" vs 3.1 type arrays).',
   defaultSeverity: "error",
   check(ctx) {
     if (ctx.version !== "3.0" && ctx.version !== "3.1") return;
 
-    for (const doc of ctx.documents) {
-      const root = doc.yamlDoc.contents;
-      if (!root || !isMap(root)) continue;
-      const components = childAt(root, "components");
-      if (!isMap(components)) continue;
-      const schemas = childAt(components, "schemas");
-      if (!isMap(schemas)) continue;
-
-      for (const pair of schemas.items) {
-        if (!isNode(pair.value)) continue;
-        walkSchemas(pair.value, (schema) => checkSchema(ctx, doc, schema));
-      }
+    const seen = new Set<Node>();
+    for (const site of iterateSchemas(ctx.graph, ctx.entryDoc, ctx.documents, ctx.version)) {
+      walkSchemas(site.node, (schema) => checkSchema(ctx, site.doc, schema), seen);
     }
   },
 };

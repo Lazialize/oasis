@@ -10,7 +10,7 @@ export const operationOperationId: Rule = {
   check(ctx) {
     const seen = new Map<string, { pathTemplate: string; method: string }>();
 
-    for (const op of iterateOperations(ctx.graph, ctx.entryDoc)) {
+    for (const op of iterateOperations(ctx.graph, ctx.entryDoc, ctx.version)) {
       const idNode = childAt(op.node, "operationId");
       if (!idNode || !isScalar(idNode) || typeof idNode.value !== "string" || idNode.value === "") {
         ctx.report(
