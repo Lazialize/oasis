@@ -1,31 +1,16 @@
 import { isMap, isNode, isScalar, isSeq } from "yaml";
 import type { Node } from "yaml";
+import { COMPONENT_SECTIONS } from "@oasis/core";
 import type { OasisDocument } from "@oasis/core";
 import { HTTP_METHODS } from "../openapi-walk.ts";
-import { childAt, keyToString } from "../util.ts";
+import { childAt, isRefObject, keyToString } from "../util.ts";
 import type { Rule, RuleContext } from "../types.ts";
 
 const STATUS_CODE = /^(default|[1-5](\d{2}|XX))$/i;
 const PARAMETER_LOCATIONS = new Set(["query", "header", "path", "cookie"]);
-const COMPONENT_CATEGORIES = [
-  "schemas",
-  "responses",
-  "parameters",
-  "examples",
-  "requestBodies",
-  "headers",
-  "securitySchemes",
-  "links",
-  "callbacks",
-  "pathItems",
-];
 
 function reportWrongType(ctx: RuleContext, doc: OasisDocument, node: Node, fieldPath: string, expected: string): void {
   ctx.report({ doc, node }, `"${fieldPath}" must be ${expected}.`);
-}
-
-function isRefObject(node: Node): boolean {
-  return isMap(node) && node.items.some((p) => keyToString(p.key) === "$ref");
 }
 
 function checkObjectField(
@@ -78,7 +63,7 @@ export const structureFieldTypes: Rule = {
       if (!isMap(components)) {
         reportWrongType(ctx, doc, components, "components", "an object");
       } else {
-        for (const category of COMPONENT_CATEGORIES) {
+        for (const category of COMPONENT_SECTIONS) {
           const categoryNode = childAt(components, category);
           if (categoryNode && !isMap(categoryNode)) {
             reportWrongType(ctx, doc, categoryNode, `components.${category}`, "an object");

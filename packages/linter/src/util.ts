@@ -1,29 +1,13 @@
-import { isMap, isNode, isScalar, isSeq } from "yaml";
+import { isMap, isScalar } from "yaml";
 import type { Node } from "yaml";
-import { nodeAtPointer, resolveRef } from "@oasis/core";
+import { childAt, keyToString, nodeAtPointer, resolveRef } from "@oasis/core";
 import type { OasisDocument, WorkspaceGraph } from "@oasis/core";
 
-/** The string form of a map key. */
-export function keyToString(key: unknown): string {
-  if (isScalar(key)) return String(key.value);
-  return String(key);
-}
+export { childAt, keyToString };
 
-/** Look up a direct child of a YAML map/seq node by key/index, without following $refs. */
-export function childAt(node: Node, segment: string): Node | undefined {
-  if (isMap(node)) {
-    const pair = node.items.find((p) => keyToString(p.key) === segment);
-    if (!pair || !isNode(pair.value)) return undefined;
-    return pair.value;
-  }
-  if (isSeq(node)) {
-    const idx = Number(segment);
-    if (!Number.isInteger(idx)) return undefined;
-    const item = node.items[idx];
-    if (!isNode(item)) return undefined;
-    return item;
-  }
-  return undefined;
+/** Whether `node` is a YAML map carrying a `$ref` key (a Reference Object). */
+export function isRefObject(node: Node): boolean {
+  return isMap(node) && node.items.some((p) => keyToString(p.key) === "$ref");
 }
 
 export interface ResolvedLocation {

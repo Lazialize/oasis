@@ -1,19 +1,10 @@
 import { isMap } from "yaml";
-import { findRefs, resolveRef } from "@oasis/core";
+import { COMPONENT_SECTIONS, findRefs, resolveRef } from "@oasis/core";
 import { childAt, keyToString } from "../util.ts";
 import type { Rule } from "../types.ts";
 
-export const COMPONENT_CATEGORIES = [
-  "schemas",
-  "parameters",
-  "responses",
-  "requestBodies",
-  "headers",
-  "securitySchemes",
-  "links",
-  "callbacks",
-  "examples",
-] as const;
+// Unused-detection for `pathItems` (3.1-only) isn't supported yet, so it's excluded here.
+export const COMPONENT_CATEGORIES = COMPONENT_SECTIONS.filter((section) => section !== "pathItems");
 
 export const noUnusedComponents: Rule = {
   name: "no-unused-components",
