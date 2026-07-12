@@ -2,7 +2,7 @@
   "name": "oasis-vscode",
   "displayName": "Oasis OpenAPI",
   "description": "Lint, navigate, and get IntelliSense for OpenAPI documents via the Oasis language server.",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "publisher": "lazialize",
   "private": true,
   "license": "MIT",
