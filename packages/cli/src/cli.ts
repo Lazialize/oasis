@@ -8,7 +8,7 @@ const HELP = `oasis - OpenAPI toolkit (lint / bundle / lsp)
 Usage:
   oasis init                                           scaffold an oasis.config.jsonc here
   oasis lint [entry...] [--config path] [--format pretty|json|sarif]
-  oasis bundle <entry> [-o|--out path] [--format yaml|json]
+  oasis bundle <entry> [-o|--out path] [--format yaml|json] [--dereference]
   oasis lsp                                            start the LSP server on stdio
 
 With no entry given, \`oasis lint\` discovers \`oasis.config.jsonc\` (upward from the working

@@ -273,10 +273,10 @@ jobs:
           cd tap-repo
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet -- Formula/oasis.rb; then
+          git add Formula/oasis.rb
+          if git diff --cached --quiet -- Formula/oasis.rb; then
             echo "Formula unchanged, nothing to commit."
             exit 0
           fi
-          git add Formula/oasis.rb
           git commit -m "chore: update oasis to ${tag#v}"
           git push origin HEAD
