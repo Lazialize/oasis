@@ -149,4 +149,15 @@ describe("oasis lint (no args, config entries)", () => {
     expect(result.stderr).toContain("missing-a.yaml");
     expect(result.stderr).toContain("missing-b.yaml");
   });
+
+  test("glob entries expand to every matching file relative to the config directory", async () => {
+    // specs/one.yaml is missing an operationId (error); specs/two.yaml is clean but must still be
+    // linted — both are matched by the "specs/*.yaml" glob entry.
+    const result = await runCli(["lint", "--format", "json"], { cwd: `${fixturesRoot}/config-lint-glob` });
+    expect(result.exitCode).toBe(1);
+    const report = JSON.parse(result.stdout);
+    expect(report.diagnostics.some((d: { rule: string }) => d.rule === "operation-operationId")).toBe(true);
+    expect(report.diagnostics.some((d: { rule: string }) => d.rule === "config")).toBe(false); // no zero-match warning
+    expect(result.stdout).toContain("one.yaml");
+  });
 });

@@ -1,10 +1,12 @@
 import { runLspServer } from "@oasis/server";
 import { runBundleCommand } from "./commands/bundle.ts";
+import { runInitCommand } from "./commands/init.ts";
 import { runLintCommand } from "./commands/lint.ts";
 
 const HELP = `oasis - OpenAPI toolkit (lint / bundle / lsp)
 
 Usage:
+  oasis init                                           scaffold an oasis.config.jsonc here
   oasis lint [entry...] [--config path] [--format pretty|json]
   oasis bundle <entry> [-o|--out path] [--format yaml|json]
   oasis lsp                                            start the LSP server on stdio
@@ -31,6 +33,8 @@ export async function runCli(argv: string[], io: CliIo = defaultIo): Promise<num
   const [command, ...rest] = argv;
 
   switch (command) {
+    case "init":
+      return runInitCommand(rest, io);
     case "lint":
       return runLintCommand(rest, io);
     case "bundle":

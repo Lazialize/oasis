@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { InMemoryFileSystem } from "@oasis/core";
 import { getDiagnosticsByFile } from "../src/diagnostics.ts";
 import { routeDocument } from "../src/document-routing.ts";
@@ -223,6 +226,67 @@ describe("project mode", () => {
     expect(ctx.projects.get(CONFIG_PATH)?.entryPaths).toEqual([ENTRY_PATH]);
     expect(ctx.projects.get(CONFIG_PATH)?.warnings.length).toBe(1);
     expect(ctx.projects.get(CONFIG_PATH)?.warnings[0]).toContain("does-not-exist.yaml");
+  });
+
+  // Glob entries are expanded against the real filesystem (the overlay FileSystem interface
+  // can't enumerate directories), so these tests use a real temp directory. The config file's
+  // own content is still read through ctx.fileSystem (here, in-memory keyed by the real path).
+  describe("glob entries", () => {
+    const entryText = (title: string): string =>
+      `openapi: 3.1.0\ninfo:\n  title: ${title}\n  version: "1.0.0"\npaths: {}\n`;
+
+    function makeGlobProjectDir(): { root: string; configPath: string; entryA: string; entryB: string } {
+      const root = mkdtempSync(join(tmpdir(), "oasis-server-glob-"));
+      mkdirSync(join(root, "apis", "a"), { recursive: true });
+      mkdirSync(join(root, "apis", "b"), { recursive: true });
+      const entryA = join(root, "apis", "a", "openapi.yaml");
+      const entryB = join(root, "apis", "b", "openapi.yaml");
+      writeFileSync(entryA, entryText("A"));
+      writeFileSync(entryB, entryText("B"));
+      return { root, configPath: join(root, "oasis.config.jsonc"), entryA, entryB };
+    }
+
+    test("a glob entry expands to every matching file on disk", async () => {
+      const { configPath, entryA, entryB } = makeGlobProjectDir();
+      const ctx = createServerContext(
+        new InMemoryFileSystem({ [configPath]: `{ "entries": ["apis/*/openapi.yaml"] }` }),
+      );
+      await loadProjectAtPath(ctx, configPath);
+
+      expect(ctx.projects.get(configPath)?.entryPaths).toEqual([entryA, entryB]);
+      expect(ctx.projects.get(configPath)?.warnings).toEqual([]);
+    });
+
+    test("reloading the project after a new file appears re-expands the glob", async () => {
+      const { root, configPath, entryA, entryB } = makeGlobProjectDir();
+      const ctx = createServerContext(
+        new InMemoryFileSystem({ [configPath]: `{ "entries": ["apis/*/openapi.yaml"] }` }),
+      );
+      await loadProjectAtPath(ctx, configPath);
+      expect(ctx.projects.get(configPath)?.entryPaths).toEqual([entryA, entryB]);
+
+      mkdirSync(join(root, "apis", "c"), { recursive: true });
+      const entryC = join(root, "apis", "c", "openapi.yaml");
+      writeFileSync(entryC, entryText("C"));
+      await loadProjectAtPath(ctx, configPath);
+
+      expect(ctx.projects.get(configPath)?.entryPaths).toEqual([entryA, entryB, entryC]);
+    });
+
+    test("a glob matching nothing records a warning; a literal entry overlapping a glob is deduped", async () => {
+      const { configPath, entryA, entryB } = makeGlobProjectDir();
+      const ctx = createServerContext(
+        new InMemoryFileSystem({
+          [configPath]: `{ "entries": ["apis/a/openapi.yaml", "apis/*/openapi.yaml", "nowhere/*.yaml"] }`,
+          [entryA]: entryText("A"),
+        }),
+      );
+      await loadProjectAtPath(ctx, configPath);
+
+      expect(ctx.projects.get(configPath)?.entryPaths).toEqual([entryA, entryB]);
+      expect(ctx.projects.get(configPath)?.warnings.length).toBe(1);
+      expect(ctx.projects.get(configPath)?.warnings[0]).toContain("nowhere/*.yaml");
+    });
   });
 
   test("loadProjectConfig with no entries in the config leaves project mode off", async () => {

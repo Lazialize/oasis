@@ -40,6 +40,21 @@ extension section below for `oasis.server.path`.
 
 ## Commands
 
+### `oasis init`
+
+Scaffolds an `oasis.config.jsonc` in the current directory:
+
+```sh
+oasis init
+```
+
+It scans the working directory (up to 2 levels deep, skipping `node_modules` and hidden
+directories) for YAML/JSON files whose root has an `openapi:` key and lists what it finds in the
+generated `entries`; with no documents found, `entries` is left as a commented-out placeholder.
+The generated file also contains an empty `lint.rules` block with commented example overrides.
+If an `oasis.config.jsonc` already exists in the directory, `oasis init` refuses to overwrite it
+and exits `2`.
+
 ### `oasis lint [entry...]`
 
 Lints one or more OpenAPI documents, following `$ref`s across files. Diagnostics in referenced files are attributed to those files.
@@ -60,8 +75,9 @@ oasis lint     # discovers oasis.config.jsonc and lints its "entries"
 
 This fails with a usage error (exit `2`) if no entry is given and no config is found, or if a
 config is found but has no (or an empty) `entries` list. An entry listed in `entries` that doesn't
-exist on disk is surfaced as a warning diagnostic in the normal output rather than a crash; the
-other entries still lint. If every declared entry is missing, that's also a usage error.
+exist on disk — or a glob entry that matches no files — is surfaced as a warning diagnostic in the
+normal output rather than a crash; the other entries still lint. If every declared entry yields
+nothing, that's also a usage error.
 
 Exit code is `1` if any error-severity diagnostic is reported, `0` otherwise, `2` on usage/config errors.
 
@@ -224,11 +240,15 @@ overrides win over `lint.rules` wherever they match (even flipping a globally `"
 or vice versa, for just the matching files).
 
 `entries` is an optional list of entry-document paths, relative to the directory containing the
-config file. It's consumed by the LSP (see "project mode" below) and by `oasis lint` when run with
-no entry arguments (see above); `oasis lint`/`oasis bundle` given an explicit entry on the command
-line ignore this field, and `oasis bundle` never reads it (it always takes exactly one entry). An
-entry that doesn't exist on disk produces a config warning diagnostic rather than a crash; the
-field can be omitted entirely with no change in behavior.
+config file. An entry may also be a glob pattern (any string containing `*`, `?`, `[`, or `{`,
+e.g. `"apis/**/openapi.yaml"`), expanded against the config file's directory; symlinked
+directories are not followed, and hidden (dot) directories and `node_modules` never match. Files
+matched by more than one entry — literal or glob — are linted once. `entries` is consumed by the
+LSP (see "project mode" below) and by `oasis lint` when run with no entry arguments (see above);
+`oasis lint`/`oasis bundle` given an explicit entry on the command line ignore this field, and
+`oasis bundle` never reads it (it always takes exactly one entry). A literal entry that doesn't
+exist on disk, or a glob that matches no files, produces a config warning diagnostic rather than a
+crash; the field can be omitted entirely with no change in behavior.
 
 ### `oasis bundle <entry>`
 

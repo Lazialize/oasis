@@ -1,6 +1,6 @@
 import { dirname, join, resolve as pathResolve, sep } from "node:path";
 import { parse as parseJsonc, type ParseError } from "jsonc-parser";
-import { CONFIG_FILE_NAME } from "@oasis/linter";
+import { CONFIG_FILE_NAME, expandGlobEntry, isGlobPattern } from "@oasis/linter";
 import type { LintConfigFile } from "@oasis/linter";
 import type { ProjectState, ServerContext } from "./workspace.ts";
 
@@ -34,11 +34,34 @@ async function resolveProjectEntries(
   configFile: LintConfigFile,
 ): Promise<ResolvedProjectEntries> {
   const entries: string[] = [];
+  const seen = new Set<string>();
   const warnings: string[] = [];
+  const configDir = dirname(configPath);
+
   for (const raw of configFile.entries ?? []) {
+    if (isGlobPattern(raw)) {
+      // Glob expansion needs to enumerate directory contents, which the overlay `FileSystem`
+      // interface (in-memory unsaved buffers over real disk) can't do. Config files only ever
+      // live on disk in project mode, so expand straight against the real filesystem instead of
+      // going through `ctx.fileSystem`.
+      const matches = expandGlobEntry(raw, configDir);
+      if (matches.length === 0) {
+        warnings.push(`Entry glob "${raw}" in ${CONFIG_FILE_NAME} matched no files (resolved against "${configDir}"); skipping.`);
+        continue;
+      }
+      for (const abs of matches) {
+        if (seen.has(abs)) continue;
+        seen.add(abs);
+        entries.push(abs);
+      }
+      continue;
+    }
+
     const abs = ctx.fileSystem.resolve(configPath, raw);
+    if (seen.has(abs)) continue;
     try {
       await ctx.fileSystem.readFile(abs);
+      seen.add(abs);
       entries.push(abs);
     } catch {
       // Unknown/missing entry: skip it rather than crashing project-mode startup, but still
