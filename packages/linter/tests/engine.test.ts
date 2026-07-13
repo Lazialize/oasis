@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { InMemoryFileSystem, loadWorkspaceGraph, NodeFileSystem } from "@oasis/core";
 import { lint } from "../src/engine.ts";
 import { resolveConfig } from "../src/config.ts";
+import type { Rule } from "../src/types.ts";
 
 const fixturesRoot = `${import.meta.dir}/fixtures`;
 
@@ -77,6 +78,40 @@ describe("missing entry document", () => {
     const graph = await loadWorkspaceGraph(fs, entry);
     const config = resolveConfig({ lint: { rules: { "refs/no-unresolved": "off" } } });
     const diagnostics = lint(graph, config);
+    expect(diagnostics).toEqual([]);
+  });
+});
+
+describe("report(): a per-file override of \"off\" silences reports even when they pass an explicit severity", () => {
+  // A stand-in for structure/server-variables, the one built-in rule that reports with an
+  // explicit `{ severity: "warn" }` (independent of the rule's own resolved severity).
+  const fakeRule: Rule = {
+    name: "fake/explicit-severity",
+    description: "Always reports once with an explicit severity, for testing report() override handling.",
+    defaultSeverity: "error",
+    check(ctx) {
+      ctx.report({ doc: ctx.entryDoc, pointer: "" }, "always reported", { severity: "warn" });
+    },
+  };
+  const ruleList = [fakeRule];
+
+  async function lintWithConfig(configFile: Parameters<typeof resolveConfig>[0]) {
+    const fs = new InMemoryFileSystem({ "/virtual/entry.yaml": "openapi: 3.0.3\ninfo:\n  title: T\n  version: '1.0.0'\npaths: {}\n" });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const config = resolveConfig(configFile, ruleList);
+    return lint(graph, config, { configPath: "/virtual/oasis.config.jsonc" }, ruleList);
+  }
+
+  test("with no override, the explicit-severity report comes through", async () => {
+    const diagnostics = await lintWithConfig(undefined);
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]?.severity).toBe("warn");
+  });
+
+  test('an override setting the rule "off" for the matching file silences the report, despite its explicit severity', async () => {
+    const diagnostics = await lintWithConfig({
+      lint: { overrides: [{ files: ["entry.yaml"], rules: { "fake/explicit-severity": "off" } }] },
+    });
     expect(diagnostics).toEqual([]);
   });
 });

@@ -3,16 +3,11 @@ import type { Node } from "yaml";
 import { COMPONENT_SECTIONS, findRefs, resolveRef } from "@oasis/core";
 import type { OasisDocument } from "@oasis/core";
 import { iterateOperations } from "../openapi-walk.ts";
-import { childAt, keyToString } from "../util.ts";
+import { childAt, isUrlLike, keyToString, toSchemaRefString } from "../util.ts";
 import type { Rule, RuleContext } from "../types.ts";
 
 // Unused-detection for `pathItems` (3.1-only) isn't supported yet, so it's excluded here.
 export const COMPONENT_CATEGORIES = COMPONENT_SECTIONS.filter((section) => section !== "pathItems");
-
-/** Mapping/URL-ish values (absolute URIs) are external targets; skip resolution for those. */
-function isUrlLike(value: string): boolean {
-  return /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(value) || value.startsWith("//");
-}
 
 /** Collect security scheme names referenced by name in a `security` requirement array node. */
 function collectSecurityNames(securityNode: Node | undefined, into: Set<string>): void {
@@ -80,8 +75,7 @@ function collectDiscriminatorMappingUsage(ctx: RuleContext, used: Set<string>): 
   for (const doc of usageDocuments(ctx)) {
     for (const value of collectDiscriminatorMappingValues(doc)) {
       if (isUrlLike(value)) continue; // external target, not a workspace component
-      const refString = value.includes("#") ? value : `#/components/schemas/${value}`;
-      const result = resolveRef(ctx.graph, doc, refString);
+      const result = resolveRef(ctx.graph, doc, toSchemaRefString(value));
       if (result.ok) used.add(`${result.doc.filePath}::${result.pointer}`);
     }
   }

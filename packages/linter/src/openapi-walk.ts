@@ -137,6 +137,68 @@ function eachComponentEntry(
   }
 }
 
+export interface ParameterObjectInfo {
+  doc: OasisDocument;
+  node: Node;
+}
+
+/**
+ * Collect every parameter object reachable from path items, operations, and `components/parameters`,
+ * deduplicated by resolved location so a parameter shared via `$ref` across several operations (or
+ * also registered under `components/parameters`) is only checked once.
+ */
+export function collectParameterObjects(
+  graph: WorkspaceGraph,
+  entryDoc: OasisDocument,
+  documents: OasisDocument[],
+  version?: OpenApiVersion,
+): ParameterObjectInfo[] {
+  const seen = new Set<string>();
+  const results: ParameterObjectInfo[] = [];
+
+  function addFromArray(doc: OasisDocument, arrNode: Node | undefined, pointerPrefix: string): void {
+    if (!arrNode || !isSeq(arrNode)) return;
+    arrNode.items.forEach((item, i) => {
+      if (!isNode(item)) return;
+      const resolved = resolveMaybeRef(graph, doc, item, `${pointerPrefix}/${i}`);
+      if (!isMap(resolved.node)) return;
+      const key = `${resolved.doc.filePath}::${resolved.pointer}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      results.push({ doc: resolved.doc, node: resolved.node });
+    });
+  }
+
+  for (const pathItem of iteratePathItems(graph, entryDoc, version)) {
+    if (!isMap(pathItem.node)) continue;
+    addFromArray(pathItem.doc, childAt(pathItem.node, "parameters"), `${pathItem.pointer}/parameters`);
+  }
+  for (const op of iterateOperations(graph, entryDoc, version)) {
+    if (!isMap(op.node)) continue;
+    addFromArray(op.doc, childAt(op.node, "parameters"), `${op.pointer}/parameters`);
+  }
+  for (const doc of documents) {
+    const root = doc.yamlDoc.contents;
+    if (!root || !isMap(root)) continue;
+    const componentsNode = childAt(root, "components");
+    if (!componentsNode || !isMap(componentsNode)) continue;
+    const parametersNode = childAt(componentsNode, "parameters");
+    if (!parametersNode || !isMap(parametersNode)) continue;
+
+    for (const pair of parametersNode.items) {
+      const name = keyToString(pair.key);
+      if (!isNode(pair.value) || !isMap(pair.value)) continue;
+      const pointer = `/components/parameters/${name}`;
+      const key = `${doc.filePath}::${pointer}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      results.push({ doc, node: pair.value });
+    }
+  }
+
+  return results;
+}
+
 /** A site where a Schema Object starts: the (possibly $ref-resolved) schema root node. */
 export interface SchemaSite {
   doc: OasisDocument;

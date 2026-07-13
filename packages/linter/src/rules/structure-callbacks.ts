@@ -2,7 +2,7 @@ import { isMap, isNode } from "yaml";
 import type { Node } from "yaml";
 import type { OasisDocument } from "@oasis/core";
 import { HTTP_METHODS, PATH_ITEM_NON_METHOD_KEYS, iterateOperations } from "../openapi-walk.ts";
-import { childAt, keyToString, resolveMaybeRef } from "../util.ts";
+import { childAt, keyToString, resolveMaybeRef, visitResolvedUnique } from "../util.ts";
 import type { Rule, RuleContext } from "../types.ts";
 
 const PATH_ITEM_ALLOWED_KEYS = new Set<string>([...HTTP_METHODS, ...PATH_ITEM_NON_METHOD_KEYS]);
@@ -75,12 +75,7 @@ export const structureCallbacks: Rule = {
     const seen = new Set<string>();
 
     const visit = (doc: OasisDocument, node: Node, pointer: string, label: string): void => {
-      const resolved = resolveMaybeRef(ctx.graph, doc, node, pointer);
-      if (!isMap(resolved.node)) return;
-      const key = `${resolved.doc.filePath}::${resolved.pointer}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      checkCallbackObject(ctx, resolved.doc, resolved.node, label);
+      visitResolvedUnique(ctx.graph, seen, doc, node, pointer, (d, n) => checkCallbackObject(ctx, d, n, label));
     };
 
     for (const op of iterateOperations(ctx.graph, ctx.entryDoc, ctx.version)) {

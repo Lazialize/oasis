@@ -43,3 +43,40 @@ export function resolveMaybeRef(
 export function nodeAt(doc: OasisDocument, pointer: string): Node | undefined {
   return nodeAtPointer(doc, pointer)?.node;
 }
+
+/** Whether a mapping/discriminator value (an absolute URI) is an external target rather than an in-workspace pointer. */
+export function isUrlLike(value: string): boolean {
+  return /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(value) || value.startsWith("//");
+}
+
+/**
+ * Resolve `node`'s `$ref` (if any) through the workspace graph and, if this resolved location
+ * hasn't been visited before (deduplicated by `filePath::pointer`, tracked in `seen`), call `visit`
+ * with it. Guards against a `$ref`'d object (a callback, link, or security scheme reused across
+ * several operations, or also registered under `components/*`) being checked more than once, and
+ * against non-map resolution targets (unresolved/external `$ref`s).
+ */
+export function visitResolvedUnique(
+  graph: WorkspaceGraph,
+  seen: Set<string>,
+  doc: OasisDocument,
+  node: Node,
+  pointer: string,
+  visit: (doc: OasisDocument, node: Node, pointer: string) => void,
+): void {
+  const resolved = resolveMaybeRef(graph, doc, node, pointer);
+  if (!isMap(resolved.node)) return;
+  const key = `${resolved.doc.filePath}::${resolved.pointer}`;
+  if (seen.has(key)) return;
+  seen.add(key);
+  visit(resolved.doc, resolved.node, resolved.pointer);
+}
+
+/**
+ * Normalize a `discriminator.mapping` / component-name-ish value to a `$ref`-style string: values
+ * already containing a `#` (a pointer or `file.yaml#/...` reference) are used as-is, bare names are
+ * expanded to `#/components/schemas/<name>` per the OpenAPI spec's shorthand for mapping values.
+ */
+export function toSchemaRefString(value: string): string {
+  return value.includes("#") ? value : `#/components/schemas/${value}`;
+}
