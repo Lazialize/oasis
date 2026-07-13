@@ -27,18 +27,20 @@ This rule hand-rolls a small, honest subset of JSON Schema / OpenAPI Schema Obje
 - `enum`
 - `const` (3.1)
 - `required` / `properties` (recursing into each declared property's schema against the corresponding example value)
-- `additionalProperties: false` (flags any example property not covered by `properties`) and `additionalProperties` as a schema (validates uncovered properties against it)
+- `patternProperties` (3.1): each example property is matched against every pattern and validated against all matching schemas; an invalid pattern regex is skipped rather than crashing
+- `additionalProperties: false` (flags any example property covered by neither `properties` nor a matching `patternProperties` pattern) and `additionalProperties` as a schema (validates uncovered properties against it)
 - `items` (+ 3.1 `prefixItems` for positional validation, with `items` applied to any remaining elements)
 - `minItems` / `maxItems`
 - `minimum` / `maximum` / `exclusiveMinimum` / `exclusiveMaximum` (version-aware boolean vs. numeric exclusive bounds, per above)
-- `minLength` / `maxLength` / `pattern`
+- `minLength` / `maxLength` / `pattern` (string length is measured in Unicode code points, per JSON Schema — a supplementary-plane emoji counts as 1, not 2)
 - `allOf` (every branch must pass; properties declared by sibling `allOf` branches count as known when one branch sets `additionalProperties: false`, including via `$ref` and nested `allOf`)
 - `oneOf` / `anyOf` (at least one branch must pass — `oneOf` exclusivity, i.e. exactly-one-match, is not enforced)
 
 **Deliberately skipped** (to avoid a false positive from a keyword the validator can't confidently evaluate):
 - `not`
 - `discriminator`
-- An unresolved `$ref` (the `$ref` chain is followed up to a fixed depth; if any link can't be resolved, validation for that schema is skipped)
+- `unevaluatedProperties` (correct 2020-12 semantics require tracking properties evaluated by every in-place applicator, which this subset validator doesn't model; note that a property matched only by `patternProperties` counts as evaluated for 2020-12 purposes)
+- An unresolved or cyclic `$ref` (the `$ref` chain is followed, with cycle detection, until a concrete schema; if any link can't be resolved, validation for that schema is skipped)
 - `externalValue` on an Examples Object entry (there's no local value to validate against)
 
 ## Examples

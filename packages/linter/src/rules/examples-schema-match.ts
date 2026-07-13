@@ -22,7 +22,7 @@ function walkSchemasForSelfExamples(ctx: RuleContext, env: ValidateEnv, doc: Oas
         reportFailures(ctx, env, { doc, node: schema }, doc, exampleNode, "Schema");
       }
     },
-    { version: env.version, prefixItems: true },
+    env.version,
     seen,
   );
 }
@@ -35,9 +35,13 @@ function reportFailures(
   exampleNode: Node,
   label: string,
 ): void {
-  const failures = validateExample(env, schemaLoc, exampleNode);
+  const failures = validateExample(env, schemaLoc, exampleDoc, exampleNode);
   for (const failure of failures) {
-    ctx.report({ doc: exampleDoc, node: failure.node }, `${label} example does not match schema: ${failure.message}`);
+    // Each failure carries the document owning its node: the example document for failures on the
+    // example value, or the schema's own (possibly different) file for failures pointing at a
+    // violated schema keyword. Pairing a schema node with the example document would convert its
+    // range against the wrong line index and point at unrelated text (issue #42).
+    ctx.report({ doc: failure.doc, node: failure.node }, `${label} example does not match schema: ${failure.message}`);
   }
 }
 

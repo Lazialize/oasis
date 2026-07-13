@@ -3,7 +3,7 @@ import type { Node } from "yaml";
 import { resolveRef } from "@oasis/core";
 import type { OasisDocument } from "@oasis/core";
 import { iterateSchemas, walkSchemaTree } from "../openapi-walk.ts";
-import { childAt, isRefObject, isUrlLike, keyToString, resolveMaybeRef, toSchemaRefString } from "../util.ts";
+import { childAt, classifyMappingValue, isRefObject, keyToString, resolveMaybeRef } from "../util.ts";
 import type { Rule, RuleContext } from "../types.ts";
 
 function scalarStrings(node: Node | undefined): string[] {
@@ -70,14 +70,14 @@ function checkMapping(ctx: RuleContext, doc: OasisDocument, mappingNode: Node, l
       continue;
     }
 
-    const value = pair.value.value;
-    if (isUrlLike(value)) continue; // external target, skip
+    const target = classifyMappingValue(pair.value.value);
+    if (target.kind === "external") continue; // absolute non-filesystem URI, not a workspace target
 
-    const result = resolveRef(ctx.graph, doc, toSchemaRefString(value));
+    const result = resolveRef(ctx.graph, doc, target.ref);
     if (!result.ok) {
       ctx.report(
         { doc, node: pair.value },
-        `${label} "discriminator.mapping" entry "${key}" -> "${value}" does not resolve to a schema in the workspace.`,
+        `${label} "discriminator.mapping" entry "${key}" -> "${pair.value.value}" does not resolve to a schema in the workspace.`,
       );
     }
   }
@@ -136,7 +136,7 @@ export const structureDiscriminator: Rule = {
       walkSchemaTree(
         site.node,
         (schema) => checkDiscriminator(ctx, site.doc, schema, "Schema"),
-        { version: ctx.version, prefixItems: true },
+        ctx.version,
         seen,
       );
     }
