@@ -1,5 +1,19 @@
 # @oasis/cli
 
+## 0.8.1
+
+### Patch Changes
+
+- [#16](https://github.com/Lazialize/oasis/pull/16) [`f76237e`](https://github.com/Lazialize/oasis/commit/f76237e1c577a8c5afae3a608af5dca4259701d5) Thanks [@Lazialize](https://github.com/Lazialize)! - Fix Marketplace and Homebrew tap publishing being skipped on release: the release workflow is
+  called as a reusable workflow from the version-and-tag workflow, which did not pass repository
+  secrets through, so the `VSCE_PAT` / `HOMEBREW_TAP_TOKEN` checks always saw empty values. The
+  caller now uses `secrets: inherit`.
+- Updated dependencies []:
+  - @oasis/bundler@0.8.1
+  - @oasis/core@0.8.1
+  - @oasis/linter@0.8.1
+  - @oasis/server@0.8.1
+
 ## 0.8.0
 
 ### Minor Changes

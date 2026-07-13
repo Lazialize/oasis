@@ -1,5 +1,12 @@
 # @oasis/linter
 
+## 0.8.1
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @oasis/core@0.8.1
+
 ## 0.8.0
 
 ### Minor Changes
