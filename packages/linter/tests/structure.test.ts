@@ -101,6 +101,73 @@ paths:
       expect(diagnostics.some((d) => d.rule === "structure/field-types" && d.message.includes("not a valid HTTP status code"))).toBe(false);
     });
   });
+
+  describe("empty Responses Object (#44)", () => {
+    test("flags an operation's empty responses: {}", async () => {
+      const diagnostics = await lintFixture("structure/empty-responses.yaml");
+      const d = diagnostics.find(
+        (d) =>
+          d.rule === "structure/field-types" &&
+          d.message.includes("paths./pets.get.responses") &&
+          d.message.includes("at least one response code"),
+      );
+      expect(d).toBeDefined();
+    });
+
+    test("does not flag a responses object with a valid entry", async () => {
+      const diagnostics = await lintFixture("structure/empty-responses.yaml");
+      const d = diagnostics.find(
+        (d) =>
+          d.rule === "structure/field-types" &&
+          d.message.includes("paths./pets.post.responses") &&
+          d.message.includes("at least one response code"),
+      );
+      expect(d).toBeUndefined();
+    });
+
+    test("accepts an extension (x-*) field as a valid responses entry", async () => {
+      const fs = new InMemoryFileSystem({
+        "/virtual/entry.yaml": `
+openapi: 3.1.0
+info:
+  title: T
+  version: "1.0.0"
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        x-custom: {}
+`,
+      });
+      const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+      const diagnostics = lint(graph, resolveConfig(undefined));
+      expect(diagnostics.some((d) => d.rule === "structure/field-types" && d.message.includes("at least one response code"))).toBe(false);
+    });
+
+    test("flags an empty responses in a callback operation", async () => {
+      const diagnostics = await lintFixture("structure/empty-responses.yaml");
+      const d = diagnostics.find(
+        (d) => d.rule === "structure/callbacks" && d.message.includes("at least one response code"),
+      );
+      expect(d).toBeDefined();
+    });
+
+    test("attributes the diagnostic to the file that owns a $ref'd Path Item's operation", async () => {
+      const fs = new NodeFileSystem();
+      const entry = `${fixturesRoot}/structure-multifile-empty-responses/entry.yaml`;
+      const graph = await loadWorkspaceGraph(fs, entry);
+      const diagnostics = lint(graph, resolveConfig(undefined));
+      const d = diagnostics.find((d) => d.rule === "structure/field-types" && d.message.includes("at least one response code"));
+      expect(d).toBeDefined();
+      expect(d?.range.filePath).toBe(`${fixturesRoot}/structure-multifile-empty-responses/paths-pets.yaml`);
+    });
+
+    test("valid fixture passes", async () => {
+      const diagnostics = await lintFixture("valid/openapi.yaml");
+      expect(diagnostics.some((d) => d.rule === "structure/field-types" && d.message.includes("at least one response code"))).toBe(false);
+    });
+  });
 });
 
 describe("structure/http-methods", () => {

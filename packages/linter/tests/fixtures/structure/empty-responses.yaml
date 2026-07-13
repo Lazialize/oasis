@@ -1,0 +1,20 @@
+openapi: 3.1.0
+info:
+  title: T
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses: {}
+    post:
+      operationId: createPet
+      responses:
+        '200':
+          description: OK
+      callbacks:
+        onData:
+          '{$request.body#/callbackUrl}':
+            post:
+              operationId: onDataCallback
+              responses: {}

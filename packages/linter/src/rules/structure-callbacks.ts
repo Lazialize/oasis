@@ -2,7 +2,7 @@ import { isMap, isNode } from "yaml";
 import type { Node } from "yaml";
 import type { OasisDocument } from "@oasis/core";
 import { HTTP_METHODS, PATH_ITEM_NON_METHOD_KEYS, iterateOperations } from "../openapi-walk.ts";
-import { childAt, keyToString, resolveMaybeRef, visitResolvedUnique } from "../util.ts";
+import { childAt, hasAnyResponseEntry, keyToString, resolveMaybeRef, visitResolvedUnique } from "../util.ts";
 import type { Rule, RuleContext } from "../types.ts";
 
 const PATH_ITEM_ALLOWED_KEYS = new Set<string>([...HTTP_METHODS, ...PATH_ITEM_NON_METHOD_KEYS]);
@@ -35,8 +35,16 @@ function checkCallbackPathItem(ctx: RuleContext, doc: OasisDocument, node: Node,
       continue;
     }
     // Operation.responses is REQUIRED in 3.0 but optional since 3.1 (see structure/field-types).
-    if (ctx.version === "3.0" && !childAt(resolved.node, "responses")) {
-      ctx.report({ doc: resolved.doc, node: resolved.node }, `${label}.${method} is missing required field "responses".`);
+    const responsesNode = childAt(resolved.node, "responses");
+    if (!responsesNode) {
+      if (ctx.version === "3.0") {
+        ctx.report({ doc: resolved.doc, node: resolved.node }, `${label}.${method} is missing required field "responses".`);
+      }
+    } else if (isMap(responsesNode) && !hasAnyResponseEntry(responsesNode)) {
+      ctx.report(
+        { doc: resolved.doc, node: responsesNode },
+        `${label}.${method}.responses must contain at least one response code, "default", or an extension ("x-*") field.`,
+      );
     }
   }
 }

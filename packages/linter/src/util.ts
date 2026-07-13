@@ -5,6 +5,22 @@ import type { OasisDocument, WorkspaceGraph } from "@oasis/core";
 
 export { childAt, keyToString };
 
+/** A valid Responses Object key: an HTTP status code, an uppercase status range ("2XX"), or "default". */
+export const RESPONSE_STATUS_CODE_PATTERN = /^(default|[1-5](\d{2}|XX))$/;
+
+/**
+ * Whether a Responses Object (`node`) has at least one entry that's legal per the OpenAPI spec: a
+ * response code, "default", or an extension ("x-*") field. An operation/callback whose `responses`
+ * map has none of these (most commonly `responses: {}`) can never be satisfied by any client.
+ */
+export function hasAnyResponseEntry(node: Node): boolean {
+  if (!isMap(node)) return false;
+  return node.items.some((pair) => {
+    const key = keyToString(pair.key);
+    return RESPONSE_STATUS_CODE_PATTERN.test(key) || key.startsWith("x-");
+  });
+}
+
 /** Whether `node` is a YAML map carrying a `$ref` key (a Reference Object). */
 export function isRefObject(node: Node): boolean {
   return isMap(node) && node.items.some((p) => keyToString(p.key) === "$ref");

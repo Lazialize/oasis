@@ -3,10 +3,9 @@ import type { Node } from "yaml";
 import { COMPONENT_SECTIONS } from "@oasis/core";
 import type { OasisDocument } from "@oasis/core";
 import { iterateOperations, iteratePathItems } from "../openapi-walk.ts";
-import { childAt, isRefObject, keyToString } from "../util.ts";
+import { RESPONSE_STATUS_CODE_PATTERN, childAt, hasAnyResponseEntry, isRefObject, keyToString } from "../util.ts";
 import type { Rule, RuleContext } from "../types.ts";
 
-const STATUS_CODE = /^(default|[1-5](\d{2}|XX))$/;
 const PARAMETER_LOCATIONS = new Set(["query", "header", "path", "cookie"]);
 
 function reportWrongType(ctx: RuleContext, doc: OasisDocument, node: Node, fieldPath: string, expected: string): void {
@@ -112,12 +111,18 @@ function checkOperation(ctx: RuleContext, doc: OasisDocument, op: Node, fieldPat
   } else if (!isMap(responses)) {
     reportWrongType(ctx, doc, responses, `${fieldPath}.responses`, "an object");
   } else {
+    if (!hasAnyResponseEntry(responses)) {
+      ctx.report(
+        { doc, node: responses },
+        `"${fieldPath}.responses" must contain at least one response code, "default", or an extension ("x-*") field.`,
+      );
+    }
     for (const pair of responses.items) {
       const status = keyToString(pair.key);
-      if (!STATUS_CODE.test(status) && isNode(pair.key)) {
+      if (!RESPONSE_STATUS_CODE_PATTERN.test(status) && !status.startsWith("x-") && isNode(pair.key)) {
         ctx.report(
           { doc, node: pair.key },
-          `"${fieldPath}.responses" key "${status}" is not a valid HTTP status code, status range ("2XX"), or "default".`,
+          `"${fieldPath}.responses" key "${status}" is not a valid HTTP status code, status range ("2XX"), "default", or an extension ("x-*").`,
         );
       }
     }
