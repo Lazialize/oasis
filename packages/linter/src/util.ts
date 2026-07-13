@@ -1,6 +1,6 @@
 import { isMap, isScalar } from "yaml";
 import type { Node } from "yaml";
-import { childAt, keyToString, nodeAtPointer, resolveRef } from "@oasis/core";
+import { childAt, isExternalUriReference, keyToString, looksLikeMappingRef, nodeAtPointer, resolveRef } from "@oasis/core";
 import type { OasisDocument, WorkspaceGraph } from "@oasis/core";
 
 export { childAt, keyToString };
@@ -65,9 +65,31 @@ export function nodeAt(doc: OasisDocument, pointer: string): Node | undefined {
   return nodeAtPointer(doc, pointer)?.node;
 }
 
-/** Whether a mapping/discriminator value (an absolute URI) is an external target rather than an in-workspace pointer. */
-export function isUrlLike(value: string): boolean {
-  return /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(value) || value.startsWith("//");
+/** How a discriminator `mapping` value resolves. See `classifyMappingValue`. */
+export type MappingValueTarget =
+  /** A bare component name; `ref` is the `#/components/schemas/<name>` shorthand to resolve. */
+  | { kind: "component"; ref: string }
+  /** A URI reference (fragment, relative path, or `file:`); `ref` is resolved as-is via `resolveRef`. */
+  | { kind: "reference"; ref: string }
+  /** An absolute non-filesystem URI (`https:`, `urn:`, …): not a workspace target, skip it. */
+  | { kind: "external" };
+
+/**
+ * Classify a discriminator `mapping` value as a bare component name (`Dog`, expanded to the
+ * `#/components/schemas/<name>` shorthand), an in-workspace URI reference (`./dog.yaml`,
+ * `../x.yaml#/Dog`, `#/components/schemas/Dog`, percent-encoded paths — resolved with normal `$ref`
+ * semantics), or an external URI (`https:`, `urn:`, … — not a workspace target). Reuses
+ * @oasis/core's classifiers (`looksLikeMappingRef`, RFC 3986-aware `isExternalUriReference`) so the
+ * linter, reference discovery, and the bundler all agree on what a mapping value means.
+ */
+export function classifyMappingValue(value: string): MappingValueTarget {
+  if (!looksLikeMappingRef(value)) {
+    return { kind: "component", ref: `#/components/schemas/${value}` };
+  }
+  if (isExternalUriReference(value) || value.startsWith("//")) {
+    return { kind: "external" };
+  }
+  return { kind: "reference", ref: value };
 }
 
 /**
@@ -91,13 +113,4 @@ export function visitResolvedUnique(
   if (seen.has(key)) return;
   seen.add(key);
   visit(resolved.doc, resolved.node, resolved.pointer);
-}
-
-/**
- * Normalize a `discriminator.mapping` / component-name-ish value to a `$ref`-style string: values
- * already containing a `#` (a pointer or `file.yaml#/...` reference) are used as-is, bare names are
- * expanded to `#/components/schemas/<name>` per the OpenAPI spec's shorthand for mapping values.
- */
-export function toSchemaRefString(value: string): string {
-  return value.includes("#") ? value : `#/components/schemas/${value}`;
 }

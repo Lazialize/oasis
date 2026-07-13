@@ -3,7 +3,7 @@ import type { Node } from "yaml";
 import { COMPONENT_SECTIONS, findRefs, resolveRef } from "@oasis/core";
 import type { OasisDocument } from "@oasis/core";
 import { iterateOperations } from "../openapi-walk.ts";
-import { childAt, isUrlLike, keyToString, toSchemaRefString } from "../util.ts";
+import { childAt, classifyMappingValue, keyToString } from "../util.ts";
 import type { Rule, RuleContext } from "../types.ts";
 
 // Unused-detection for `pathItems` (3.1-only) isn't supported yet, so it's excluded here.
@@ -70,13 +70,35 @@ function usageDocuments(ctx: RuleContext): OasisDocument[] {
   return ctx.externalDocuments && ctx.externalDocuments.length > 0 ? [...ctx.documents, ...ctx.externalDocuments] : ctx.documents;
 }
 
-/** Mark components resolved from `discriminator.mapping` values (pointer or bare-name form) as used. */
+/**
+ * If `pointer` addresses something *below* a top-level component — `/components/<section>/<name>`
+ * followed by a deeper path (e.g. `/components/schemas/Foo/properties/id`) — return the enclosing
+ * component pointer `/components/<section>/<name>`. A `$ref` into a component's interior still
+ * *uses* that component (issue #36), so the whole component must count as referenced.
+ */
+function enclosingComponentPointer(pointer: string): string | undefined {
+  const segments = pointer.split("/"); // e.g. ["", "components", "schemas", "Foo", "properties", "id"]
+  if (segments.length > 4 && segments[1] === "components") {
+    return `/${segments[1]}/${segments[2]}/${segments[3]}`;
+  }
+  return undefined;
+}
+
+/** Record a resolved reference target as used, crediting the enclosing top-level component too (#36). */
+function markUsed(used: Set<string>, filePath: string, pointer: string): void {
+  used.add(`${filePath}::${pointer}`);
+  const enclosing = enclosingComponentPointer(pointer);
+  if (enclosing) used.add(`${filePath}::${enclosing}`);
+}
+
+/** Mark components resolved from `discriminator.mapping` values (reference or bare-name form) as used. */
 function collectDiscriminatorMappingUsage(ctx: RuleContext, used: Set<string>): void {
   for (const doc of usageDocuments(ctx)) {
     for (const value of collectDiscriminatorMappingValues(doc)) {
-      if (isUrlLike(value)) continue; // external target, not a workspace component
-      const result = resolveRef(ctx.graph, doc, toSchemaRefString(value));
-      if (result.ok) used.add(`${result.doc.filePath}::${result.pointer}`);
+      const target = classifyMappingValue(value);
+      if (target.kind === "external") continue; // absolute non-filesystem URI, not a workspace component
+      const result = resolveRef(ctx.graph, doc, target.ref);
+      if (result.ok) markUsed(used, result.doc.filePath, result.pointer);
     }
   }
 }
@@ -91,7 +113,7 @@ export const noUnusedComponents: Rule = {
     for (const doc of usageDocuments(ctx)) {
       for (const ref of findRefs(doc)) {
         const result = resolveRef(ctx.graph, doc, ref.value, ref.range);
-        if (result.ok) used.add(`${result.doc.filePath}::${result.pointer}`);
+        if (result.ok) markUsed(used, result.doc.filePath, result.pointer);
       }
     }
     collectDiscriminatorMappingUsage(ctx, used);

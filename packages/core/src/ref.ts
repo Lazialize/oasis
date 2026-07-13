@@ -78,16 +78,18 @@ export function isContainerKey(key: string, value: Node): boolean {
 }
 
 /**
- * Heuristic distinguishing a `discriminator.mapping` value that is a reference (a schema-name URI
- * or `$ref`-style pointer, e.g. "./dog.yaml#/Dog" or "#/components/schemas/Dog") from one that is
- * a bare component name (e.g. "Dog"), which OpenAPI's discriminator mapping also allows and which
- * must be left untouched — it names a component, it isn't a place to load/rewrite. Per the OpenAPI
- * spec, a mapping value may be either a schema name or a reference, with no syntactic marker other
- * than "does it look like a path/URI/pointer", so this treats any value containing a path
- * separator, fragment marker, or file-extension-ish dot as a reference.
+ * Distinguishes a `discriminator.mapping` value that is a URI reference (e.g. "./dog.yaml#/Dog",
+ * "../schemas/dog.yaml", "urn:example:dog", "#/components/schemas/Dog") from one that is a bare
+ * component name (e.g. "Dog"), which OpenAPI's discriminator mapping also allows and which must be
+ * left untouched — it names a schema under `components/schemas`, it isn't a place to load/rewrite.
+ * Per the OpenAPI spec a mapping value is either a schema name or a URI reference; a *bare
+ * component name* is a value matching `^[a-zA-Z0-9._-]+$` (so it contains neither a path separator
+ * `/`, a scheme separator `:`, a fragment marker `#`, nor percent encoding). Anything else — a
+ * relative path reference, an absolute URI (with or without `//`), a fragment, a percent-encoded
+ * path — is a URI reference resolved with normal `$ref` semantics.
  */
 export function looksLikeMappingRef(value: string): boolean {
-  return value.includes("/") || value.includes("#") || value.includes(".");
+  return !/^[a-zA-Z0-9._-]+$/.test(value);
 }
 
 export interface FoundRef {
