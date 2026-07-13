@@ -112,6 +112,14 @@ describe("oasis lint CLI", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("No lint issues found.");
   });
+
+  test("`--` protects a positional entry literally named --help from being read as the help flag (#31)", async () => {
+    const result = await runCli(["lint", "--", "--help"]);
+    expect(result.stdout).not.toContain("Options:");
+    // Treated as an entry path (which doesn't exist) rather than the help flag.
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout || result.stderr).toContain("--help");
+  });
 });
 
 describe("oasis lint (no args, config entries)", () => {

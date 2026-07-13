@@ -1,7 +1,7 @@
 import { extname, resolve as pathResolve } from "node:path";
 import { loadWorkspaceGraph, NodeFileSystem } from "@oasis/core";
 import { bundle } from "@oasis/bundler";
-import { parseBundleArgs } from "../args.ts";
+import { hasHelpFlag, parseBundleArgs } from "../args.ts";
 
 export interface RunBundleOptions {
   stdout: (text: string) => void;
@@ -21,7 +21,7 @@ Options:
 `;
 
 export async function runBundleCommand(args: string[], io: RunBundleOptions): Promise<number> {
-  if (args.includes("-h") || args.includes("--help")) {
+  if (hasHelpFlag(args)) {
     io.stdout(BUNDLE_HELP);
     return 0;
   }

@@ -2,7 +2,7 @@ import { dirname, resolve as pathResolve } from "node:path";
 import { loadWorkspaceGraph, NodeFileSystem } from "@oasis/core";
 import { lint, loadConfig, resolveConfig, resolveEntries } from "@oasis/linter";
 import type { LintDiagnostic } from "@oasis/linter";
-import { parseLintArgs } from "../args.ts";
+import { hasHelpFlag, parseLintArgs } from "../args.ts";
 import { renderJson } from "../render/json.ts";
 import { renderPretty } from "../render/pretty.ts";
 import { renderSarif } from "../render/sarif.ts";
@@ -41,7 +41,7 @@ function warningDiagnostic(message: string, configPath: string): LintDiagnostic 
 }
 
 export async function runLintCommand(args: string[], io: RunLintOptions): Promise<number> {
-  if (args.includes("-h") || args.includes("--help")) {
+  if (hasHelpFlag(args)) {
     io.stdout(LINT_HELP);
     return 0;
   }
