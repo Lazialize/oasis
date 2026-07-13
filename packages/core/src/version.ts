@@ -11,10 +11,18 @@ export function detectVersion(doc: OasisDocument): OpenApiVersion | undefined {
   const pair = root.items.find((p) => isScalar(p.key) && p.key.value === "openapi");
   if (!pair || !isScalar(pair.value)) return undefined;
 
-  const value = pair.value.value;
+  let value = pair.value.value;
+
+  // Handle YAML numbers (e.g., unquoted 3.1 in YAML): convert to string
+  if (typeof value === "number") {
+    value = String(value);
+  }
+
   if (typeof value !== "string") return undefined;
 
-  if (/^3\.0\.\d+/.test(value)) return "3.0";
-  if (/^3\.1\.\d+/.test(value)) return "3.1";
+  // Match "3.0", "3.0.x", "3.0-x" (but not "3.10")
+  if (/^3\.0($|\.|\-)/.test(value)) return "3.0";
+  // Match "3.1", "3.1.x", "3.1-x" (but not "3.10" or "3.11")
+  if (/^3\.1($|\.|\-)/.test(value)) return "3.1";
   return undefined;
 }
