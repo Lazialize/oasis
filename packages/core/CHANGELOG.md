@@ -1,5 +1,24 @@
 # @oasis/core
 
+## 0.8.3
+
+### Patch Changes
+
+- [#20](https://github.com/Lazialize/oasis/pull/20) [`0a04379`](https://github.com/Lazialize/oasis/commit/0a0437902aeffa9b185642dc347841d6ddc993c1) Thanks [@Lazialize](https://github.com/Lazialize)! - fix: core correctness fixes ahead of 1.0
+
+  - `findRefs` no longer treats `$ref`-shaped literal data inside `example`/`default`/`enum`/`const` as a real reference when the enclosing property is named like a container keyword (`parameters`, `headers`, `schemas`, ...)
+  - `formatPointer` now percent-encodes a literal `%` followed by hex digits so `formatPointer`/`parsePointer` are exact inverses (component names containing `%XX` resolve correctly)
+  - a file that fails to load is attempted and diagnosed once, instead of once per referencing `$ref`
+  - a leading BOM is stripped at parse time so first-line columns match what editors display
+
+- [#20](https://github.com/Lazialize/oasis/pull/20) [`aee8902`](https://github.com/Lazialize/oasis/commit/aee8902abe95fd7ed7fc281f2f71989a1bb0eb02) Thanks [@Lazialize](https://github.com/Lazialize)! - fix: accept patch-less openapi version values (3.0/3.1) in version detection
+
+- [#20](https://github.com/Lazialize/oasis/pull/20) [`d600ad9`](https://github.com/Lazialize/oasis/commit/d600ad9a5e36c21bf2e0bcb4aaf828f5a46da707) Thanks [@Lazialize](https://github.com/Lazialize)! - fix: suppression-comment and rule correctness fixes ahead of 1.0
+
+  - `# oasis-disable-*` directives are now extracted from real YAML comment tokens (CST), so directive-looking text inside a block scalar or quoted string no longer silently suppresses diagnostics
+  - `structure/field-types` and `structure/callbacks` no longer report `responses` as a missing required field on OpenAPI 3.1 documents (it is optional since 3.1)
+  - `security/defined` now also validates scopes: oauth2 scopes must be declared by one of the scheme's flows, and only `oauth2`/`openIdConnect` requirements may list scopes
+
 ## 0.8.2
 
 ### Patch Changes
