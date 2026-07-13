@@ -1,5 +1,5 @@
-import { describe, expect, test, afterAll } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
+import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**
@@ -16,17 +16,8 @@ describe("extension version sync", () => {
     const lockfile = JSON.parse(readFileSync(vscodePackageLockPath, "utf8"));
 
     const packageVersion = vscodePackage.version;
-    const lockfileRootVersion = lockfile.version;
-    const lockfilePackageVersion = lockfile.packages?.[""]?.version;
 
-    expect(lockfileRootVersion).toBe(
-      packageVersion,
-      `package-lock.json root version (${lockfileRootVersion}) does not match package.json version (${packageVersion})`,
-    );
-
-    expect(lockfilePackageVersion).toBe(
-      packageVersion,
-      `package-lock.json packages[""].version (${lockfilePackageVersion}) does not match package.json version (${packageVersion})`,
-    );
+    expect(lockfile.version).toBe(packageVersion);
+    expect(lockfile.packages?.[""]?.version).toBe(packageVersion);
   });
 });
