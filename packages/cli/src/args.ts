@@ -15,21 +15,24 @@ export function parseLintArgs(args: string[]): ParseResult<ParsedLintArgs> {
   const entries: string[] = [];
   let configPath: string | undefined;
   let format: "pretty" | "json" | "sarif" = "pretty";
+  let positionalOnly = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (arg === "--config") {
+    if (!positionalOnly && arg === "--") {
+      positionalOnly = true;
+    } else if (!positionalOnly && arg === "--config") {
       const value = args[++i];
       if (!value) return { ok: false, error: "--config requires a path argument" };
       configPath = value;
-    } else if (arg === "--format") {
+    } else if (!positionalOnly && arg === "--format") {
       const value = args[++i];
       if (!value) return { ok: false, error: "--format requires a value argument" };
       if (value !== "pretty" && value !== "json" && value !== "sarif") {
         return { ok: false, error: '--format must be "pretty", "json", or "sarif"' };
       }
       format = value;
-    } else if (arg?.startsWith("--")) {
+    } else if (!positionalOnly && arg?.startsWith("-")) {
       return { ok: false, error: `Unknown flag "${arg}"` };
     } else if (arg) {
       entries.push(arg);
@@ -54,23 +57,26 @@ export function parseBundleArgs(args: string[]): ParseResult<ParsedBundleArgs> {
   let outPath: string | undefined;
   let format: "yaml" | "json" | undefined;
   let dereference = false;
+  let positionalOnly = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (arg === "-o" || arg === "--out") {
+    if (!positionalOnly && arg === "--") {
+      positionalOnly = true;
+    } else if (!positionalOnly && (arg === "-o" || arg === "--out")) {
       const value = args[++i];
       if (!value) return { ok: false, error: `${arg} requires a path argument` };
       outPath = value;
-    } else if (arg === "--format") {
+    } else if (!positionalOnly && arg === "--format") {
       const value = args[++i];
       if (!value) return { ok: false, error: "--format requires a value argument" };
       if (value !== "yaml" && value !== "json") {
         return { ok: false, error: '--format must be "yaml" or "json"' };
       }
       format = value;
-    } else if (arg === "--dereference") {
+    } else if (!positionalOnly && arg === "--dereference") {
       dereference = true;
-    } else if (arg?.startsWith("-")) {
+    } else if (!positionalOnly && arg?.startsWith("-")) {
       return { ok: false, error: `Unknown flag "${arg}"` };
     } else if (arg && !entry) {
       entry = arg;

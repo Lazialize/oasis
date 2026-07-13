@@ -346,8 +346,17 @@ export function startServer(): Connection {
 
   documents.onDidClose((event) => {
     const path = uriToPath(event.document.uri);
+    // Only standalone entries (no owning project) need their diagnostics cleared here: a
+    // project-member document keeps being linted by its project regardless of whether it's open
+    // (project mode publishes diagnostics for every file in a project's entry graphs unconditionally),
+    // so closing it must not touch what's published. A standalone entry's diagnostics, though, only
+    // ever came from *this* document being open — once it closes there's no watcher left to
+    // refresh or clear them (only `oasis.config.jsonc` is watched), so without this they'd linger
+    // in the Problems panel forever.
+    const wasStandaloneEntry = ctx.openStandaloneEntries.has(path);
     invalidateGraph(ctx, path);
     ctx.openStandaloneEntries.delete(path);
+    if (wasStandaloneEntry) clearPublishedFor(path);
     const timer = debounceTimers.get(path);
     if (timer) {
       clearTimeout(timer);
