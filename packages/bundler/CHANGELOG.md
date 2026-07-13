@@ -1,5 +1,18 @@
 # @oasis/bundler
 
+## 0.8.3
+
+### Patch Changes
+
+- [#20](https://github.com/Lazialize/oasis/pull/20) [`d1d74d9`](https://github.com/Lazialize/oasis/commit/d1d74d9c9162801b8ba1352bf2690ee77d7583fe) Thanks [@Lazialize](https://github.com/Lazialize)! - Fix bundling of Path Item Objects in webhook and callback positions. Root-level 3.1 `webhooks`
+  entries and the runtime-expression entries of a Callback Object are now recognized as Path Item
+  slots: a path-item `$ref` there is inlined in place (with 3.1 `summary`/`description` siblings
+  preserved) instead of being invalidly lifted into `components`. A `$ref` at `callbacks/<name>`
+  (a whole Callback Object) still lifts into `components/callbacks`, and refs inside an inlined path
+  item are still lifted normally.
+- Updated dependencies [[`0a04379`](https://github.com/Lazialize/oasis/commit/0a0437902aeffa9b185642dc347841d6ddc993c1), [`aee8902`](https://github.com/Lazialize/oasis/commit/aee8902abe95fd7ed7fc281f2f71989a1bb0eb02), [`d600ad9`](https://github.com/Lazialize/oasis/commit/d600ad9a5e36c21bf2e0bcb4aaf828f5a46da707)]:
+  - @oasis/core@0.8.3
+
 ## 0.8.2
 
 ### Patch Changes
