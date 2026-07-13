@@ -526,6 +526,14 @@ function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undef
         case "securitySchemes":
           out[key] = mapChildren(ctx, doc, value, "securitySchemes");
           break;
+        // 3.1-only `components/pathItems`: a map of name -> (Path Item Object | Reference Object).
+        // Unlike a path-item `$ref` under `paths` (inlined in place — 3.0 has no pathItems section),
+        // a whole-document `$ref` here IS a component reference and is lifted into
+        // `components/pathItems` like any other component (never `components/schemas`). Refs *inside*
+        // a lifted path item are lifted normally by the recursive `convertValue`.
+        case "pathItems":
+          out[key] = mapChildren(ctx, doc, value, "pathItems");
+          break;
         // Maps of user/spec-named entries (not JSON Schema keywords): route through `mapChildren`
         // so an entry named `default`/`example`/`enum`/... is converted as a real object (and any
         // genuine `$ref` inside it is lifted/rewritten), never mistaken for literal instance data.
