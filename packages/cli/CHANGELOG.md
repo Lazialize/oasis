@@ -1,5 +1,17 @@
 # @oasis/cli
 
+## 0.8.2
+
+### Patch Changes
+
+- [#18](https://github.com/Lazialize/oasis/pull/18) [`717dc99`](https://github.com/Lazialize/oasis/commit/717dc998af059743ea7fd66d574f023005d78faf) Thanks [@Lazialize](https://github.com/Lazialize)! - Fix three CLI bugs: `oasis init` now accepts `-h`/`--help` flags and prints usage; `oasis lint --format` and `oasis bundle --format` now properly report "requires a value" when no value is provided instead of misleading format validation errors.
+
+- Updated dependencies [[`fcda9cb`](https://github.com/Lazialize/oasis/commit/fcda9cb039ba28624e57914f40001e0e4b364c35), [`f5fdd29`](https://github.com/Lazialize/oasis/commit/f5fdd298e78b3604009c2515e47f0416d7f05770), [`efb4404`](https://github.com/Lazialize/oasis/commit/efb4404fc63dd50e1b97e24d12b380888484425b), [`8060414`](https://github.com/Lazialize/oasis/commit/8060414c1f890f599b820dfe93c8c9f94c5b1435), [`6bcb0b4`](https://github.com/Lazialize/oasis/commit/6bcb0b460f048ff9601aeec1f199821280bdaeed), [`bb3a169`](https://github.com/Lazialize/oasis/commit/bb3a169ad6345fa0763b438c6e63341b62cc09d9)]:
+  - @oasis/linter@0.8.2
+  - @oasis/server@0.8.2
+  - @oasis/core@0.8.2
+  - @oasis/bundler@0.8.2
+
 ## 0.8.1
 
 ### Patch Changes
