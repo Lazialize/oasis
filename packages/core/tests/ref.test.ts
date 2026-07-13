@@ -226,3 +226,23 @@ describe("InMemoryFileSystem workspace graph", () => {
     expect(isMap(result.node) && isScalar((result.node as YAMLMap).items[0]?.value)).toBe(true);
   });
 });
+
+describe("failed-load negative cache", () => {
+  test("a missing file referenced from multiple sites yields one diagnostic", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": [
+        "openapi: 3.0.3",
+        "components:",
+        "  schemas:",
+        "    A:",
+        "      $ref: './missing.yaml#/components/schemas/X'",
+        "    B:",
+        "      $ref: './missing.yaml#/components/schemas/Y'",
+        "",
+      ].join("\n"),
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const loadFailures = graph.diagnostics.filter((d) => d.message.includes("Failed to load"));
+    expect(loadFailures).toHaveLength(1);
+  });
+});

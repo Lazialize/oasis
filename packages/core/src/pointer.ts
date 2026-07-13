@@ -36,8 +36,20 @@ export function parsePointer(pointer: string): string[] {
   return raw.split("/").map((seg) => unescapePointerSegment(safeDecodeURIComponent(seg)));
 }
 
-/** Join unescaped segments back into a JSON Pointer string. */
+/**
+ * Join unescaped segments back into a JSON Pointer string, as the exact inverse of
+ * `parsePointer`. Because `parsePointer` percent-decodes each segment (for `$ref`-fragment
+ * pointers), a literal `%` that happens to be followed by two hex digits would be corrupted on
+ * re-parse unless it is percent-encoded here. Only that case is encoded — a `%` not followed by
+ * hex survives `safeDecodeURIComponent` unchanged — so pointers stay human-readable in
+ * diagnostics for the common case.
+ */
 export function formatPointer(segments: string[]): string {
   if (segments.length === 0) return "";
-  return "/" + segments.map(escapePointerSegment).join("/");
+  return (
+    "/" +
+    segments
+      .map((seg) => escapePointerSegment(seg).replace(/%(?=[0-9a-fA-F]{2})/g, "%25"))
+      .join("/")
+  );
 }
