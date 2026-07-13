@@ -12,6 +12,15 @@ An OpenAPI 3.0 / 3.1 toolkit: **linter**, **multi-file bundler**, and **language
 
 ## Install
 
+### Homebrew (macOS/Linux)
+
+```sh
+brew install lazialize/oasis/oasis
+```
+
+This pulls from the [`Lazialize/homebrew-oasis`](https://github.com/Lazialize/homebrew-oasis) tap,
+which the release workflow keeps in sync with the latest GitHub Release.
+
 ### Prebuilt binaries
 
 Each [GitHub Release](https://github.com/Lazialize/oasis/releases) publishes self-contained `oasis`
@@ -23,11 +32,9 @@ tar -xzf oasis.tar.gz
 ./oasis --help
 ```
 
-The release workflow can also publish the VS Code extension to the Marketplace and update a
-Homebrew tap formula; both are optional integrations gated on repository secrets being configured
-(see [docs/releasing.md](docs/releasing.md)) — check the [Releases page](https://github.com/Lazialize/oasis/releases)
-or the [VS Code Marketplace](https://marketplace.visualstudio.com/) for current availability
-rather than assuming `brew install` or Marketplace install already works.
+The release workflow also publishes the VS Code extension to the
+[Marketplace](https://marketplace.visualstudio.com/items?itemName=lazialize.oasis-vscode) as
+**Oasis OpenAPI** — see [VS Code extension](#vs-code-extension) below.
 
 ### Build from source
 
