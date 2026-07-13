@@ -3,6 +3,7 @@ import { type OasisDocument, parseDocument } from "./parse.ts";
 import { zeroRange } from "./position.ts";
 import { findRefs, parseRefString } from "./ref.ts";
 import type { Diagnostic, Range } from "./types.ts";
+import { isExternalUriReference } from "./uri.ts";
 
 export interface WorkspaceGraph {
   entryPath: string;
@@ -53,6 +54,10 @@ export async function loadWorkspaceGraph(fs: FileSystem, entryPath: string): Pro
     for (const ref of findRefs(doc)) {
       const { filePart } = parseRefString(ref.value);
       if (filePart === "") continue; // same-document ref; no file to load
+      // An absolute non-filesystem URI (`https:`, `urn:`, ...) is an external target the FileSystem
+      // abstraction can't load — deliberately skipped here rather than turned into a bogus file
+      // lookup. `resolveRef` reports it as an unsupported external reference when it's resolved.
+      if (isExternalUriReference(filePart)) continue;
 
       const targetPath = fs.resolve(path, filePart);
       if (targetPath === path) continue;
