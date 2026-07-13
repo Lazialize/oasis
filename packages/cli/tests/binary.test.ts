@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -8,14 +8,18 @@ import { parseDocument } from "@oasis/core";
 /**
  * Verifies the self-contained `bun build --compile` binary actually works: `oasis lint`,
  * `oasis bundle`, and `oasis lsp` (initialize/didOpen/publishDiagnostics) exercised as a real
- * subprocess against `dist/oasis`, not `bun run src/index.ts`. This is the only place we catch
- * runtime breakage specific to compilation (e.g. vscode-languageserver's dynamic requires).
+ * compiled subprocess, not `bun run src/index.ts`. This is the only place we catch runtime
+ * breakage specific to compilation (e.g. vscode-languageserver's dynamic requires).
  *
- * Not part of the default `bun test` run (too slow to build every time); run via `bun run test:bin`.
+ * The binary is always rebuilt from the current source into a unique temporary path in suite
+ * setup (#34), so these tests never run against a stale `dist/oasis` left over from an earlier
+ * build (and never touch `dist/` at all). The build takes well under a second, so this suite is
+ * part of the default `bun test` run; `bun run test:bin` runs it in isolation.
  */
 
 const repoRoot = `${import.meta.dir}/../../..`;
-const binPath = join(repoRoot, "dist", "oasis");
+const buildDir = mkdtempSync(join(tmpdir(), "oasis-bin-test-"));
+const binPath = join(buildDir, "oasis");
 const fixturesRoot = `${import.meta.dir}/fixtures`;
 
 interface RunResult {
@@ -137,14 +141,21 @@ class LspClient {
 
 describe("compiled oasis binary", () => {
   beforeAll(async () => {
-    if (!existsSync(binPath)) {
-      const build = Bun.spawn(["bun", "run", "build:bin"], { cwd: repoRoot, stdout: "pipe", stderr: "pipe" });
-      const exitCode = await build.exited;
-      if (exitCode !== 0) {
-        const stderr = await new Response(build.stderr).text();
-        throw new Error(`build:bin failed:\n${stderr}`);
-      }
+    // Always rebuild from the current source (same flags as the `build:bin` script, but into a
+    // unique temp path): a pre-existing dist/oasis may be stale relative to the source under test.
+    const build = Bun.spawn(
+      ["bun", "build", "packages/cli/src/index.ts", "--compile", "--minify", `--outfile=${binPath}`],
+      { cwd: repoRoot, stdout: "pipe", stderr: "pipe" },
+    );
+    const exitCode = await build.exited;
+    if (exitCode !== 0) {
+      const stderr = await new Response(build.stderr).text();
+      throw new Error(`binary build failed:\n${stderr}`);
     }
+  });
+
+  afterAll(() => {
+    rmSync(buildDir, { recursive: true, force: true });
   });
 
   test("binary exists and is executable", () => {
