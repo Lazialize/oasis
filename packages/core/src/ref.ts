@@ -43,6 +43,38 @@ function isLiteralDataKey(key: string, value: Node): boolean {
   return key === "example" || key === "default" || key === "enum" || key === "const";
 }
 
+/**
+ * Keys whose value is a map of *user/spec-named entries* (component names, HTTP status codes,
+ * media types, property names, ...), not JSON Schema keywords. When descending into such a map,
+ * the `isLiteralDataKey` check must NOT be applied to the entry names: an entry named `default`,
+ * `example`, `enum`, etc. is an ordinary named object (a Response/Example/Schema Object that may
+ * legitimately carry a real `$ref`), not literal instance data. `examples` qualifies only in its
+ * *map* form (name -> Example Object); its *sequence* form is the JSON Schema literal keyword.
+ */
+const CONTAINER_KEYS = new Set<string>([
+  "responses",
+  "properties",
+  "patternProperties",
+  "headers",
+  "links",
+  "callbacks",
+  "variables",
+  "mapping",
+  "schemas",
+  "parameters",
+  "requestBodies",
+  "securitySchemes",
+  "encoding",
+  "scopes",
+  "$defs",
+  "definitions",
+]);
+
+function isContainerKey(key: string, value: Node): boolean {
+  if (key === "examples") return isMap(value);
+  return CONTAINER_KEYS.has(key);
+}
+
 export interface FoundRef {
   value: string;
   range: Range;
@@ -75,7 +107,10 @@ export function findRefs(doc: OasisDocument): FoundRef[] {
   const seenRefContext = new Set<Node>();
   const seenLiteralContext = new Set<Node>();
 
-  function walk(node: Node, literal: boolean): void {
+  // `inContainer` marks that `node`'s own keys are user/spec-named entries (see `isContainerKey`),
+  // so the literal-data key check is suppressed for them — an entry named `default`/`example` under
+  // `responses`/`examples`/`properties`/... is a real object that may carry a genuine `$ref`.
+  function walk(node: Node, literal: boolean, inContainer: boolean): void {
     const resolved = resolveAlias(node, doc.yamlDoc);
     if (!resolved) return;
     const seen = literal ? seenLiteralContext : seenRefContext;
@@ -101,17 +136,18 @@ export function findRefs(doc: OasisDocument): FoundRef[] {
       for (const pair of resolved.items) {
         if (!isNode(pair.value)) continue;
         const keyStr = isScalar(pair.key) ? String(pair.key.value) : undefined;
-        const childLiteral = literal || (keyStr !== undefined && isLiteralDataKey(keyStr, pair.value));
-        walk(pair.value, childLiteral);
+        const childLiteral = literal || (!inContainer && keyStr !== undefined && isLiteralDataKey(keyStr, pair.value));
+        const childContainer = !literal && keyStr !== undefined && isContainerKey(keyStr, pair.value);
+        walk(pair.value, childLiteral, childContainer);
       }
     } else if (isSeq(resolved)) {
       for (const item of resolved.items) {
-        if (isNode(item)) walk(item, literal);
+        if (isNode(item)) walk(item, literal, false);
       }
     }
   }
 
-  if (isNode(root)) walk(root, false);
+  if (isNode(root)) walk(root, false, false);
   findRefsCache.set(doc, results);
   return results;
 }

@@ -396,7 +396,10 @@ function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undef
           out[key] = convertValue(ctx, doc, value, "schemas");
           break;
         case "properties":
+        case "patternProperties":
         case "schemas":
+        case "$defs":
+        case "definitions":
           out[key] = mapChildren(ctx, doc, value, "schemas");
           break;
         case "allOf":
@@ -431,6 +434,16 @@ function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undef
           break;
         case "securitySchemes":
           out[key] = mapChildren(ctx, doc, value, "securitySchemes");
+          break;
+        // Maps of user/spec-named entries (not JSON Schema keywords): route through `mapChildren`
+        // so an entry named `default`/`example`/`enum`/... is converted as a real object (and any
+        // genuine `$ref` inside it is lifted/rewritten), never mistaken for literal instance data.
+        // `hint` is passed through as the fallback lift section, matching the old default-case path.
+        case "variables":
+        case "mapping":
+        case "encoding":
+        case "scopes":
+          out[key] = mapChildren(ctx, doc, value, hint ?? "schemas");
           break;
         default:
           out[key] = convertValue(ctx, doc, value, hint);

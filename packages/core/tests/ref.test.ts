@@ -151,6 +151,65 @@ describe("$ref-as-literal-data is not treated as a reference", () => {
   });
 });
 
+describe("container entries named like literal-data keywords are still references", () => {
+  test("responses.default, examples-map entries, and a property named `default` are found; schema-level example/default/enum stay literal", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": [
+        "openapi: 3.0.3",
+        "paths:",
+        "  /pets:",
+        "    get:",
+        "      responses:",
+        "        '200':",
+        "          description: ok",
+        "          content:",
+        "            application/json:",
+        "              schema:",
+        "                $ref: '#/components/schemas/Pet'",
+        "              examples:",
+        "                default:",
+        "                  $ref: '#/components/examples/PetExample'",
+        "                example:",
+        "                  $ref: '#/components/examples/OtherExample'",
+        "        default:",
+        "          $ref: '#/components/responses/NotFound'",
+        "components:",
+        "  schemas:",
+        "    Pet:",
+        "      type: object",
+        "      properties:",
+        // A schema property literally named `default` is a Schema Object with a real $ref.
+        "        default:",
+        "          $ref: '#/components/schemas/Fallback'",
+        "    Fallback:",
+        "      type: string",
+        // Genuine literal data: the $ref-shaped values here are plain instance data, not refs.
+        "      default:",
+        "        $ref: './not-a-ref.yaml'",
+        "      example:",
+        "        $ref: './also-not.yaml'",
+        "      enum:",
+        "        - $ref: './nope.yaml'",
+      ].join("\n"),
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const entryDoc = graph.documents.get("/virtual/entry.yaml")!;
+    const values = findRefs(entryDoc).map((r) => r.value).sort();
+
+    expect(values).toEqual(
+      [
+        "#/components/examples/OtherExample",
+        "#/components/examples/PetExample",
+        "#/components/responses/NotFound",
+        "#/components/schemas/Fallback",
+        "#/components/schemas/Pet",
+      ].sort(),
+    );
+    // The literal-data $refs (under schema-level default/example/enum) are NOT among them.
+    expect(values.some((v) => v.endsWith(".yaml"))).toBe(false);
+  });
+});
+
 describe("InMemoryFileSystem workspace graph", () => {
   test("resolves refs across in-memory buffers", async () => {
     const fs = new InMemoryFileSystem({
