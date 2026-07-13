@@ -136,7 +136,7 @@ export const structureDiscriminator: Rule = {
       walkSchemaTree(
         site.node,
         (schema) => checkDiscriminator(ctx, site.doc, schema, "Schema"),
-        { version: ctx.version, prefixItems: true },
+        ctx.version,
         seen,
       );
     }

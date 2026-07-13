@@ -22,7 +22,7 @@ function walkSchemasForSelfExamples(ctx: RuleContext, env: ValidateEnv, doc: Oas
         reportFailures(ctx, env, { doc, node: schema }, doc, exampleNode, "Schema");
       }
     },
-    { version: env.version, prefixItems: true },
+    env.version,
     seen,
   );
 }

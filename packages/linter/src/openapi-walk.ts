@@ -432,105 +432,79 @@ function computeIterateMediaTypes(
 }
 
 /**
- * Options controlling which JSON Schema applicators `walkSchemaTree` recurses into, beyond the
- * always-traversed `properties`/`items`/`additionalProperties`/`allOf`/`oneOf`/`anyOf`. The 3.1-only
- * applicators (`prefixItems`, `patternProperties`, `if`/`then`/`else`, `$defs`) are only traversed
- * when `version` is `"3.1"` *and* the corresponding flag is set — different rules care about
- * different subsets, and some (e.g. `style/naming-convention`) deliberately skip one even on 3.1
- * documents (see that rule for why).
+ * JSON Schema applicator keywords whose value is a *single* nested Schema Object.
+ * `items`/`additionalProperties`/`not` exist in both dialects; the rest are JSON Schema 2020-12
+ * (OpenAPI 3.1) only.
  */
-export interface SchemaWalkOptions {
-  /** The document's OpenAPI version; gates all 3.1-only applicators below. Omit to never traverse them. */
-  version?: OpenApiVersion;
-  /** Traverse (3.1) `prefixItems` tuple members. */
-  prefixItems?: boolean;
-  /** Traverse (3.1) `patternProperties` values. */
-  patternProperties?: boolean;
-  /** Traverse `not`. */
-  not?: boolean;
-  /** Traverse (3.1) `if`/`then`/`else` branches. */
-  ifThenElse?: boolean;
-  /** Traverse (3.1) `$defs` entries. */
-  defs?: boolean;
-}
+const SINGLE_SCHEMA_KEYS_COMMON = ["items", "additionalProperties", "not"] as const;
+const SINGLE_SCHEMA_KEYS_31 = [
+  "if",
+  "then",
+  "else",
+  "propertyNames",
+  "contains",
+  "unevaluatedItems",
+  "unevaluatedProperties",
+  "contentSchema",
+] as const;
+
+/** Applicator keywords whose value is a *map* of named Schema Objects (name/pattern -> schema). */
+const MAP_OF_SCHEMAS_KEYS_COMMON = ["properties"] as const;
+const MAP_OF_SCHEMAS_KEYS_31 = ["patternProperties", "$defs", "dependentSchemas"] as const;
+
+/** Applicator keywords whose value is a *sequence* of Schema Objects. */
+const SEQ_OF_SCHEMAS_KEYS_COMMON = ["allOf", "oneOf", "anyOf"] as const;
+const SEQ_OF_SCHEMAS_KEYS_31 = ["prefixItems"] as const;
 
 /**
- * Recursively visit schema-shaped nodes reachable from `node` via the JSON Schema applicators
- * selected by `options`: always `properties`/`items`/`additionalProperties`/`allOf`/`oneOf`/`anyOf`,
- * plus whichever 3.1-only applicators `options` opts into. `$ref`s are not followed for discovery —
- * a `$ref`'d schema is visited at its own definition site (`components/schemas` etc., via
- * `iterateSchemas`) — and `seen` guards against revisiting a node reached more than once (e.g.
- * shared inline schemas, or when a caller shares one `seen` set across multiple root calls).
+ * Recursively visit every nested Schema Object reachable from `node` through the JSON Schema
+ * applicators legal in the document's `version`. Traversal is complete and version-aware:
+ * - 3.0: `properties`, `items`, `additionalProperties`, `allOf`/`oneOf`/`anyOf`, `not`.
+ * - 3.1 (JSON Schema 2020-12): all of the above plus `patternProperties`, `prefixItems`,
+ *   `if`/`then`/`else`, `contains`, `propertyNames`, `dependentSchemas`, `$defs`,
+ *   `unevaluatedItems`, `unevaluatedProperties`, `contentSchema`.
+ * When `version` is `undefined` the 3.1 applicators are included too, so nothing is missed on a
+ * document whose version couldn't be detected.
+ *
+ * `$ref`s are not followed for discovery — a `$ref`'d schema is visited at its own definition site
+ * (`components/schemas` etc., via `iterateSchemas`) — and `seen` guards against revisiting a node
+ * reached more than once (e.g. shared inline schemas, or when a caller shares one `seen` set across
+ * multiple root calls).
  */
 export function walkSchemaTree(
   node: Node,
   visit: (schema: Node) => void,
-  options: SchemaWalkOptions = {},
+  version: OpenApiVersion | undefined,
   seen: Set<Node> = new Set(),
 ): void {
   if (!isMap(node) || seen.has(node)) return;
   seen.add(node);
   visit(node);
 
-  const properties = childAt(node, "properties");
-  if (isMap(properties)) {
-    for (const pair of properties.items) {
-      if (isNode(pair.value)) walkSchemaTree(pair.value, visit, options, seen);
+  const include31 = version !== "3.0";
+  const singleKeys = include31 ? [...SINGLE_SCHEMA_KEYS_COMMON, ...SINGLE_SCHEMA_KEYS_31] : SINGLE_SCHEMA_KEYS_COMMON;
+  const mapKeys = include31 ? [...MAP_OF_SCHEMAS_KEYS_COMMON, ...MAP_OF_SCHEMAS_KEYS_31] : MAP_OF_SCHEMAS_KEYS_COMMON;
+  const seqKeys = include31 ? [...SEQ_OF_SCHEMAS_KEYS_COMMON, ...SEQ_OF_SCHEMAS_KEYS_31] : SEQ_OF_SCHEMAS_KEYS_COMMON;
+
+  for (const key of singleKeys) {
+    const child = childAt(node, key);
+    if (isNode(child)) walkSchemaTree(child, visit, version, seen);
+  }
+
+  for (const key of mapKeys) {
+    const map = childAt(node, key);
+    if (isMap(map)) {
+      for (const pair of map.items) {
+        if (isNode(pair.value)) walkSchemaTree(pair.value, visit, version, seen);
+      }
     }
   }
 
-  const items = childAt(node, "items");
-  if (isNode(items)) walkSchemaTree(items, visit, options, seen);
-
-  const additionalProperties = childAt(node, "additionalProperties");
-  if (isNode(additionalProperties)) walkSchemaTree(additionalProperties, visit, options, seen);
-
-  if (options.not) {
-    const notNode = childAt(node, "not");
-    if (isNode(notNode)) walkSchemaTree(notNode, visit, options, seen);
-  }
-
-  for (const key of ["allOf", "oneOf", "anyOf"]) {
+  for (const key of seqKeys) {
     const seq = childAt(node, key);
     if (isSeq(seq)) {
       for (const item of seq.items) {
-        if (isNode(item)) walkSchemaTree(item, visit, options, seen);
-      }
-    }
-  }
-
-  if (options.version === "3.1") {
-    if (options.prefixItems) {
-      const prefixItems = childAt(node, "prefixItems");
-      if (isSeq(prefixItems)) {
-        for (const item of prefixItems.items) {
-          if (isNode(item)) walkSchemaTree(item, visit, options, seen);
-        }
-      }
-    }
-
-    if (options.patternProperties) {
-      const patternProperties = childAt(node, "patternProperties");
-      if (isMap(patternProperties)) {
-        for (const pair of patternProperties.items) {
-          if (isNode(pair.value)) walkSchemaTree(pair.value, visit, options, seen);
-        }
-      }
-    }
-
-    if (options.ifThenElse) {
-      for (const key of ["if", "then", "else"]) {
-        const branch = childAt(node, key);
-        if (isNode(branch)) walkSchemaTree(branch, visit, options, seen);
-      }
-    }
-
-    if (options.defs) {
-      const defs = childAt(node, "$defs");
-      if (isMap(defs)) {
-        for (const pair of defs.items) {
-          if (isNode(pair.value)) walkSchemaTree(pair.value, visit, options, seen);
-        }
+        if (isNode(item)) walkSchemaTree(item, visit, version, seen);
       }
     }
   }
