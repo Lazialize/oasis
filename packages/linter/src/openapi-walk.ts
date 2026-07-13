@@ -115,6 +115,28 @@ function computeIterateOperations(graph: WorkspaceGraph, entryDoc: OasisDocument
   return results;
 }
 
+/**
+ * Visit every entry of a `components/<section>` map, resolving each entry's `$ref` through the
+ * workspace graph first. Shared by `computeIterateSchemas` and `computeIterateMediaTypes`, which
+ * both walk the same set of components sections looking for different things.
+ */
+function eachComponentEntry(
+  graph: WorkspaceGraph,
+  doc: OasisDocument,
+  components: Node,
+  section: string,
+  visit: (doc: OasisDocument, node: Node, pointer: string) => void,
+): void {
+  const sectionNode = childAt(components, section);
+  if (!sectionNode || !isMap(sectionNode)) return;
+  for (const pair of sectionNode.items) {
+    const name = keyToString(pair.key);
+    if (!isNode(pair.value)) continue;
+    const resolved = resolveMaybeRef(graph, doc, pair.value, `/components/${section}/${name}`);
+    visit(resolved.doc, resolved.node, resolved.pointer);
+  }
+}
+
 /** A site where a Schema Object starts: the (possibly $ref-resolved) schema root node. */
 export interface SchemaSite {
   doc: OasisDocument;
@@ -216,24 +238,13 @@ function computeIterateSchemas(
     const components = childAt(root, "components");
     if (!components || !isMap(components)) continue;
 
-    const eachEntry = (section: string, visit: (doc: OasisDocument, node: Node, pointer: string) => void): void => {
-      const sectionNode = childAt(components, section);
-      if (!sectionNode || !isMap(sectionNode)) return;
-      for (const pair of sectionNode.items) {
-        const name = keyToString(pair.key);
-        if (!isNode(pair.value)) continue;
-        const resolved = resolveMaybeRef(graph, doc, pair.value, `/components/${section}/${name}`);
-        visit(resolved.doc, resolved.node, resolved.pointer);
-      }
-    };
-
-    eachEntry("schemas", (d, n, p) => addSchema(d, n, p));
-    eachEntry("parameters", addFromSchemaBearing);
-    eachEntry("headers", addFromSchemaBearing);
-    eachEntry("requestBodies", (d, n, p) => {
+    eachComponentEntry(graph, doc, components, "schemas", (d, n, p) => addSchema(d, n, p));
+    eachComponentEntry(graph, doc, components, "parameters", addFromSchemaBearing);
+    eachComponentEntry(graph, doc, components, "headers", addFromSchemaBearing);
+    eachComponentEntry(graph, doc, components, "requestBodies", (d, n, p) => {
       if (isMap(n)) addFromContent(d, childAt(n, "content"), `${p}/content`);
     });
-    eachEntry("responses", addFromResponse);
+    eachComponentEntry(graph, doc, components, "responses", addFromResponse);
   }
 
   // Operation-level sites, following the paths (and, on 3.1, webhooks) walk.
@@ -321,21 +332,10 @@ function computeIterateMediaTypes(
     const components = childAt(root, "components");
     if (!components || !isMap(components)) continue;
 
-    const eachEntry = (section: string, visit: (doc: OasisDocument, node: Node, pointer: string) => void): void => {
-      const sectionNode = childAt(components, section);
-      if (!sectionNode || !isMap(sectionNode)) return;
-      for (const pair of sectionNode.items) {
-        const name = keyToString(pair.key);
-        if (!isNode(pair.value)) continue;
-        const resolved = resolveMaybeRef(graph, doc, pair.value, `/components/${section}/${name}`);
-        visit(resolved.doc, resolved.node, resolved.pointer);
-      }
-    };
-
-    eachEntry("requestBodies", (d, n, p) => {
+    eachComponentEntry(graph, doc, components, "requestBodies", (d, n, p) => {
       if (isMap(n)) addFromContent(d, childAt(n, "content"), `${p}/content`);
     });
-    eachEntry("responses", (d, n, p) => {
+    eachComponentEntry(graph, doc, components, "responses", (d, n, p) => {
       if (isMap(n)) addFromContent(d, childAt(n, "content"), `${p}/content`);
     });
   }
@@ -365,4 +365,109 @@ function computeIterateMediaTypes(
   }
 
   return results;
+}
+
+/**
+ * Options controlling which JSON Schema applicators `walkSchemaTree` recurses into, beyond the
+ * always-traversed `properties`/`items`/`additionalProperties`/`allOf`/`oneOf`/`anyOf`. The 3.1-only
+ * applicators (`prefixItems`, `patternProperties`, `if`/`then`/`else`, `$defs`) are only traversed
+ * when `version` is `"3.1"` *and* the corresponding flag is set — different rules care about
+ * different subsets, and some (e.g. `style/naming-convention`) deliberately skip one even on 3.1
+ * documents (see that rule for why).
+ */
+export interface SchemaWalkOptions {
+  /** The document's OpenAPI version; gates all 3.1-only applicators below. Omit to never traverse them. */
+  version?: OpenApiVersion;
+  /** Traverse (3.1) `prefixItems` tuple members. */
+  prefixItems?: boolean;
+  /** Traverse (3.1) `patternProperties` values. */
+  patternProperties?: boolean;
+  /** Traverse `not`. */
+  not?: boolean;
+  /** Traverse (3.1) `if`/`then`/`else` branches. */
+  ifThenElse?: boolean;
+  /** Traverse (3.1) `$defs` entries. */
+  defs?: boolean;
+}
+
+/**
+ * Recursively visit schema-shaped nodes reachable from `node` via the JSON Schema applicators
+ * selected by `options`: always `properties`/`items`/`additionalProperties`/`allOf`/`oneOf`/`anyOf`,
+ * plus whichever 3.1-only applicators `options` opts into. `$ref`s are not followed for discovery —
+ * a `$ref`'d schema is visited at its own definition site (`components/schemas` etc., via
+ * `iterateSchemas`) — and `seen` guards against revisiting a node reached more than once (e.g.
+ * shared inline schemas, or when a caller shares one `seen` set across multiple root calls).
+ */
+export function walkSchemaTree(
+  node: Node,
+  visit: (schema: Node) => void,
+  options: SchemaWalkOptions = {},
+  seen: Set<Node> = new Set(),
+): void {
+  if (!isMap(node) || seen.has(node)) return;
+  seen.add(node);
+  visit(node);
+
+  const properties = childAt(node, "properties");
+  if (isMap(properties)) {
+    for (const pair of properties.items) {
+      if (isNode(pair.value)) walkSchemaTree(pair.value, visit, options, seen);
+    }
+  }
+
+  const items = childAt(node, "items");
+  if (isNode(items)) walkSchemaTree(items, visit, options, seen);
+
+  const additionalProperties = childAt(node, "additionalProperties");
+  if (isNode(additionalProperties)) walkSchemaTree(additionalProperties, visit, options, seen);
+
+  if (options.not) {
+    const notNode = childAt(node, "not");
+    if (isNode(notNode)) walkSchemaTree(notNode, visit, options, seen);
+  }
+
+  for (const key of ["allOf", "oneOf", "anyOf"]) {
+    const seq = childAt(node, key);
+    if (isSeq(seq)) {
+      for (const item of seq.items) {
+        if (isNode(item)) walkSchemaTree(item, visit, options, seen);
+      }
+    }
+  }
+
+  if (options.version === "3.1") {
+    if (options.prefixItems) {
+      const prefixItems = childAt(node, "prefixItems");
+      if (isSeq(prefixItems)) {
+        for (const item of prefixItems.items) {
+          if (isNode(item)) walkSchemaTree(item, visit, options, seen);
+        }
+      }
+    }
+
+    if (options.patternProperties) {
+      const patternProperties = childAt(node, "patternProperties");
+      if (isMap(patternProperties)) {
+        for (const pair of patternProperties.items) {
+          if (isNode(pair.value)) walkSchemaTree(pair.value, visit, options, seen);
+        }
+      }
+    }
+
+    if (options.ifThenElse) {
+      for (const key of ["if", "then", "else"]) {
+        const branch = childAt(node, key);
+        if (isNode(branch)) walkSchemaTree(branch, visit, options, seen);
+      }
+    }
+
+    if (options.defs) {
+      const defs = childAt(node, "$defs");
+      if (isMap(defs)) {
+        for (const pair of defs.items) {
+          if (isNode(pair.value)) walkSchemaTree(pair.value, visit, options, seen);
+        }
+      }
+    }
+  }
 }

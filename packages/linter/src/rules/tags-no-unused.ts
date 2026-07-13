@@ -6,7 +6,7 @@ import type { Rule, RuleContext } from "../types.ts";
 /** Collect every tag name used by an operation's `tags` list. */
 function collectUsedTags(ctx: RuleContext): Set<string> {
   const used = new Set<string>();
-  for (const op of iterateOperations(ctx.graph, ctx.entryDoc)) {
+  for (const op of iterateOperations(ctx.graph, ctx.entryDoc, ctx.version)) {
     const tagsNode = childAt(op.node, "tags");
     if (!tagsNode || !isSeq(tagsNode)) continue;
     for (const item of tagsNode.items) {

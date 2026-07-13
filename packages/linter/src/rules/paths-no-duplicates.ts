@@ -3,12 +3,14 @@ import type { Rule } from "../types.ts";
 
 /**
  * Normalize a path template so that templates differing only in parameter names compare equal:
- * `/users/{id}` and `/users/{userId}` both become `/users/{}`.
+ * `/users/{id}` and `/users/{userId}` both become `/users/{}`, and `/files/report-{id}.json` and
+ * `/files/report-{docId}.json` both become `/files/report-{}.json` (every `{...}` run within a
+ * segment is replaced, not just whole-segment templates).
  */
 function normalizeTemplate(template: string): string {
   return template
     .split("/")
-    .map((segment) => (/^\{.+\}$/.test(segment) ? "{}" : segment))
+    .map((segment) => segment.replace(/\{[^{}]+\}/g, "{}"))
     .join("/");
 }
 

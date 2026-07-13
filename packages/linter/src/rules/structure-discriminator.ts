@@ -2,7 +2,7 @@ import { isMap, isNode, isScalar, isSeq } from "yaml";
 import type { Node } from "yaml";
 import { resolveRef } from "@oasis/core";
 import type { OasisDocument } from "@oasis/core";
-import { iterateSchemas } from "../openapi-walk.ts";
+import { iterateSchemas, walkSchemaTree } from "../openapi-walk.ts";
 import { childAt, isRefObject, keyToString, resolveMaybeRef } from "../util.ts";
 import type { Rule, RuleContext } from "../types.ts";
 
@@ -89,50 +89,6 @@ function checkMapping(ctx: RuleContext, doc: OasisDocument, mappingNode: Node, l
   }
 }
 
-/**
- * Recursively visits schema-shaped nodes reachable from `node` via properties/items/allOf/oneOf/
- * anyOf/additionalProperties (+ 3.1 `prefixItems`), mirroring the walk in `structure/schema-
- * nullable`; `$ref`s are not followed for discovery (a $ref'd schema's own discriminator is found
- * when its `components/schemas` entry is visited directly).
- */
-function walkSchemas(ctx: RuleContext, doc: OasisDocument, node: Node, seen: Set<Node>): void {
-  if (!isMap(node) || seen.has(node)) return;
-  seen.add(node);
-
-  checkDiscriminator(ctx, doc, node, "Schema");
-
-  const properties = childAt(node, "properties");
-  if (isMap(properties)) {
-    for (const pair of properties.items) {
-      if (isNode(pair.value)) walkSchemas(ctx, doc, pair.value, seen);
-    }
-  }
-
-  const items = childAt(node, "items");
-  if (isNode(items)) walkSchemas(ctx, doc, items, seen);
-
-  if (ctx.version === "3.1") {
-    const prefixItems = childAt(node, "prefixItems");
-    if (isSeq(prefixItems)) {
-      for (const item of prefixItems.items) {
-        if (isNode(item)) walkSchemas(ctx, doc, item, seen);
-      }
-    }
-  }
-
-  const additionalProperties = childAt(node, "additionalProperties");
-  if (isNode(additionalProperties)) walkSchemas(ctx, doc, additionalProperties, seen);
-
-  for (const key of ["allOf", "oneOf", "anyOf"]) {
-    const seq = childAt(node, key);
-    if (isSeq(seq)) {
-      for (const item of seq.items) {
-        if (isNode(item)) walkSchemas(ctx, doc, item, seen);
-      }
-    }
-  }
-}
-
 function checkDiscriminator(ctx: RuleContext, doc: OasisDocument, schemaNode: Node, label: string): void {
   if (!isMap(schemaNode)) return;
   const discNode = childAt(schemaNode, "discriminator");
@@ -183,7 +139,12 @@ export const structureDiscriminator: Rule = {
   check(ctx) {
     const seen = new Set<Node>();
     for (const site of iterateSchemas(ctx.graph, ctx.entryDoc, ctx.documents, ctx.version)) {
-      walkSchemas(ctx, site.doc, site.node, seen);
+      walkSchemaTree(
+        site.node,
+        (schema) => checkDiscriminator(ctx, site.doc, schema, "Schema"),
+        { version: ctx.version, prefixItems: true },
+        seen,
+      );
     }
   },
 };

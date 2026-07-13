@@ -28,6 +28,14 @@ describe("paths/no-duplicates", () => {
     expect(diagnostics.some((d) => d.rule === "paths/no-duplicates")).toBe(false);
   });
 
+  test("flags two path templates differing only in a partial-segment parameter name", async () => {
+    const diagnostics = await lintFixture("duplicate-paths/partial-segment.yaml");
+    const d = diagnostics.find((d) => d.rule === "paths/no-duplicates");
+    expect(d).toBeDefined();
+    expect(d?.message).toContain("/files/report-{docId}.json");
+    expect(d?.message).toContain("/files/report-{id}.json");
+  });
+
   test("valid fixture passes", async () => {
     const diagnostics = await lintFixture("valid/openapi.yaml");
     expect(diagnostics.some((d) => d.rule === "paths/no-duplicates")).toBe(false);

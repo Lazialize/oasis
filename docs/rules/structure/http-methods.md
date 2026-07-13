@@ -6,7 +6,7 @@ This rule checks that every key directly under a Path Item Object (e.g. `paths./
 
 ## Version notes
 
-No version-specific behavior — this rule applies identically to OpenAPI 3.0 and 3.1 documents. The set of allowed HTTP methods and non-method Path Item keys is the same in both versions.
+This rule walks path items via the shared path-item iterator, which follows path-item `$ref`s to their target file (diagnostics are attributed there, not to the referencing document) and, on OpenAPI 3.1 documents, also walks the root `webhooks` map. The set of allowed HTTP methods and non-method Path Item keys is otherwise the same in both versions.
 
 ## Options
 

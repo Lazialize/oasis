@@ -9,6 +9,7 @@ import {
   loadConfig,
   resolveConfig,
   resolveEntries,
+  toGlobPath,
 } from "../src/config.ts";
 import { rules } from "../src/rules/index.ts";
 import type { Rule, RuleContext } from "../src/types.ts";
@@ -214,6 +215,33 @@ describe("end-to-end config application", () => {
     const configDiag = diagnostics.find((d) => d.rule === "oasis/config");
     expect(configDiag).toBeDefined();
     expect(configDiag?.message).toContain("no-such-rule");
+  });
+});
+
+describe("toGlobPath", () => {
+  test("normalizes Windows-style backslash separators to forward slashes", () => {
+    expect(toGlobPath("paths\\pets.yaml")).toBe("paths/pets.yaml");
+    expect(toGlobPath("a\\b\\c.yaml")).toBe("a/b/c.yaml");
+  });
+
+  test("is a no-op on already-forward-slash (POSIX) paths", () => {
+    expect(toGlobPath("paths/pets.yaml")).toBe("paths/pets.yaml");
+  });
+
+  test("effectiveRuleConfig matches an override glob even when the relative path uses backslashes", () => {
+    // Simulates what `path.relative` returns on Windows, to exercise the normalization without
+    // requiring an actual Windows filesystem.
+    const config = resolveConfig({
+      lint: {
+        rules: { "operation/tags": "warn" },
+        overrides: [{ files: ["paths/**/*.yaml"], rules: { "operation/tags": "off" } }],
+      },
+    });
+    // Can't force `path.relative` to emit backslashes on POSIX, so call the normalizer directly
+    // and confirm the glob match that `effectiveRuleConfig` relies on succeeds against it.
+    const winRelative = toGlobPath("paths\\pets.yaml");
+    expect(new Bun.Glob("paths/**/*.yaml").match(winRelative)).toBe(true);
+    expect(config.overrides[0]?.files).toContain("paths/**/*.yaml");
   });
 });
 

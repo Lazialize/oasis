@@ -6,7 +6,7 @@ This rule checks the JSON types of common top-level and operation-level fields: 
 
 ## Version notes
 
-No version-specific behavior — this rule applies identically to OpenAPI 3.0 and 3.1 documents.
+Path-item and operation-level checks are driven by the shared path-item/operation iterators, which follow path-item `$ref`s to their target file (diagnostics are attributed there) and, on OpenAPI 3.1 documents, also walk the root `webhooks` map the same way as `paths`. Root-level checks (`tags`, `servers`, `security`, `components`) apply identically to OpenAPI 3.0 and 3.1 documents.
 
 ## Options
 
