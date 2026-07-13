@@ -1,5 +1,34 @@
 # @oasis/server
 
+## 0.8.2
+
+### Patch Changes
+
+- [#18](https://github.com/Lazialize/oasis/pull/18) [`f5fdd29`](https://github.com/Lazialize/oasis/commit/f5fdd298e78b3604009c2515e47f0416d7f05770) Thanks [@Lazialize](https://github.com/Lazialize)! - Fix two multi-entry-workspace bugs when an `oasis.config.jsonc` declares several `entries` whose graphs share a `$ref`'d file:
+
+  - Rename and find-references now union every loaded graph that contains the target file instead of stopping at the first owning entry. Renaming a component defined in a shared file used to leave sibling entries with a dangling `$ref`, and find-references undercounted; both now cover all reaching graphs and dedupe a file (and its refs) shared by two graphs.
+  - `components/no-unused` no longer reports a shared component as unused when only a sibling entry references it. The lint engine's `RuleContext` gained an optional `externalDocuments` field (populated only by the server's project-mode lint path with sibling entries' graph documents) so cross-entry usage counts; a CLI lint of a single entry graph is unchanged. The server's "Remove unused component" quickfix also cross-checks all loaded graphs and won't offer a destructive delete for a component a sibling entry still references.
+
+- [#18](https://github.com/Lazialize/oasis/pull/18) [`efb4404`](https://github.com/Lazialize/oasis/commit/efb4404fc63dd50e1b97e24d12b380888484425b) Thanks [@Lazialize](https://github.com/Lazialize)! - Fix two bugs:
+
+  - `lint.overrides` now applies the overridden rule _options_, not just severity. Previously
+    `RuleContext.options` was resolved once from the top-level `lint.rules` entry before a rule ran,
+    so a matching override could change a diagnostic's severity but never the options a rule actually
+    checked against. `RuleContext` gained `optionsFor(filePath)` to resolve options per matched file
+    (the same override resolution `report()` already used for severity); `style/naming-convention`
+    (the only rule that takes options today) now uses it, so e.g. an `operationId` casing override for
+    a glob of files is honored instead of silently falling back to the top-level casing style.
+  - The LSP server now re-validates open standalone entries when an open `$ref`'d fragment file with
+    no top-level `openapi:` key is edited. Previously such a fragment routed as `{kind: "ignored"}` on
+    edit; its graph cache was invalidated correctly, but nothing re-validated the dependent standalone
+    entry, so its published diagnostics went stale until the entry document itself was next edited.
+
+- [#18](https://github.com/Lazialize/oasis/pull/18) [`6bcb0b4`](https://github.com/Lazialize/oasis/commit/6bcb0b460f048ff9601aeec1f199821280bdaeed) Thanks [@Lazialize](https://github.com/Lazialize)! - Fix the LSP server crashing on an unhandled rejection: notification-driven async work (document open/change, debounced validation, initial project load, config file reload) is now run through a `runSafely` wrapper that catches and logs errors via `connection.console.error` instead of letting them escape as unhandled rejections, plus a top-level `unhandledRejection` listener as a last-resort net.
+
+- Updated dependencies [[`fcda9cb`](https://github.com/Lazialize/oasis/commit/fcda9cb039ba28624e57914f40001e0e4b364c35), [`f5fdd29`](https://github.com/Lazialize/oasis/commit/f5fdd298e78b3604009c2515e47f0416d7f05770), [`efb4404`](https://github.com/Lazialize/oasis/commit/efb4404fc63dd50e1b97e24d12b380888484425b), [`8060414`](https://github.com/Lazialize/oasis/commit/8060414c1f890f599b820dfe93c8c9f94c5b1435), [`bb3a169`](https://github.com/Lazialize/oasis/commit/bb3a169ad6345fa0763b438c6e63341b62cc09d9)]:
+  - @oasis/linter@0.8.2
+  - @oasis/core@0.8.2
+
 ## 0.8.1
 
 ### Patch Changes
