@@ -1,0 +1,11 @@
+openapi: 3.0.3
+info:
+  title: Percent-encoded refs
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    FromFile:
+      $ref: './petstore%20v2.yaml#/components/schemas/Pet'
+    Malformed:
+      $ref: './bad%.yaml'

@@ -19,7 +19,7 @@ export function nodeAtPointer(doc: OasisDocument, pointer: string): PointerLooku
 
   let current: Node = root;
   for (const seg of segments) {
-    const next = childAt(current, seg);
+    const next = childAt(current, seg, doc.yamlDoc);
     if (!next) return undefined;
     current = next;
   }
@@ -67,6 +67,18 @@ export function nodeAtPosition(doc: OasisDocument, offset: number): PositionLook
 function findContainingChild(node: Node, offset: number): { node: Node; segment: string } | undefined {
   if (isMap(node)) {
     for (const pair of node.items) {
+      const key = pair.key;
+      // A cursor on the key text itself (e.g. the "$ref" in "$ref: ./foo.yaml") previously fell
+      // through to nothing, so the search stopped one level short and returned the *containing
+      // map* instead of this pair. Map it to the pair's own pointer, same as landing on the value
+      // — that's what keeps pointer-based consumers (e.g. `endsWith("/$ref")` ref detection,
+      // component-target resolution) working the same whether the cursor is on the key or the
+      // value. Fall back to the key node itself when there's no value node to point at (e.g. a
+      // key typed with no value yet).
+      if (isNode(key) && key.range && offset >= key.range[0] && offset <= key.range[1]) {
+        const value = pair.value;
+        return { node: isNode(value) ? value : key, segment: keyToString(key) };
+      }
       const value = pair.value;
       if (isNode(value) && value.range && offset >= value.range[0] && offset <= value.range[1]) {
         return { node: value, segment: keyToString(pair.key) };

@@ -43,6 +43,20 @@ import { createServerContext, invalidateGraph } from "./workspace.ts";
 
 const DEBOUNCE_MS = 250;
 
+/** Run a fire-and-forget async handler (a notification callback with no caller to await it) so
+ * that an exception anywhere in the diagnostics/config pipeline is logged instead of becoming an
+ * unhandled rejection that kills the whole server process. */
+export function runSafely(connection: Connection, label: string, task: () => Promise<void>): void {
+  // `Promise.resolve().then(task)` (rather than calling `task()` directly) so a *synchronous*
+  // throw inside `task` (e.g. `uriToPath` rejecting a malformed URI) becomes a rejection this
+  // function's `.catch` observes too, instead of propagating out of `runSafely` itself.
+  Promise.resolve()
+    .then(task)
+    .catch((error: unknown) => {
+      connection.console.error(`[oasis] ${label} failed: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`);
+    });
+}
+
 function uriToPath(uri: string): string {
   return URI.parse(uri).fsPath;
 }
@@ -170,7 +184,7 @@ export function startServer(): Connection {
       entryPath,
       setTimeout(() => {
         debounceTimers.delete(entryPath);
-        void validate(entryPath);
+        runSafely(connection, "validate", () => validate(entryPath));
       }, DEBOUNCE_MS),
     );
   }
@@ -270,9 +284,21 @@ export function startServer(): Connection {
         // linting it as a broken standalone entry (avoids spurious "Missing required field
         // openapi" noise now that the client may sync every yaml/json/jsonc file).
         connection.sendDiagnostics({ uri: pathToUri(path), diagnostics: [] });
+        // It may still be a $ref'd fragment of one or more open standalone entries (see
+        // `routeDocument`'s "ignored" case): re-validate those so their published diagnostics don't
+        // go stale until the entry document itself is next edited. This also republishes the
+        // fragment's own diagnostics (if any) as part of each dependent entry's graph, the same way
+        // a project-member fragment's diagnostics ride along with its owning entry's validate.
+        for (const entryPath of route.dependentStandaloneEntries ?? []) scheduleValidate(entryPath);
         return;
     }
   }
+
+  // Last-resort net: a bug that somehow still slips past the per-site `runSafely` wrapping below
+  // (e.g. in a handler added later without it) gets logged rather than crashing the process.
+  process.on("unhandledRejection", (reason) => {
+    connection.console.error(`[oasis] unhandled rejection: ${reason instanceof Error ? (reason.stack ?? reason.message) : String(reason)}`);
+  });
 
   connection.onShutdown(() => {});
   connection.onExit(() => process.exit(0));
@@ -298,24 +324,24 @@ export function startServer(): Connection {
   });
 
   connection.onInitialized(() => {
-    void initializeProjects();
+    runSafely(connection, "initializeProjects", initializeProjects);
   });
 
   connection.onDidChangeWatchedFiles((params) => {
     for (const change of params.changes) {
       const path = uriToPath(change.uri);
       if (isConfigFilePath(path)) {
-        void reloadProjectAtConfigPath(path);
+        runSafely(connection, "reloadProjectAtConfigPath", () => reloadProjectAtConfigPath(path));
       }
     }
   });
 
   documents.onDidOpen((event) => {
-    void handleDocumentEvent(uriToPath(event.document.uri), event.document.getText());
+    runSafely(connection, "handleDocumentEvent", () => handleDocumentEvent(uriToPath(event.document.uri), event.document.getText()));
   });
 
   documents.onDidChangeContent((event) => {
-    void handleDocumentEvent(uriToPath(event.document.uri), event.document.getText());
+    runSafely(connection, "handleDocumentEvent", () => handleDocumentEvent(uriToPath(event.document.uri), event.document.getText()));
   });
 
   documents.onDidClose((event) => {

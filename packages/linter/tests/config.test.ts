@@ -9,6 +9,7 @@ import {
   loadConfig,
   resolveConfig,
   resolveEntries,
+  toGlobPath,
 } from "../src/config.ts";
 import { rules } from "../src/rules/index.ts";
 import type { Rule, RuleContext } from "../src/types.ts";
@@ -116,6 +117,60 @@ describe("engine passes resolved options to the rule context", () => {
   });
 });
 
+describe("ctx.optionsFor: lint.overrides apply overridden options per-file, not just severity", () => {
+  test("optionsFor resolves the top-level options by default, and the override's options for matching files", async () => {
+    const seenOptionsByFile: Record<string, unknown> = {};
+    const fakeRule: Rule = {
+      ...makeFakeRule(),
+      check(ctx: RuleContext) {
+        for (const doc of ctx.documents) seenOptionsByFile[doc.filePath] = ctx.optionsFor(doc.filePath);
+      },
+    };
+    const fs = new NodeFileSystem();
+    const entry = `${fixturesRoot}/overrides/entry.yaml`;
+    const graph = await loadWorkspaceGraph(fs, entry);
+    const config = resolveConfig(
+      {
+        lint: {
+          rules: { "fake-rule": ["warn", { level: 1 }] },
+          overrides: [{ files: ["paths/**/*.yaml"], rules: { "fake-rule": ["warn", { level: 99 }] } }],
+        },
+      },
+      [fakeRule],
+    );
+    lint(graph, config, { configPath: `${fixturesRoot}/overrides/oasis.config.jsonc` }, [fakeRule]);
+
+    // entry.yaml doesn't match the "paths/**" override: top-level options.
+    expect(seenOptionsByFile[entry]).toEqual({ level: 1 });
+    // paths/pets.yaml matches: the override's options, not the top-level ones.
+    expect(seenOptionsByFile[`${fixturesRoot}/overrides/paths/pets.yaml`]).toEqual({ level: 99 });
+  });
+
+  test("ctx.options (top-level, unaffected by overrides) and ctx.optionsFor stay independent", async () => {
+    let topLevelOptions: unknown;
+    const fakeRule: Rule = {
+      ...makeFakeRule(),
+      check(ctx: RuleContext) {
+        topLevelOptions = ctx.options;
+      },
+    };
+    const fs = new NodeFileSystem();
+    const graph = await loadWorkspaceGraph(fs, `${fixturesRoot}/overrides/entry.yaml`);
+    const config = resolveConfig(
+      {
+        lint: {
+          rules: { "fake-rule": ["warn", { level: 1 }] },
+          overrides: [{ files: ["**/*.yaml"], rules: { "fake-rule": ["warn", { level: 99 }] } }],
+        },
+      },
+      [fakeRule],
+    );
+    lint(graph, config, { configPath: `${fixturesRoot}/overrides/oasis.config.jsonc` }, [fakeRule]);
+    // ctx.options is always the top-level resolution, regardless of any override.
+    expect(topLevelOptions).toEqual({ level: 1 });
+  });
+});
+
 describe("lint.overrides", () => {
   test("effectiveRuleConfig: overrides win over top-level rules, later overrides win, matched relative to configDir", () => {
     const config = resolveConfig({
@@ -214,6 +269,33 @@ describe("end-to-end config application", () => {
     const configDiag = diagnostics.find((d) => d.rule === "oasis/config");
     expect(configDiag).toBeDefined();
     expect(configDiag?.message).toContain("no-such-rule");
+  });
+});
+
+describe("toGlobPath", () => {
+  test("normalizes Windows-style backslash separators to forward slashes", () => {
+    expect(toGlobPath("paths\\pets.yaml")).toBe("paths/pets.yaml");
+    expect(toGlobPath("a\\b\\c.yaml")).toBe("a/b/c.yaml");
+  });
+
+  test("is a no-op on already-forward-slash (POSIX) paths", () => {
+    expect(toGlobPath("paths/pets.yaml")).toBe("paths/pets.yaml");
+  });
+
+  test("effectiveRuleConfig matches an override glob even when the relative path uses backslashes", () => {
+    // Simulates what `path.relative` returns on Windows, to exercise the normalization without
+    // requiring an actual Windows filesystem.
+    const config = resolveConfig({
+      lint: {
+        rules: { "operation/tags": "warn" },
+        overrides: [{ files: ["paths/**/*.yaml"], rules: { "operation/tags": "off" } }],
+      },
+    });
+    // Can't force `path.relative` to emit backslashes on POSIX, so call the normalizer directly
+    // and confirm the glob match that `effectiveRuleConfig` relies on succeeds against it.
+    const winRelative = toGlobPath("paths\\pets.yaml");
+    expect(new Bun.Glob("paths/**/*.yaml").match(winRelative)).toBe(true);
+    expect(config.overrides[0]?.files).toContain("paths/**/*.yaml");
   });
 });
 

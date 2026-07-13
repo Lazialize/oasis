@@ -5,6 +5,7 @@ import { scanWorkspaceRootsForProjects } from "../src/project.ts";
 import { createServerContext } from "../src/workspace.ts";
 import { positionOf } from "./helpers.ts";
 import { ENTRY_PATH, ENTRY_TEXT, FRAGMENT_PATH, FRAGMENT_TEXT, ROOT, refsFixtureFiles } from "./refs-fixtures.ts";
+import { ENTRY_A_PATH, ENTRY_B_PATH, ROOT as MULTI_ROOT, SHARED_PATH, SHARED_TEXT, multiEntryFiles } from "./multi-entry-fixtures.ts";
 
 async function contextWithProject() {
   const ctx = createServerContext(new InMemoryFileSystem(refsFixtureFiles()));
@@ -92,5 +93,33 @@ describe("getReferences", () => {
     const results = await getReferences(ctx, { path: FRAGMENT_PATH, position, includeDeclaration: false });
 
     expect(results).toEqual([]);
+  });
+});
+
+describe("getReferences across multiple project entries", () => {
+  async function multiEntryContext() {
+    const ctx = createServerContext(new InMemoryFileSystem(multiEntryFiles()));
+    await scanWorkspaceRootsForProjects(ctx, [MULTI_ROOT]);
+    return ctx;
+  }
+
+  test("finds $ref locations across BOTH entry graphs, not just the first owning graph", async () => {
+    const ctx = await multiEntryContext();
+    const position = positionOf(SHARED_TEXT, "Pet:");
+
+    const results = await getReferences(ctx, { path: SHARED_PATH, position, includeDeclaration: false });
+
+    const files = results.map((r) => r.filePath).sort();
+    expect(files).toEqual([ENTRY_A_PATH, ENTRY_B_PATH].sort());
+  });
+
+  test("includeDeclaration adds the shared definition site exactly once", async () => {
+    const ctx = await multiEntryContext();
+    const position = positionOf(SHARED_TEXT, "Pet:");
+
+    const results = await getReferences(ctx, { path: SHARED_PATH, position, includeDeclaration: true });
+
+    expect(results.filter((r) => r.filePath === SHARED_PATH)).toHaveLength(1);
+    expect(results).toHaveLength(3);
   });
 });

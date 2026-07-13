@@ -10,6 +10,16 @@ import { scanWorkspaceRootsForProjects } from "../src/project.ts";
 import { createServerContext } from "../src/workspace.ts";
 import { positionOf } from "./helpers.ts";
 import { ENTRY_PATH, ENTRY_TEXT, FRAGMENT_PATH, FRAGMENT_TEXT, ROOT, refsFixtureFiles } from "./refs-fixtures.ts";
+import {
+  ENTRY_A_PATH,
+  ENTRY_A_TEXT,
+  ENTRY_B_PATH,
+  ENTRY_B_TEXT,
+  ROOT as MULTI_ROOT,
+  SHARED_PATH,
+  SHARED_TEXT,
+  multiEntryFiles,
+} from "./multi-entry-fixtures.ts";
 
 async function contextWithProject() {
   const ctx = createServerContext(new InMemoryFileSystem(refsFixtureFiles()));
@@ -207,5 +217,34 @@ components:
       expect(edit.newText).toBe("PetV2");
       expect(textAt(overlayText, edit.range)).toBe("Pet");
     }
+  });
+});
+
+describe("renameComponent across multiple project entries", () => {
+  async function multiEntryContext() {
+    const ctx = createServerContext(new InMemoryFileSystem(multiEntryFiles()));
+    await scanWorkspaceRootsForProjects(ctx, [MULTI_ROOT]);
+    return ctx;
+  }
+
+  test("a component in a file $ref'd by two entries: rename rewrites the $ref in BOTH entry docs", async () => {
+    const ctx = await multiEntryContext();
+    const position = positionOf(SHARED_TEXT, "Pet:");
+
+    const edits = await renameComponent(ctx, { path: SHARED_PATH, position, newName: "PetV2" });
+
+    expect(edits).toBeDefined();
+    for (const edit of edits!) expect(edit.newText).toBe("PetV2");
+
+    const files = new Set(edits!.map((e) => e.filePath));
+    // The definition (shared.yaml) plus the referencing $ref in each of the two entries.
+    expect(files).toEqual(new Set([SHARED_PATH, ENTRY_A_PATH, ENTRY_B_PATH]));
+    expect(edits!.filter((e) => e.filePath === ENTRY_A_PATH)).toHaveLength(1);
+    expect(edits!.filter((e) => e.filePath === ENTRY_B_PATH)).toHaveLength(1);
+    // The shared file, reachable from both graphs, is still edited exactly once (deduped).
+    expect(edits!.filter((e) => e.filePath === SHARED_PATH)).toHaveLength(1);
+
+    expect(textAt(ENTRY_A_TEXT, edits!.find((e) => e.filePath === ENTRY_A_PATH)!.range)).toBe("Pet");
+    expect(textAt(ENTRY_B_TEXT, edits!.find((e) => e.filePath === ENTRY_B_PATH)!.range)).toBe("Pet");
   });
 });

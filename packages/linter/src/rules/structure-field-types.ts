@@ -2,7 +2,7 @@ import { isMap, isNode, isScalar, isSeq } from "yaml";
 import type { Node } from "yaml";
 import { COMPONENT_SECTIONS } from "@oasis/core";
 import type { OasisDocument } from "@oasis/core";
-import { HTTP_METHODS } from "../openapi-walk.ts";
+import { iterateOperations, iteratePathItems } from "../openapi-walk.ts";
 import { childAt, isRefObject, keyToString } from "../util.ts";
 import type { Rule, RuleContext } from "../types.ts";
 
@@ -41,21 +41,35 @@ export const structureFieldTypes: Rule = {
     checkObjectField(ctx, doc, root, "security", "an array", isSeq);
 
     const paths = childAt(root, "paths");
-    if (paths) {
-      if (!isMap(paths)) {
-        reportWrongType(ctx, doc, paths, "paths", "an object");
-      } else {
-        for (const pair of paths.items) {
-          const template = keyToString(pair.key);
-          if (!isNode(pair.value)) continue;
-          const pathItem = pair.value;
-          if (!isMap(pathItem)) {
-            reportWrongType(ctx, doc, pathItem, `paths.${template}`, "an object");
-            continue;
-          }
-          if (!isRefObject(pathItem)) checkPathItem(ctx, doc, pathItem, template);
-        }
+    if (paths && !isMap(paths)) {
+      reportWrongType(ctx, doc, paths, "paths", "an object");
+    }
+
+    const webhooks = childAt(root, "webhooks");
+    if (webhooks && !isMap(webhooks)) {
+      reportWrongType(ctx, doc, webhooks, "webhooks", "an object");
+    }
+
+    for (const pathItem of iteratePathItems(ctx.graph, ctx.entryDoc, ctx.version)) {
+      const label = pathItem.origin === "webhooks" ? pathItem.template : `paths.${pathItem.template}`;
+      if (!isMap(pathItem.node)) {
+        reportWrongType(ctx, pathItem.doc, pathItem.node, label, "an object");
+        continue;
       }
+      const parameters = childAt(pathItem.node, "parameters");
+      if (parameters && !isSeq(parameters)) {
+        reportWrongType(ctx, pathItem.doc, parameters, `${label}.parameters`, "an array");
+      }
+    }
+
+    for (const op of iterateOperations(ctx.graph, ctx.entryDoc, ctx.version)) {
+      const pathLabel = op.pathItem.origin === "webhooks" ? op.pathItem.template : `paths.${op.pathItem.template}`;
+      const fieldPath = `${pathLabel}.${op.method}`;
+      if (!isMap(op.node)) {
+        reportWrongType(ctx, op.doc, op.node, fieldPath, "an object");
+        continue;
+      }
+      checkOperation(ctx, op.doc, op.node, fieldPath);
     }
 
     const components = childAt(root, "components");
@@ -73,25 +87,6 @@ export const structureFieldTypes: Rule = {
     }
   },
 };
-
-function checkPathItem(ctx: RuleContext, doc: OasisDocument, pathItem: Node, template: string): void {
-  if (!isMap(pathItem)) return;
-
-  const parameters = childAt(pathItem, "parameters");
-  if (parameters && !isSeq(parameters)) {
-    reportWrongType(ctx, doc, parameters, `paths.${template}.parameters`, "an array");
-  }
-
-  for (const method of HTTP_METHODS) {
-    const opNode = childAt(pathItem, method);
-    if (!opNode) continue;
-    if (!isMap(opNode)) {
-      reportWrongType(ctx, doc, opNode, `paths.${template}.${method}`, "an object");
-      continue;
-    }
-    checkOperation(ctx, doc, opNode, `paths.${template}.${method}`);
-  }
-}
 
 function checkOperation(ctx: RuleContext, doc: OasisDocument, op: Node, fieldPath: string): void {
   if (!isMap(op)) return;

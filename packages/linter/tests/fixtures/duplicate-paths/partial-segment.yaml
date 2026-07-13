@@ -1,0 +1,33 @@
+openapi: 3.0.3
+info:
+  title: T
+  version: "1.0.0"
+paths:
+  /files/report-{id}.json:
+    get:
+      operationId: getReportById
+      tags: [a]
+      description: x
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+  /files/report-{docId}.json:
+    get:
+      operationId: getReportByDocId
+      tags: [a]
+      description: x
+      parameters:
+        - name: docId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK

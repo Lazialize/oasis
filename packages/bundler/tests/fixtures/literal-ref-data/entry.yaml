@@ -1,0 +1,22 @@
+openapi: 3.0.3
+info:
+  title: Literal ref data
+  version: "1.0.0"
+paths:
+  /widgets:
+    get:
+      operationId: getWidget
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                example:
+                  $ref: './does-not-exist.yaml'
+                default:
+                  $ref: './also-missing.yaml'
+                enum:
+                  - $ref: './enum-missing.yaml'
+                  - plain

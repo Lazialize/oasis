@@ -144,4 +144,85 @@ describe("bundle", () => {
     expect(result.output).toContain("listWidgets");
     await assertSelfContained(result.output);
   });
+
+  test("path item $ref siblings (summary/description) are preserved, both resolved and unresolved", async () => {
+    const graph = await loadFixture("pathitem-siblings");
+    const result = bundle(graph);
+    // Resolved case: target is inlined, and the sibling summary/description override it.
+    expect(result.output).toContain("listWidgets");
+    expect(result.output).toContain("Widgets summary override");
+    expect(result.output).toContain("Widgets description override");
+    // Unresolved case: $ref preserved verbatim, but its sibling isn't dropped either.
+    expect(result.output).toContain("./does-not-exist.yaml");
+    expect(result.output).toContain("Missing path summary");
+  });
+
+  test("$ref-as-literal-data (example/default/enum) is copied through unchanged, not lifted or rewritten", async () => {
+    const graph = await loadFixture("literal-ref-data");
+    const result = bundle(graph);
+    expect(result.diagnostics).toEqual([]);
+    // The literal $ref-shaped data must survive verbatim; it must not be treated as a real
+    // reference (no lifting into components, no rewriting, no unresolved-ref diagnostic).
+    expect(result.output).toContain("./does-not-exist.yaml");
+    expect(result.output).toContain("./also-missing.yaml");
+    expect(result.output).toContain("./enum-missing.yaml");
+    expect(result.output).not.toContain("components:");
+  });
+
+  test("container entries named like literal keywords (responses.default, examples map, a property named `default`) are real refs and are lifted", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": [
+        "openapi: 3.0.3",
+        'info: { title: t, version: "1.0.0" }',
+        "paths:",
+        "  /pets:",
+        "    get:",
+        "      operationId: getPets",
+        "      responses:",
+        "        '200':",
+        "          description: ok",
+        "          content:",
+        "            application/json:",
+        "              schema:",
+        "                type: object",
+        "                properties:",
+        // A schema property literally named `default` is a Schema Object with a real $ref.
+        "                  default:",
+        "                    $ref: './ext.yaml#/Fallback'",
+        "              examples:",
+        // Map-form `examples`: entry names are user-chosen, incl. `default`/`example`.
+        "                default:",
+        "                  $ref: './ext.yaml#/PetExample'",
+        "                example:",
+        "                  $ref: './ext.yaml#/OtherExample'",
+        // The default Response Object is a real Reference Object.
+        "        default:",
+        "          $ref: './ext.yaml#/NotFound'",
+        "",
+      ].join("\n"),
+      "/virtual/ext.yaml": [
+        "Fallback:",
+        "  type: string",
+        "PetExample:",
+        "  value: { id: 1 }",
+        "OtherExample:",
+        "  value: { id: 2 }",
+        "NotFound:",
+        "  description: not found",
+        "",
+      ].join("\n"),
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const result = bundle(graph);
+
+    expect(result.diagnostics).toEqual([]);
+    // All four external targets were treated as references and lifted (not copied verbatim, not
+    // left dangling as external refs).
+    expect(result.output).not.toContain("ext.yaml");
+    expect(result.output).toContain("Fallback");
+    expect(result.output).toContain("PetExample");
+    expect(result.output).toContain("OtherExample");
+    expect(result.output).toContain("NotFound");
+    await assertSelfContained(result.output);
+  });
 });

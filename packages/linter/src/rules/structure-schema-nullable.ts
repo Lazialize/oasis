@@ -1,44 +1,11 @@
 import { isMap, isNode, isScalar, isSeq } from "yaml";
 import type { Node } from "yaml";
 import type { OasisDocument } from "@oasis/core";
-import { iterateSchemas } from "../openapi-walk.ts";
+import { iterateSchemas, walkSchemaTree } from "../openapi-walk.ts";
 import { childAt } from "../util.ts";
 import type { Rule, RuleContext } from "../types.ts";
 
 const VALID_TYPES = new Set(["string", "number", "integer", "boolean", "array", "object", "null"]);
-
-/**
- * Recursively visits schema-shaped nodes reachable from `node` via properties/items/allOf/oneOf/
- * anyOf/additionalProperties, guarding against revisits (shared refs are not followed here; only
- * the literal nesting within a single schema tree).
- */
-function walkSchemas(node: Node, visit: (schema: Node) => void, seen: Set<Node> = new Set()): void {
-  if (!isMap(node) || seen.has(node)) return;
-  seen.add(node);
-  visit(node);
-
-  const properties = childAt(node, "properties");
-  if (isMap(properties)) {
-    for (const pair of properties.items) {
-      if (isNode(pair.value)) walkSchemas(pair.value, visit, seen);
-    }
-  }
-
-  const items = childAt(node, "items");
-  if (isNode(items)) walkSchemas(items, visit, seen);
-
-  const additionalProperties = childAt(node, "additionalProperties");
-  if (isNode(additionalProperties)) walkSchemas(additionalProperties, visit, seen);
-
-  for (const key of ["allOf", "oneOf", "anyOf"]) {
-    const seq = childAt(node, key);
-    if (isSeq(seq)) {
-      for (const item of seq.items) {
-        if (isNode(item)) walkSchemas(item, visit, seen);
-      }
-    }
-  }
-}
 
 function checkSchema(ctx: RuleContext, doc: OasisDocument, schema: Node): void {
   if (!isMap(schema)) return;
@@ -77,7 +44,7 @@ export const structureSchemaNullable: Rule = {
 
     const seen = new Set<Node>();
     for (const site of iterateSchemas(ctx.graph, ctx.entryDoc, ctx.documents, ctx.version)) {
-      walkSchemas(site.node, (schema) => checkSchema(ctx, site.doc, schema), seen);
+      walkSchemaTree(site.node, (schema) => checkSchema(ctx, site.doc, schema), {}, seen);
     }
   },
 };

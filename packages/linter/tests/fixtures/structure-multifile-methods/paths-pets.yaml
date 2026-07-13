@@ -1,0 +1,12 @@
+PetsPath:
+  fetch:
+    operationId: listPets
+    responses:
+      '200':
+        description: OK
+  post:
+    operationId: createPet
+    tags: notanarray
+    responses:
+      '200':
+        description: OK

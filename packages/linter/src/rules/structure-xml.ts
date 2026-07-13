@@ -1,45 +1,13 @@
-import { isMap, isNode, isScalar, isSeq } from "yaml";
+import { isMap, isNode, isScalar } from "yaml";
 import type { Node } from "yaml";
 import type { OasisDocument } from "@oasis/core";
-import { iterateSchemas } from "../openapi-walk.ts";
+import { iterateSchemas, walkSchemaTree } from "../openapi-walk.ts";
 import { childAt, keyToString } from "../util.ts";
 import type { Rule, RuleContext } from "../types.ts";
 
 const ALLOWED_KEYS = new Set(["name", "namespace", "prefix", "attribute", "wrapped"]);
 /** A pragmatic "clearly not an absolute URI" check: requires a `scheme:` prefix. */
 const ABSOLUTE_URI = /^[a-zA-Z][a-zA-Z\d+\-.]*:\S*$/;
-
-/**
- * Recursively visits schema-shaped nodes reachable from `node` via properties/items/allOf/oneOf/
- * anyOf/additionalProperties (mirrors `structure/schema-nullable`'s walk).
- */
-function walkSchemas(node: Node, visit: (schema: Node) => void, seen: Set<Node> = new Set()): void {
-  if (!isMap(node) || seen.has(node)) return;
-  seen.add(node);
-  visit(node);
-
-  const properties = childAt(node, "properties");
-  if (isMap(properties)) {
-    for (const pair of properties.items) {
-      if (isNode(pair.value)) walkSchemas(pair.value, visit, seen);
-    }
-  }
-
-  const items = childAt(node, "items");
-  if (isNode(items)) walkSchemas(items, visit, seen);
-
-  const additionalProperties = childAt(node, "additionalProperties");
-  if (isNode(additionalProperties)) walkSchemas(additionalProperties, visit, seen);
-
-  for (const key of ["allOf", "oneOf", "anyOf"]) {
-    const seq = childAt(node, key);
-    if (isSeq(seq)) {
-      for (const item of seq.items) {
-        if (isNode(item)) walkSchemas(item, visit, seen);
-      }
-    }
-  }
-}
 
 function checkXml(ctx: RuleContext, doc: OasisDocument, xmlNode: Node): void {
   if (!isMap(xmlNode)) {
@@ -91,12 +59,13 @@ export const structureXml: Rule = {
   check(ctx) {
     const seen = new Set<Node>();
     for (const site of iterateSchemas(ctx.graph, ctx.entryDoc, ctx.documents, ctx.version)) {
-      walkSchemas(
+      walkSchemaTree(
         site.node,
         (schema) => {
           const xmlNode = childAt(schema, "xml");
           if (xmlNode) checkXml(ctx, site.doc, xmlNode);
         },
+        {},
         seen,
       );
     }

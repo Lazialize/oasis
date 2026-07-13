@@ -1,8 +1,8 @@
-import { LineCounter, isMap, isNode, isSeq, parseDocument as yamlParseDocument } from "yaml";
+import { LineCounter, isMap, isNode, parseDocument as yamlParseDocument } from "yaml";
 import type { Document as YamlDocument } from "yaml";
 import type { Diagnostic } from "./types.ts";
 import { rangeFromOffsets, zeroRange } from "./position.ts";
-import { keyToString } from "./walk.ts";
+import { keyToString, walkNodes } from "./walk.ts";
 
 export interface OasisDocument {
   /** Absolute path (or synthetic URI) identifying this document. */
@@ -61,35 +61,30 @@ export function parseDocument(text: string, filePath: string): OasisDocument {
 function detectDuplicateKeys(yamlDoc: YamlDocument.Parsed, filePath: string, lineCounter: LineCounter): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   const root = yamlDoc.contents;
-  if (isNode(root)) walk(root);
-  return diagnostics;
+  if (!isNode(root)) return diagnostics;
 
-  function walk(node: unknown): void {
-    if (isMap(node)) {
-      const seen = new Set<string>();
-      for (const pair of node.items) {
-        const keyStr = keyToString(pair.key);
-        if (seen.has(keyStr)) {
-          const keyNode = pair.key;
-          const range = isNode(keyNode) && keyNode.range
-            ? rangeFromOffsets(filePath, lineCounter, keyNode.range[0], keyNode.range[1])
-            : zeroRange(filePath);
-          diagnostics.push({
-            message: `Duplicate key "${keyStr}"`,
-            severity: "error",
-            code: "no-duplicate-keys",
-            source: "core",
-            range,
-          });
-        } else {
-          seen.add(keyStr);
-        }
-        if (isNode(pair.value)) walk(pair.value);
-      }
-    } else if (isSeq(node)) {
-      for (const item of node.items) {
-        if (isNode(item)) walk(item);
+  walkNodes(root, yamlDoc, (node) => {
+    if (!isMap(node)) return;
+    const seen = new Set<string>();
+    for (const pair of node.items) {
+      const keyStr = keyToString(pair.key);
+      if (seen.has(keyStr)) {
+        const keyNode = pair.key;
+        const range = isNode(keyNode) && keyNode.range
+          ? rangeFromOffsets(filePath, lineCounter, keyNode.range[0], keyNode.range[1])
+          : zeroRange(filePath);
+        diagnostics.push({
+          message: `Duplicate key "${keyStr}"`,
+          severity: "error",
+          code: "no-duplicate-keys",
+          source: "core",
+          range,
+        });
+      } else {
+        seen.add(keyStr);
       }
     }
-  }
+  });
+
+  return diagnostics;
 }

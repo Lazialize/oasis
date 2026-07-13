@@ -1,6 +1,6 @@
 import { looksLikeOpenApi } from "./openapi-guard.ts";
 import { discoverProjectUpward, isConfigFilePath } from "./project.ts";
-import { findOwningEntry } from "./workspace.ts";
+import { findEntriesLastContaining, findOwningEntry } from "./workspace.ts";
 import type { ServerContext } from "./workspace.ts";
 
 export type DocumentRoute =
@@ -10,8 +10,14 @@ export type DocumentRoute =
   | { kind: "project-member"; entryPath: string }
   /** Not a project member, but looks like its own OpenAPI document: today's standalone behavior. */
   | { kind: "standalone"; entryPath: string }
-  /** Not a project member and doesn't look like OpenAPI: no diagnostics, left alone. */
-  | { kind: "ignored" };
+  /**
+   * Not a project member and doesn't look like OpenAPI: no diagnostics of its own. When it's
+   * nonetheless a `$ref`'d fragment of one or more currently-open standalone entries (per
+   * `findEntriesLastContaining`), those entries are listed so the caller can re-validate them —
+   * otherwise their published diagnostics would go stale until the entry document itself is next
+   * edited (the entry's graph cache was already invalidated for this same file change).
+   */
+  | { kind: "ignored"; dependentStandaloneEntries?: string[] };
 
 /**
  * Decide how a document at `path` (with current content `text`) should be handled. Mirrors the
@@ -40,7 +46,8 @@ export async function routeDocument(ctx: ServerContext, path: string, text: stri
 
   if (!looksLikeOpenApi(text)) {
     ctx.openStandaloneEntries.delete(path);
-    return { kind: "ignored" };
+    const dependentStandaloneEntries = findEntriesLastContaining(ctx, path, ctx.openStandaloneEntries);
+    return dependentStandaloneEntries.length > 0 ? { kind: "ignored", dependentStandaloneEntries } : { kind: "ignored" };
   }
 
   ctx.openStandaloneEntries.add(path);

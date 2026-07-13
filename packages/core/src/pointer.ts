@@ -8,12 +8,32 @@ export function unescapePointerSegment(segment: string): string {
   return segment.replace(/~1/g, "/").replace(/~0/g, "~");
 }
 
-/** Split a JSON Pointer string (e.g. "/paths/~1users/get") into unescaped segments. */
+/**
+ * `decodeURIComponent`, but tolerant of malformed percent-encoding (e.g. a lone trailing `%`):
+ * a `$ref` fragment is user-authored text, and a bad escape must never crash resolution — it's
+ * treated as literal text instead (consistent with how callers turn a bad ref into a diagnostic
+ * rather than an exception).
+ */
+export function safeDecodeURIComponent(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
+/**
+ * Split a JSON Pointer string (e.g. "/paths/~1users/get") into unescaped segments. When a pointer
+ * comes from a `$ref` fragment (a URI-reference), each segment may additionally be percent-encoded
+ * per URI syntax; per RFC 6901 §6 that percent-encoding is undone *before* the `~1`/`~0` JSON
+ * Pointer escaping (percent-encoding is a URI-level concern, layered on top of the pointer's own
+ * escaping). Segments that are never URI-encoded (the common case) round-trip unchanged.
+ */
 export function parsePointer(pointer: string): string[] {
   if (pointer === "") return [];
   const raw = pointer.startsWith("/") ? pointer.slice(1) : pointer;
   if (raw === "") return [""];
-  return raw.split("/").map(unescapePointerSegment);
+  return raw.split("/").map((seg) => unescapePointerSegment(safeDecodeURIComponent(seg)));
 }
 
 /** Join unescaped segments back into a JSON Pointer string. */

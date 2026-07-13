@@ -1,7 +1,7 @@
 import { isMap, isNode, isScalar, isSeq } from "yaml";
 import type { Node } from "yaml";
 import type { OasisDocument } from "@oasis/core";
-import { iterateSchemas } from "../openapi-walk.ts";
+import { iterateSchemas, walkSchemaTree } from "../openapi-walk.ts";
 import { childAt, isRefObject, keyToString } from "../util.ts";
 import type { Rule, RuleContext } from "../types.ts";
 
@@ -54,71 +54,6 @@ function numberValue(node: Node | undefined): number | undefined {
 
 function stringValue(node: Node | undefined): string | undefined {
   return node && isScalar(node) && typeof node.value === "string" ? (node.value as string) : undefined;
-}
-
-/**
- * Recursively visits schema-shaped nodes reachable from `node` via the JSON Schema applicators:
- * properties/items/(3.1) prefixItems/allOf/oneOf/anyOf/not/additionalProperties/(3.1)
- * patternProperties/(3.1) if/then/else/(3.1) $defs. Mirrors the walk in `structure/discriminator`;
- * `$ref`s are not followed for discovery (a $ref'd schema is visited at its own definition site).
- */
-function walkSchemas(version: RuleContext["version"], node: Node, visit: (schema: Node) => void, seen: Set<Node> = new Set()): void {
-  if (!isMap(node) || seen.has(node)) return;
-  seen.add(node);
-  visit(node);
-
-  const properties = childAt(node, "properties");
-  if (isMap(properties)) {
-    for (const pair of properties.items) {
-      if (isNode(pair.value)) walkSchemas(version, pair.value, visit, seen);
-    }
-  }
-
-  const items = childAt(node, "items");
-  if (isNode(items) && isMap(items)) walkSchemas(version, items, visit, seen);
-
-  const additionalProperties = childAt(node, "additionalProperties");
-  if (isNode(additionalProperties) && isMap(additionalProperties)) walkSchemas(version, additionalProperties, visit, seen);
-
-  const notNode = childAt(node, "not");
-  if (isNode(notNode) && isMap(notNode)) walkSchemas(version, notNode, visit, seen);
-
-  for (const key of ["allOf", "oneOf", "anyOf"]) {
-    const seq = childAt(node, key);
-    if (isSeq(seq)) {
-      for (const item of seq.items) {
-        if (isNode(item)) walkSchemas(version, item, visit, seen);
-      }
-    }
-  }
-
-  if (version === "3.1") {
-    const prefixItems = childAt(node, "prefixItems");
-    if (isSeq(prefixItems)) {
-      for (const item of prefixItems.items) {
-        if (isNode(item)) walkSchemas(version, item, visit, seen);
-      }
-    }
-
-    const patternProperties = childAt(node, "patternProperties");
-    if (isMap(patternProperties)) {
-      for (const pair of patternProperties.items) {
-        if (isNode(pair.value)) walkSchemas(version, pair.value, visit, seen);
-      }
-    }
-
-    for (const key of ["if", "then", "else"]) {
-      const branch = childAt(node, key);
-      if (isNode(branch) && isMap(branch)) walkSchemas(version, branch, visit, seen);
-    }
-
-    const defs = childAt(node, "$defs");
-    if (isMap(defs)) {
-      for (const pair of defs.items) {
-        if (isNode(pair.value)) walkSchemas(version, pair.value, visit, seen);
-      }
-    }
-  }
 }
 
 function checkVersionOnlyKeywords(ctx: RuleContext, doc: OasisDocument, schema: Node): void {
@@ -363,7 +298,12 @@ export const structureSchemaKeywords: Rule = {
 
     const seen = new Set<Node>();
     for (const site of iterateSchemas(ctx.graph, ctx.entryDoc, ctx.documents, ctx.version)) {
-      walkSchemas(ctx.version, site.node, (schema) => checkSchema(ctx, site.doc, schema), seen);
+      walkSchemaTree(
+        site.node,
+        (schema) => checkSchema(ctx, site.doc, schema),
+        { version: ctx.version, prefixItems: true, patternProperties: true, not: true, ifThenElse: true, defs: true },
+        seen,
+      );
     }
   },
 };

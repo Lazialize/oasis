@@ -4,7 +4,7 @@ import type { Range } from "@oasis/core";
 import { DiagnosticSeverity } from "vscode-languageserver";
 import type { Diagnostic as LspDiagnostic } from "vscode-languageserver";
 import { resolveConfigForEntry } from "./project.ts";
-import { getGraph } from "./workspace.ts";
+import { collectExternalDocuments, getGraph } from "./workspace.ts";
 import type { ServerContext } from "./workspace.ts";
 
 const SEVERITY_MAP: Record<LintDiagnosticSeverity, DiagnosticSeverity> = {
@@ -43,7 +43,12 @@ export async function getDiagnosticsByFile(ctx: ServerContext, entryPath: string
   const loaded = await resolveConfigForEntry(ctx, entryPath);
   const resolved = resolveConfig(loaded.configFile);
 
-  const diagnostics = lint(graph, resolved, { configPath: loaded.configPath });
+  // Documents reachable from sibling entries (in this or any other loaded project) so that
+  // whole-workspace rules like `components/no-unused` don't flag a shared component that only a
+  // sibling entry uses. Empty outside project mode / when nothing else is loaded, keeping the
+  // single-graph lint identical to the CLI's.
+  const externalDocuments = await collectExternalDocuments(ctx, graph);
+  const diagnostics = lint(graph, resolved, { configPath: loaded.configPath, externalDocuments });
 
   const byFile = new Map<string, LspDiagnostic[]>();
   for (const path of graph.documents.keys()) byFile.set(path, []);

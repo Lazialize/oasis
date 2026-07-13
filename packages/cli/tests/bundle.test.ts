@@ -109,6 +109,12 @@ describe("oasis bundle CLI", () => {
     expect(result.exitCode).toBe(2);
   });
 
+  test("exits 2 when --format has no value", async () => {
+    const result = await runCli(["bundle", `${fixturesRoot}/bundle/entry.yaml`, "--format"]);
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("requires a value");
+  });
+
   test("exits 2 when the entry document fails to load/parse", async () => {
     const result = await runCli(["bundle", `${fixturesRoot}/does-not-exist.yaml`]);
     expect(result.exitCode).toBe(2);

@@ -178,6 +178,87 @@ components:
   });
 });
 
+describe("style/naming-convention rule + lint.overrides", () => {
+  // Repro for the bug where `lint.overrides` only ever applied the overridden *severity*, never the
+  // overridden *options*: top-level `operationId: camelCase`, with an override for `legacy/**/*.yaml`
+  // switching it to `snake_case`. Each file's operationId matches its own applicable style; only
+  // violations of the *effective* (per-file) style should be reported.
+  const mem = new InMemoryFileSystem({
+    "/virtual/entry.yaml": `
+openapi: 3.0.3
+info:
+  title: Overrides Options
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      operationId: list_pets
+      responses:
+        '200':
+          description: OK
+  /legacy:
+    $ref: './legacy/openapi.yaml#/LegacyPath'
+`,
+    "/virtual/legacy/openapi.yaml": `
+LegacyPath:
+  get:
+    operationId: list_pets
+    responses:
+      '200':
+        description: OK
+`,
+  });
+
+  async function lintOverrideFixture() {
+    const graph = await loadWorkspaceGraph(mem, "/virtual/entry.yaml");
+    const config = resolveConfig(
+      {
+        lint: {
+          rules: { "style/naming-convention": ["warn", { operationId: "camelCase" }] },
+          overrides: [{ files: ["legacy/**/*.yaml"], rules: { "style/naming-convention": ["warn", { operationId: "snake_case" }] } }],
+        },
+      },
+      ruleList,
+    );
+    return lint(graph, config, { configPath: "/virtual/oasis.config.jsonc" }, ruleList);
+  }
+
+  test("the override's operationId option (snake_case), not the top-level one (camelCase), applies to legacy/**", async () => {
+    const diagnostics = await lintOverrideFixture();
+    const namingDiags = diagnostics.filter((d) => d.rule === "style/naming-convention");
+    // entry.yaml's "list_pets" violates the top-level camelCase option.
+    expect(namingDiags.length).toBe(1);
+    expect(namingDiags[0]?.range.filePath).toBe("/virtual/entry.yaml");
+    expect(namingDiags[0]?.message).toContain('operationId "list_pets" is not camelCase');
+    // legacy/openapi.yaml's "list_pets" matches the override's snake_case option, so it's clean.
+    expect(namingDiags.some((d) => d.range.filePath === "/virtual/legacy/openapi.yaml")).toBe(false);
+  });
+
+  test("an override that doesn't mention the rule leaves its top-level options in effect on matched files", async () => {
+    // The "legacy/**" override only touches "operation/tags", not "style/naming-convention" — the
+    // naming-convention rule's top-level options (camelCase) must still apply there, unaffected.
+    const graph = await loadWorkspaceGraph(mem, "/virtual/entry.yaml");
+    const config = resolveConfig(
+      {
+        lint: {
+          rules: {
+            "style/naming-convention": ["warn", { operationId: "camelCase" }],
+          },
+          overrides: [{ files: ["legacy/**/*.yaml"], rules: { "operation/tags": "off" } }],
+        },
+      },
+      [namingConvention],
+    );
+    const diagnostics = lint(graph, config, { configPath: "/virtual/oasis.config.jsonc" }, [namingConvention]);
+    const namingDiags = diagnostics.filter((d) => d.rule === "style/naming-convention");
+    // Both files' "list_pets" now violate the (only) applicable option, top-level camelCase.
+    expect(namingDiags.length).toBe(2);
+    expect(namingDiags.map((d) => d.range.filePath).sort()).toEqual(
+      ["/virtual/entry.yaml", "/virtual/legacy/openapi.yaml"].sort(),
+    );
+  });
+});
+
 describe("style/naming-convention validateOptions", () => {
   test("accepts an empty options object", () => {
     expect(namingConvention.validateOptions?.({})).toBeUndefined();

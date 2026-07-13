@@ -86,8 +86,21 @@ ${entriesLines}
 `;
 }
 
+const INIT_HELP = `oasis init
+
+Scaffold an oasis.config.jsonc file in the current working directory.
+Automatically detects OpenAPI entry documents up to 2 levels deep.
+
+Options:
+  -h, --help             Show this help message
+`;
+
 /** `oasis init`: scaffold an `oasis.config.jsonc` in the current working directory. */
 export async function runInitCommand(args: string[], io: RunInitOptions): Promise<number> {
+  if (args.includes("-h") || args.includes("--help")) {
+    io.stdout(INIT_HELP);
+    return 0;
+  }
   if (args.length > 0) {
     io.stderr(`oasis init: unexpected argument "${args[0]}" (init takes no arguments)\n`);
     return 2;

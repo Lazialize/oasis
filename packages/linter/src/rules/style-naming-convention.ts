@@ -1,7 +1,7 @@
 import { isMap, isNode, isScalar, isSeq } from "yaml";
 import type { Node } from "yaml";
 import type { OasisDocument } from "@oasis/core";
-import { iterateOperations, iteratePathItems, iterateSchemas } from "../openapi-walk.ts";
+import { iterateOperations, iteratePathItems, iterateSchemas, walkSchemaTree } from "../openapi-walk.ts";
 import { childAt, keyToString, resolveMaybeRef } from "../util.ts";
 import type { Rule, RuleContext } from "../types.ts";
 
@@ -51,8 +51,15 @@ export function matchesCase(name: string, style: CasingStyle): boolean {
   }
 }
 
-function checkOperationIds(ctx: RuleContext, style: CasingStyle): void {
+function optionsForDoc(ctx: RuleContext, doc: OasisDocument): NamingConventionOptions {
+  return (ctx.optionsFor(doc.filePath) ?? {}) as NamingConventionOptions;
+}
+
+function checkOperationIds(ctx: RuleContext): void {
   for (const op of iterateOperations(ctx.graph, ctx.entryDoc, ctx.version)) {
+    const style = optionsForDoc(ctx, op.doc).operationId;
+    if (!style) continue;
+
     const idNode = childAt(op.node, "operationId");
     if (!idNode || !isScalar(idNode) || typeof idNode.value !== "string" || idNode.value === "") continue;
 
@@ -64,8 +71,11 @@ function checkOperationIds(ctx: RuleContext, style: CasingStyle): void {
   }
 }
 
-function checkComponentNames(ctx: RuleContext, style: CasingStyle): void {
+function checkComponentNames(ctx: RuleContext): void {
   for (const doc of ctx.documents) {
+    const style = optionsForDoc(ctx, doc).componentName;
+    if (!style) continue;
+
     const root = doc.yamlDoc.contents;
     if (!root || !isMap(root)) continue;
     const componentsNode = childAt(root, "components");
@@ -145,8 +155,11 @@ function collectParameterObjects(ctx: RuleContext): ParameterObject[] {
   return results;
 }
 
-function checkParameterNames(ctx: RuleContext, style: CasingStyle): void {
+function checkParameterNames(ctx: RuleContext): void {
   for (const param of collectParameterObjects(ctx)) {
+    const style = optionsForDoc(ctx, param.doc).parameterName;
+    if (!style) continue;
+
     // HTTP header names are conventionally kebab/mixed case and case-insensitive on the wire, so
     // "in: header" parameters are exempt from the configured style.
     const inNode = childAt(param.node, "in");
@@ -162,43 +175,15 @@ function checkParameterNames(ctx: RuleContext, style: CasingStyle): void {
   }
 }
 
-/**
- * Recursively visit schema-shaped nodes reachable from `node` via properties/items/allOf/oneOf/
- * anyOf/additionalProperties (mirrors `structure/schema-nullable`'s walk). `patternProperties`
- * (3.1) is deliberately not traversed: its keys are regexes, not property names.
- */
-function walkSchemas(node: Node, visit: (schema: Node) => void, seen: Set<Node> = new Set()): void {
-  if (!isMap(node) || seen.has(node)) return;
-  seen.add(node);
-  visit(node);
-
-  const properties = childAt(node, "properties");
-  if (isMap(properties)) {
-    for (const pair of properties.items) {
-      if (isNode(pair.value)) walkSchemas(pair.value, visit, seen);
-    }
-  }
-
-  const items = childAt(node, "items");
-  if (isNode(items)) walkSchemas(items, visit, seen);
-
-  const additionalProperties = childAt(node, "additionalProperties");
-  if (isNode(additionalProperties)) walkSchemas(additionalProperties, visit, seen);
-
-  for (const key of ["allOf", "oneOf", "anyOf"]) {
-    const seq = childAt(node, key);
-    if (isSeq(seq)) {
-      for (const item of seq.items) {
-        if (isNode(item)) walkSchemas(item, visit, seen);
-      }
-    }
-  }
-}
-
-function checkPropertyNames(ctx: RuleContext, style: CasingStyle): void {
+function checkPropertyNames(ctx: RuleContext): void {
   const seen = new Set<Node>();
   for (const site of iterateSchemas(ctx.graph, ctx.entryDoc, ctx.documents, ctx.version)) {
-    walkSchemas(
+    const style = optionsForDoc(ctx, site.doc).propertyName;
+    if (!style) continue;
+
+    // `patternProperties` (3.1) is deliberately not traversed: its keys are regexes, not property
+    // names.
+    walkSchemaTree(
       site.node,
       (schema) => {
         const properties = childAt(schema, "properties");
@@ -213,6 +198,7 @@ function checkPropertyNames(ctx: RuleContext, style: CasingStyle): void {
           }
         }
       },
+      {},
       seen,
     );
   }
@@ -242,10 +228,11 @@ export const namingConvention: Rule = {
     return undefined;
   },
   check(ctx) {
-    const options = (ctx.options ?? {}) as NamingConventionOptions;
-    if (options.operationId) checkOperationIds(ctx, options.operationId);
-    if (options.componentName) checkComponentNames(ctx, options.componentName);
-    if (options.parameterName) checkParameterNames(ctx, options.parameterName);
-    if (options.propertyName) checkPropertyNames(ctx, options.propertyName);
+    // Each check resolves its own per-file options (via `ctx.optionsFor`) since `lint.overrides`
+    // can change which casing style applies (or whether the rule applies at all) per matched file.
+    checkOperationIds(ctx);
+    checkComponentNames(ctx);
+    checkParameterNames(ctx);
+    checkPropertyNames(ctx);
   },
 };

@@ -187,6 +187,15 @@ function isRuleSeverity(value: unknown): value is RuleSeverity {
 }
 
 /**
+ * Normalize an OS-native relative path (as produced by `path.relative`, which uses backslashes on
+ * Windows) to the forward-slash form that `Bun.Glob` patterns and config `files` globs use.
+ * A no-op on POSIX, where `path.relative` already yields forward slashes.
+ */
+export function toGlobPath(relativePath: string): string {
+  return relativePath.replace(/\\/g, "/");
+}
+
+/**
  * Resolve the effective severity/options for `ruleName` at `filePath`: start from the top-level
  * `lint.rules` entry, then apply matching `lint.overrides` in declaration order (later wins).
  * `configDir` is the directory containing the config file; overrides are skipped entirely when
@@ -201,7 +210,7 @@ export function effectiveRuleConfig(
   let effective = config.rules[ruleName] ?? { severity: "off" as RuleSeverity, options: undefined };
   if (!configDir) return effective;
 
-  const relativePath = pathRelative(configDir, filePath);
+  const relativePath = toGlobPath(pathRelative(configDir, filePath));
   for (const override of config.overrides) {
     const overrideRule = override.rules[ruleName];
     if (!overrideRule) continue;

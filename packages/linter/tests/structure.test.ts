@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { loadWorkspaceGraph, NodeFileSystem } from "@oasis/core";
+import { InMemoryFileSystem, loadWorkspaceGraph, NodeFileSystem } from "@oasis/core";
 import { lint } from "../src/engine.ts";
 import { resolveConfig } from "../src/config.ts";
 
@@ -744,5 +744,72 @@ describe("structure rules across $ref'd multi-file documents", () => {
     );
     expect(exampleDiag).toBeDefined();
     expect(exampleDiag?.range.filePath).toContain("examples.yaml");
+  });
+});
+
+describe("structure/http-methods and structure/field-types across a $ref'd path item", () => {
+  test("both rules follow the path item $ref and attribute diagnostics to the target file", async () => {
+    const fs = new NodeFileSystem();
+    const entry = `${fixturesRoot}/structure-multifile-methods/entry.yaml`;
+    const graph = await loadWorkspaceGraph(fs, entry);
+    const config = resolveConfig(undefined);
+    const diagnostics = lint(graph, config);
+
+    const methodDiag = diagnostics.find((d) => d.rule === "structure/http-methods" && d.message.includes("fetch"));
+    expect(methodDiag).toBeDefined();
+    expect(methodDiag?.range.filePath).toContain("paths-pets.yaml");
+
+    const fieldTypeDiag = diagnostics.find((d) => d.rule === "structure/field-types" && d.message.includes("tags"));
+    expect(fieldTypeDiag).toBeDefined();
+    expect(fieldTypeDiag?.range.filePath).toContain("paths-pets.yaml");
+  });
+});
+
+describe("structure/http-methods and structure/field-types on 3.1 webhooks", () => {
+  test("structure/http-methods flags an invalid key under a webhook path item", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": `
+openapi: 3.1.0
+info:
+  title: Webhooks
+  version: "1.0.0"
+paths: {}
+webhooks:
+  newPet:
+    fetch:
+      operationId: onNewPet
+      responses:
+        '200':
+          description: OK
+`,
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    const d = diagnostics.find((d) => d.rule === "structure/http-methods" && d.message.includes("fetch"));
+    expect(d).toBeDefined();
+  });
+
+  test("structure/field-types flags a wrong-typed field on a webhook operation", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": `
+openapi: 3.1.0
+info:
+  title: Webhooks
+  version: "1.0.0"
+paths: {}
+webhooks:
+  newPet:
+    post:
+      operationId: onNewPet
+      tags: notanarray
+      responses:
+        '200':
+          description: OK
+`,
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    const d = diagnostics.find((d) => d.rule === "structure/field-types" && d.message.includes("tags"));
+    expect(d).toBeDefined();
   });
 });

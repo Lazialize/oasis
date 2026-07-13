@@ -1,4 +1,4 @@
-import { isMap, isNode, isScalar, isSeq, stringify as yamlStringify } from "yaml";
+import { isAlias, isMap, isNode, isScalar, isSeq, stringify as yamlStringify } from "yaml";
 import type { Node, Pair, Scalar } from "yaml";
 import {
   COMPONENT_SECTIONS,
@@ -46,6 +46,10 @@ function rangeOfScalar(doc: OasisDocument, scalar: Scalar): Range {
   return scalar.range ? rangeFromOffsets(doc.filePath, doc.lineCounter, scalar.range[0], scalar.range[1]) : zeroRange(doc.filePath);
 }
 
+function rangeOfNode(doc: OasisDocument, node: Node): Range {
+  return node.range ? rangeFromOffsets(doc.filePath, doc.lineCounter, node.range[0], node.range[1]) : zeroRange(doc.filePath);
+}
+
 interface BundleContext {
   graph: WorkspaceGraph;
   entryDoc: OasisDocument;
@@ -64,6 +68,8 @@ interface BundleContext {
   cycleAssignments: Map<string, { section: string; name: string }>;
   /** Identity keys of entry-document components that were reached via some `$ref` during dereferencing. */
   visitedEntryIdentities: Set<string>;
+  /** Anchor-target nodes currently being expanded, to break cyclic YAML `*alias` references. */
+  aliasStack: Set<Node>;
 }
 
 function identityKeyOf(result: ResolvedRef): string {
@@ -269,11 +275,30 @@ function convertPathItem(ctx: BundleContext, doc: OasisDocument, node: Node, dep
     const scalar = refPair.value as Scalar;
     const refValue = scalar.value as string;
     const result = resolveRefPair(ctx, doc, refPair);
-    if (!result.ok) return { $ref: refValue };
-    return convertPathItem(ctx, result.doc, result.node, depth + 1);
+    // 3.1 allows a Path Item `$ref` to carry siblings (`summary`/`description`); those override the
+    // target's own per 3.1 Reference Object semantics, same as `withSiblings`/`mergeSiblingsInto`
+    // do for non-path-item refs. Merge them in on both the resolved and unresolved branches instead
+    // of dropping them.
+    if (!result.ok) return withPathItemSiblings(ctx, doc, node, { $ref: refValue });
+    const target = convertPathItem(ctx, result.doc, result.node, depth + 1);
+    return withPathItemSiblings(ctx, doc, node, target);
   }
 
   return convertValue(ctx, doc, node, undefined);
+}
+
+/** Merge a Path Item `$ref`'s sibling keys (e.g. `summary`, `description`) onto the inlined target. */
+function withPathItemSiblings(ctx: BundleContext, doc: OasisDocument, node: Node, target: unknown): unknown {
+  if (!isMap(node)) return target;
+  const siblingPairs = node.items.filter((p) => keyToString(p.key) !== "$ref" && isNode(p.value));
+  if (siblingPairs.length === 0) return target;
+
+  const base: Record<string, unknown> =
+    typeof target === "object" && target !== null && !Array.isArray(target) ? { ...(target as Record<string, unknown>) } : {};
+  for (const pair of siblingPairs) {
+    base[keyToString(pair.key)] = convertValue(ctx, doc, pair.value as Node, undefined);
+  }
+  return base;
 }
 
 function convertPathsMap(ctx: BundleContext, doc: OasisDocument, mapNode: Node): Record<string, unknown> {
@@ -286,12 +311,58 @@ function convertPathsMap(ctx: BundleContext, doc: OasisDocument, mapNode: Node):
   return out;
 }
 
-/** Convert a YAML AST node into a plain JS value, lifting/rewriting `$ref`s as it goes. */
-function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undefined, hint: string | undefined): unknown {
+/**
+ * Keys whose value is arbitrary literal instance data (JSON Schema `example`/`default`/`enum`/
+ * `const`), where a `{"$ref": "..."}` appearing inside is plain data rather than a reference to
+ * lift/rewrite. `examples` is ambiguous by name alone: as a *sequence* it's the 3.1 JSON Schema
+ * `examples` keyword (literal instances, same as `example`), but as a *map* it's an OpenAPI Media
+ * Type/Parameter/Header `examples` field (name -> Example Object) whose entries may legitimately
+ * `$ref` into `components/examples` — so only the sequence form is treated as literal data.
+ */
+function isLiteralDataKey(key: string, value: Node): boolean {
+  if (key === "examples") return isSeq(value);
+  return key === "example" || key === "default" || key === "enum" || key === "const";
+}
+
+/**
+ * Convert a YAML AST node into a plain JS value, lifting/rewriting `$ref`s as it goes. `literal`,
+ * once set by descending under a key like `example`/`default`/`enum`/`const` (see
+ * `isLiteralDataKey`), stays set for the rest of the subtree: a `$ref`-shaped map found there is
+ * plain data, not a reference, and is copied through unchanged rather than lifted/rewritten.
+ */
+function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undefined, hint: string | undefined, literal = false): unknown {
   if (!node) return undefined;
 
+  if (isAlias(node)) {
+    const target = node.resolve(doc.yamlDoc);
+    if (!target) {
+      ctx.diagnostics.push({
+        message: `Unresolved YAML alias "*${node.source}": no matching anchor`,
+        severity: "warning",
+        code: "unresolved-alias",
+        source: "bundler",
+        range: rangeOfNode(doc, node),
+      });
+      return undefined;
+    }
+    if (ctx.aliasStack.has(target)) {
+      ctx.diagnostics.push({
+        message: `Cyclic YAML alias "*${node.source}" cannot be inlined; omitted to break the cycle`,
+        severity: "warning",
+        code: "cyclic-alias",
+        source: "bundler",
+        range: rangeOfNode(doc, node),
+      });
+      return undefined;
+    }
+    ctx.aliasStack.add(target);
+    const converted = convertValue(ctx, doc, target, hint, literal);
+    ctx.aliasStack.delete(target);
+    return converted;
+  }
+
   if (isMap(node)) {
-    const refPair = findRefPair(node);
+    const refPair = literal ? undefined : findRefPair(node);
     if (refPair) return convertRef(ctx, doc, node, refPair, hint);
 
     const out: Record<string, unknown> = {};
@@ -300,6 +371,18 @@ function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undef
       const value = pair.value;
       if (!isNode(value)) {
         out[key] = value;
+        continue;
+      }
+      if (!literal && isLiteralDataKey(key, value)) {
+        out[key] = convertValue(ctx, doc, value, hint, true);
+        continue;
+      }
+      // Once inside literal data, the structural key-hints below (which route real OpenAPI
+      // fields like "schema"/"properties"/"paths" to their ref-lifting/section logic) no longer
+      // apply — a key of that name here is just user data that happens to share it. Recurse
+      // generically, keeping the literal flag set for the rest of the subtree.
+      if (literal) {
+        out[key] = convertValue(ctx, doc, value, hint, true);
         continue;
       }
       switch (key) {
@@ -313,7 +396,10 @@ function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undef
           out[key] = convertValue(ctx, doc, value, "schemas");
           break;
         case "properties":
+        case "patternProperties":
         case "schemas":
+        case "$defs":
+        case "definitions":
           out[key] = mapChildren(ctx, doc, value, "schemas");
           break;
         case "allOf":
@@ -349,6 +435,16 @@ function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undef
         case "securitySchemes":
           out[key] = mapChildren(ctx, doc, value, "securitySchemes");
           break;
+        // Maps of user/spec-named entries (not JSON Schema keywords): route through `mapChildren`
+        // so an entry named `default`/`example`/`enum`/... is converted as a real object (and any
+        // genuine `$ref` inside it is lifted/rewritten), never mistaken for literal instance data.
+        // `hint` is passed through as the fallback lift section, matching the old default-case path.
+        case "variables":
+        case "mapping":
+        case "encoding":
+        case "scopes":
+          out[key] = mapChildren(ctx, doc, value, hint ?? "schemas");
+          break;
         default:
           out[key] = convertValue(ctx, doc, value, hint);
       }
@@ -357,7 +453,7 @@ function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undef
   }
 
   if (isSeq(node)) {
-    return node.items.filter(isNode).map((item) => convertValue(ctx, doc, item, hint));
+    return node.items.filter(isNode).map((item) => convertValue(ctx, doc, item, hint, literal));
   }
 
   if (isScalar(node)) return node.value;
@@ -392,6 +488,7 @@ export function bundle(graph: WorkspaceGraph, options: BundleOptions = {}): Bund
     expansionStack: new Set(),
     cycleAssignments: new Map(),
     visitedEntryIdentities: new Set(),
+    aliasStack: new Set(),
   };
 
   const componentsPair = root.items.find((p) => keyToString(p.key) === "components");

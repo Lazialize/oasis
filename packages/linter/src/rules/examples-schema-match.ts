@@ -1,58 +1,30 @@
 import { isMap, isNode, isScalar, isSeq } from "yaml";
 import type { Node } from "yaml";
 import type { OasisDocument } from "@oasis/core";
-import { iterateOperations, iterateSchemas } from "../openapi-walk.ts";
+import { iterateOperations, iterateSchemas, walkSchemaTree } from "../openapi-walk.ts";
 import { childAt, keyToString, resolveMaybeRef } from "../util.ts";
 import type { Rule, RuleContext } from "../types.ts";
 import { validateExample } from "./validate-example.ts";
 import type { ValidateEnv } from "./validate-example.ts";
 
 /**
- * Recursively visits schema-shaped nodes reachable from `node` via properties/items/allOf/oneOf/
- * anyOf/additionalProperties (+ 3.1 `prefixItems`), guarding against revisits. Mirrors the walk
- * in `structure/schema-nullable`; `$ref`s are not followed for discovery purposes (only literal
- * nesting), matching that rule's convention — a `$ref`'d schema's own `example` is found when its
- * `components/schemas` entry is visited directly.
+ * Visits schema-shaped nodes reachable from `node` (see `walkSchemaTree`), reporting a schema-level
+ * `example` keyword that doesn't match its own schema. `$ref`s are not followed for discovery
+ * purposes (only literal nesting), matching `structure/schema-nullable`'s convention — a `$ref`'d
+ * schema's own `example` is found when its `components/schemas` entry is visited directly.
  */
 function walkSchemasForSelfExamples(ctx: RuleContext, env: ValidateEnv, doc: OasisDocument, node: Node, seen: Set<Node>): void {
-  if (!isMap(node) || seen.has(node)) return;
-  seen.add(node);
-
-  const exampleNode = childAt(node, "example");
-  if (exampleNode) {
-    reportFailures(ctx, env, { doc, node }, doc, exampleNode, "Schema");
-  }
-
-  const properties = childAt(node, "properties");
-  if (isMap(properties)) {
-    for (const pair of properties.items) {
-      if (isNode(pair.value)) walkSchemasForSelfExamples(ctx, env, doc, pair.value, seen);
-    }
-  }
-
-  const items = childAt(node, "items");
-  if (isNode(items)) walkSchemasForSelfExamples(ctx, env, doc, items, seen);
-
-  if (env.version === "3.1") {
-    const prefixItems = childAt(node, "prefixItems");
-    if (isSeq(prefixItems)) {
-      for (const item of prefixItems.items) {
-        if (isNode(item)) walkSchemasForSelfExamples(ctx, env, doc, item, seen);
+  walkSchemaTree(
+    node,
+    (schema) => {
+      const exampleNode = childAt(schema, "example");
+      if (exampleNode) {
+        reportFailures(ctx, env, { doc, node: schema }, doc, exampleNode, "Schema");
       }
-    }
-  }
-
-  const additionalProperties = childAt(node, "additionalProperties");
-  if (isNode(additionalProperties)) walkSchemasForSelfExamples(ctx, env, doc, additionalProperties, seen);
-
-  for (const key of ["allOf", "oneOf", "anyOf"]) {
-    const seq = childAt(node, key);
-    if (isSeq(seq)) {
-      for (const item of seq.items) {
-        if (isNode(item)) walkSchemasForSelfExamples(ctx, env, doc, item, seen);
-      }
-    }
-  }
+    },
+    { version: env.version, prefixItems: true },
+    seen,
+  );
 }
 
 function reportFailures(

@@ -79,6 +79,18 @@ export interface ServerContext {
    * that never register as a project and so wouldn't otherwise trigger a re-lint.
    */
   openStandaloneEntries: Set<string>;
+  /**
+   * The file membership (document paths) of each entry's graph as of its most recent successful
+   * `getGraph` load, keyed by entry path. Unlike `graphCache`, `invalidateGraph` deliberately does
+   * NOT clear this: it's a snapshot of "what did this entry's graph contain a moment ago", used by
+   * `routeDocument` to notice that an edited `$ref`'d fragment (which has no owning project entry
+   * and no `openapi:` key of its own, so it would otherwise route as `{kind: "ignored"}`) is still a
+   * member of some open standalone entry's graph — even though that entry's cache was *just*
+   * invalidated for this very same edit, moments before routing runs (see `handleDocumentEvent` in
+   * `connection.ts`, which invalidates before routing). Self-heals on the next `getGraph` call for
+   * that entry, whether or not the file is still a member after the edit.
+   */
+  lastGraphFiles: Map<string, Set<string>>;
 }
 
 export function createServerContext(fileSystem: FileSystem): ServerContext {
@@ -90,6 +102,7 @@ export function createServerContext(fileSystem: FileSystem): ServerContext {
     upwardMissCache: new Set(),
     standaloneConfigCache: new Map(),
     openStandaloneEntries: new Set(),
+    lastGraphFiles: new Map(),
   };
 }
 
@@ -99,7 +112,25 @@ export async function getGraph(ctx: ServerContext, entryPath: string): Promise<W
   if (cached) return cached;
   const graph = await loadWorkspaceGraph(ctx.fileSystem, entryPath);
   ctx.graphCache.set(entryPath, graph);
+  ctx.lastGraphFiles.set(entryPath, new Set(graph.documents.keys()));
   return graph;
+}
+
+/**
+ * Entry paths from `entryPaths` whose most-recently-loaded graph (per `lastGraphFiles`, which
+ * survives `invalidateGraph`) included `path` as a member. Used by `routeDocument` to find open
+ * standalone entries that depend on a `$ref`'d fragment file being edited, even though that
+ * fragment routes as `{kind: "ignored"}` on its own (no owning project entry, no `openapi:` key)
+ * and its dependents' graph cache was just invalidated for this same edit. Deliberately reads the
+ * last-known snapshot rather than reloading graphs here, so an edit to an ignored file doesn't
+ * force an eager rebuild of every open standalone graph on every keystroke.
+ */
+export function findEntriesLastContaining(ctx: ServerContext, path: string, entryPaths: Iterable<string>): string[] {
+  const result: string[] = [];
+  for (const entryPath of entryPaths) {
+    if (entryPath !== path && ctx.lastGraphFiles.get(entryPath)?.has(path)) result.push(entryPath);
+  }
+  return result;
 }
 
 /**
@@ -166,4 +197,73 @@ export function findProjectForEntry(ctx: ServerContext, entryPath: string): Proj
  */
 export async function resolveEntryForPath(ctx: ServerContext, path: string): Promise<string> {
   return (await findOwningEntry(ctx, path)) ?? path;
+}
+
+/**
+ * Every currently-loaded workspace graph: each project entry's graph (lazily (re)loaded if it was
+ * evicted from the cache) plus any cached standalone graphs, deduplicated by graph identity. Unlike
+ * `resolveEntryForPath`/`findOwningEntry` — which pick a single owning graph — this is for features
+ * where *every* reaching graph matters (a file `$ref`'d by several entries lives in several graphs).
+ */
+export async function loadAllGraphs(ctx: ServerContext): Promise<WorkspaceGraph[]> {
+  for (const project of ctx.projects.values()) {
+    for (const entryPath of project.entryPaths) {
+      if (!ctx.graphCache.has(entryPath)) await getGraph(ctx, entryPath);
+    }
+  }
+  return [...new Set(ctx.graphCache.values())];
+}
+
+/**
+ * Every loaded workspace graph whose document set includes `path`. A file `$ref`'d by more than one
+ * project entry belongs to more than one graph; rename / find-references need all of them so a ref
+ * living in a sibling entry's graph isn't missed (see `findOwningEntry`, which stops at the first).
+ */
+export async function findAllGraphsContaining(ctx: ServerContext, path: string): Promise<WorkspaceGraph[]> {
+  return (await loadAllGraphs(ctx)).filter((graph) => graph.documents.has(path));
+}
+
+/**
+ * The distinct documents (deduped by file path) across every loaded graph that contains
+ * `targetPath`, each paired with one graph it belongs to so its `$ref`s can be resolved. Used by
+ * rename / find-references: to find every `$ref` to a component, we must scan the documents of all
+ * graphs that load the component's file — not just the first owning graph. Deduping by file path
+ * means a document shared by two graphs (and therefore a shared `$ref`) is considered once, so the
+ * same edit/location isn't produced twice.
+ */
+export async function referringDocumentsFor(
+  ctx: ServerContext,
+  targetPath: string,
+): Promise<Array<{ doc: OasisDocument; graph: WorkspaceGraph }>> {
+  const seen = new Set<string>();
+  const result: Array<{ doc: OasisDocument; graph: WorkspaceGraph }> = [];
+  for (const graph of await findAllGraphsContaining(ctx, targetPath)) {
+    for (const doc of graph.documents.values()) {
+      if (seen.has(doc.filePath)) continue;
+      seen.add(doc.filePath);
+      result.push({ doc, graph });
+    }
+  }
+  return result;
+}
+
+/**
+ * Documents from every *other* loaded graph that aren't already in `graph`, deduped by file path.
+ * Fed to the lint engine as `externalDocuments` so a whole-workspace rule (`components/no-unused`)
+ * counts usage from sibling project entries: a component in a shared file used only by entry B must
+ * not be flagged unused when linting entry A's graph. The CLI never calls this, so a CLI lint of a
+ * single entry graph keeps its existing whole-world semantics.
+ */
+export async function collectExternalDocuments(ctx: ServerContext, graph: WorkspaceGraph): Promise<OasisDocument[]> {
+  const seen = new Set<string>(graph.documents.keys());
+  const externals: OasisDocument[] = [];
+  for (const other of await loadAllGraphs(ctx)) {
+    if (other === graph) continue;
+    for (const doc of other.documents.values()) {
+      if (seen.has(doc.filePath)) continue;
+      seen.add(doc.filePath);
+      externals.push(doc);
+    }
+  }
+  return externals;
 }

@@ -3,7 +3,7 @@ import type { Position, Range } from "@oasis/core";
 import { componentKeyRange, refSegmentRange, resolveComponentTarget } from "../component-target.ts";
 import { findRefAtPosition } from "../refs.ts";
 import { mapKeys } from "../yaml-helpers.ts";
-import { getDocument, getGraph, resolveEntryForPath } from "../workspace.ts";
+import { getDocument, getGraph, referringDocumentsFor, resolveEntryForPath } from "../workspace.ts";
 import type { ServerContext } from "../workspace.ts";
 
 export interface RenamePositionParams {
@@ -84,9 +84,13 @@ export async function renameComponent(ctx: ServerContext, params: RenameParams):
 
   const edits: RenameEdit[] = [{ filePath: target.doc.filePath, range: keyRange, newText: params.newName }];
 
-  for (const fileDoc of graph.documents.values()) {
+  // Scan every graph that loads the definition's file, not just the owning entry's: the same
+  // component can be `$ref`'d from a sibling entry's graph (e.g. two config `entries` that both
+  // reference a shared file). `referringDocumentsFor` dedupes documents by path, so a file shared
+  // by two graphs — and any ref it holds — is edited exactly once.
+  for (const { doc: fileDoc, graph: refGraph } of await referringDocumentsFor(ctx, target.doc.filePath)) {
     for (const ref of findRefs(fileDoc)) {
-      const resolved = resolveRef(graph, fileDoc, ref.value);
+      const resolved = resolveRef(refGraph, fileDoc, ref.value);
       if (!resolved.ok) continue;
       if (resolved.doc.filePath !== target.doc.filePath || resolved.pointer !== target.pointer) continue;
       const segRange = refSegmentRange(fileDoc, ref.range, target.name);
