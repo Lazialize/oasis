@@ -20,4 +20,8 @@ export class OverlayFileSystem implements FileSystem {
   resolve(fromPath: string, ref: string): string {
     return this.disk.resolve(fromPath, ref);
   }
+
+  canonicalize(path: string): string {
+    return this.disk.canonicalize(path);
+  }
 }
