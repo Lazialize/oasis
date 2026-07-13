@@ -79,6 +79,18 @@ export interface ServerContext {
    * that never register as a project and so wouldn't otherwise trigger a re-lint.
    */
   openStandaloneEntries: Set<string>;
+  /**
+   * The file membership (document paths) of each entry's graph as of its most recent successful
+   * `getGraph` load, keyed by entry path. Unlike `graphCache`, `invalidateGraph` deliberately does
+   * NOT clear this: it's a snapshot of "what did this entry's graph contain a moment ago", used by
+   * `routeDocument` to notice that an edited `$ref`'d fragment (which has no owning project entry
+   * and no `openapi:` key of its own, so it would otherwise route as `{kind: "ignored"}`) is still a
+   * member of some open standalone entry's graph — even though that entry's cache was *just*
+   * invalidated for this very same edit, moments before routing runs (see `handleDocumentEvent` in
+   * `connection.ts`, which invalidates before routing). Self-heals on the next `getGraph` call for
+   * that entry, whether or not the file is still a member after the edit.
+   */
+  lastGraphFiles: Map<string, Set<string>>;
 }
 
 export function createServerContext(fileSystem: FileSystem): ServerContext {
@@ -90,6 +102,7 @@ export function createServerContext(fileSystem: FileSystem): ServerContext {
     upwardMissCache: new Set(),
     standaloneConfigCache: new Map(),
     openStandaloneEntries: new Set(),
+    lastGraphFiles: new Map(),
   };
 }
 
@@ -99,7 +112,25 @@ export async function getGraph(ctx: ServerContext, entryPath: string): Promise<W
   if (cached) return cached;
   const graph = await loadWorkspaceGraph(ctx.fileSystem, entryPath);
   ctx.graphCache.set(entryPath, graph);
+  ctx.lastGraphFiles.set(entryPath, new Set(graph.documents.keys()));
   return graph;
+}
+
+/**
+ * Entry paths from `entryPaths` whose most-recently-loaded graph (per `lastGraphFiles`, which
+ * survives `invalidateGraph`) included `path` as a member. Used by `routeDocument` to find open
+ * standalone entries that depend on a `$ref`'d fragment file being edited, even though that
+ * fragment routes as `{kind: "ignored"}` on its own (no owning project entry, no `openapi:` key)
+ * and its dependents' graph cache was just invalidated for this same edit. Deliberately reads the
+ * last-known snapshot rather than reloading graphs here, so an edit to an ignored file doesn't
+ * force an eager rebuild of every open standalone graph on every keystroke.
+ */
+export function findEntriesLastContaining(ctx: ServerContext, path: string, entryPaths: Iterable<string>): string[] {
+  const result: string[] = [];
+  for (const entryPath of entryPaths) {
+    if (entryPath !== path && ctx.lastGraphFiles.get(entryPath)?.has(path)) result.push(entryPath);
+  }
+  return result;
 }
 
 /**

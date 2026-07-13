@@ -99,6 +99,9 @@ export function lint(
       externalDocuments: options.externalDocuments,
       version: detectVersion(entryDoc),
       options: base.options,
+      optionsFor(filePath) {
+        return effectiveRuleConfig(config, rule.name, filePath, configDir).options;
+      },
       report(location, message, opts) {
         const range = resolveLocation(location);
         if (!range) return;

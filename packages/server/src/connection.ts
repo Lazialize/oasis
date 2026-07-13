@@ -284,6 +284,12 @@ export function startServer(): Connection {
         // linting it as a broken standalone entry (avoids spurious "Missing required field
         // openapi" noise now that the client may sync every yaml/json/jsonc file).
         connection.sendDiagnostics({ uri: pathToUri(path), diagnostics: [] });
+        // It may still be a $ref'd fragment of one or more open standalone entries (see
+        // `routeDocument`'s "ignored" case): re-validate those so their published diagnostics don't
+        // go stale until the entry document itself is next edited. This also republishes the
+        // fragment's own diagnostics (if any) as part of each dependent entry's graph, the same way
+        // a project-member fragment's diagnostics ride along with its owning entry's validate.
+        for (const entryPath of route.dependentStandaloneEntries ?? []) scheduleValidate(entryPath);
         return;
     }
   }

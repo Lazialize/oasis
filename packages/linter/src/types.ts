@@ -44,6 +44,14 @@ export interface RuleContext {
    * own `defaultOptions` if none were given). Rules that don't declare options can ignore this.
    */
   options: unknown;
+  /**
+   * This rule's resolved options for `filePath`, i.e. `options` with any matching `lint.overrides`
+   * applied (later overrides win, same resolution `report()` uses for severity). Rules whose
+   * behavior can vary per matched file (e.g. `style/naming-convention`) should call this per
+   * reported entity instead of reading the top-level `options`; rules that don't take options, or
+   * that don't need per-file granularity, can ignore it.
+   */
+  optionsFor(filePath: string): unknown;
   /** Record a lint diagnostic at the given location. */
   report(location: ReportLocation, message: string, opts?: ReportOptions): void;
 }
