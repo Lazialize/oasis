@@ -1,4 +1,4 @@
-import { findRefs, parseRefString, rangeFromOffsets } from "@oasis/core";
+import { findRefs, isExternalUriReference, parseRefString, rangeFromOffsets } from "@oasis/core";
 import type { OasisDocument, Range } from "@oasis/core";
 import { resolveDocContext } from "../workspace.ts";
 import type { ServerContext } from "../workspace.ts";
@@ -14,13 +14,14 @@ export interface DocumentLinkResult {
   targetPath: string;
 }
 
-const URL_SCHEME_RE = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//;
-
 /**
  * Every `$ref` in the document whose value has a file-path portion -> a clickable link to that
  * file. Same-document refs (`#/...`, no file part) are skipped: definition/hover already serve
- * them, and a link to the current file is noise. URL refs (`https://...`) are skipped too, since
- * they aren't local files the editor can navigate to as a document link.
+ * them, and a link to the current file is noise. Absolute non-filesystem URIs are skipped too:
+ * these are classified per RFC 3986 with the shared core classifier (`isExternalUriReference`), so
+ * every non-`file:` absolute scheme (`https:`, `urn:example:schema`, ...) — including URIs without
+ * a `//` authority — is recognised and never turned into a bogus local filesystem link. Relative
+ * filesystem references and `file:` URIs are still linked.
  *
  * The target file is not checked for existence: an unresolvable relative path still gets a link,
  * so the editor's own "file not found" affordance applies rather than the link silently
@@ -34,7 +35,7 @@ export async function getDocumentLinks(ctx: ServerContext, params: DocumentLinkP
   const results: DocumentLinkResult[] = [];
   for (const ref of findRefs(doc)) {
     const { filePart } = parseRefString(ref.value);
-    if (filePart === "" || URL_SCHEME_RE.test(filePart)) continue;
+    if (filePart === "" || isExternalUriReference(filePart)) continue;
 
     const range = filePartRange(doc, ref.range, filePart);
     if (!range) continue;
