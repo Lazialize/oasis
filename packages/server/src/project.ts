@@ -258,9 +258,15 @@ export async function discoverProjectUpward(ctx: ServerContext, docPath: string)
   return false;
 }
 
-/** Whether `path` is (the name of) an `oasis.config.jsonc` file. */
+/** Whether `path` is (the name of) an `oasis.config.jsonc` file.
+ *
+ * Paths come from `URI.fsPath`, which uses backslash separators on Windows, so this can't just
+ * check for a trailing `/${CONFIG_FILE_NAME}` (that only matches POSIX-style paths) — it must
+ * split on the last `/` *or* `\` to find the basename regardless of which platform produced the
+ * path or which platform this check runs on. */
 export function isConfigFilePath(path: string): boolean {
-  return path.endsWith(`/${CONFIG_FILE_NAME}`) || path === CONFIG_FILE_NAME;
+  const lastSep = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return path.slice(lastSep + 1) === CONFIG_FILE_NAME;
 }
 
 export interface NearestConfigResult {

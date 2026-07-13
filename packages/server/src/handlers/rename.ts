@@ -3,7 +3,7 @@ import type { Position, Range } from "@oasis/core";
 import { componentKeyRange, refSegmentRange, resolveComponentTarget } from "../component-target.ts";
 import { findRefAtPosition } from "../refs.ts";
 import { mapKeys } from "../yaml-helpers.ts";
-import { getDocument, getGraph, referringDocumentsFor, resolveEntryForPath } from "../workspace.ts";
+import { referringDocumentsFor, resolveDocContext } from "../workspace.ts";
 import type { ServerContext } from "../workspace.ts";
 
 export interface RenamePositionParams {
@@ -29,10 +29,9 @@ function isValidComponentName(name: string): boolean {
  * placeholder. Returns undefined for any other position, so the editor blocks F2 there.
  */
 export async function prepareRename(ctx: ServerContext, params: RenamePositionParams): Promise<PrepareRenameResult | undefined> {
-  const entryPath = await resolveEntryForPath(ctx, params.path);
-  const graph = await getGraph(ctx, entryPath);
-  const doc = getDocument(graph, params.path);
-  if (!doc) return undefined;
+  const docCtx = await resolveDocContext(ctx, params.path);
+  if (!docCtx) return undefined;
+  const { graph, doc } = docCtx;
 
   const target = resolveComponentTarget(graph, doc, params.position);
   if (!target) return undefined;
@@ -65,10 +64,9 @@ export interface RenameEdit {
  * within the same component section of the definition's document.
  */
 export async function renameComponent(ctx: ServerContext, params: RenameParams): Promise<RenameEdit[] | undefined> {
-  const entryPath = await resolveEntryForPath(ctx, params.path);
-  const graph = await getGraph(ctx, entryPath);
-  const doc = getDocument(graph, params.path);
-  if (!doc) return undefined;
+  const docCtx = await resolveDocContext(ctx, params.path);
+  if (!docCtx) return undefined;
+  const { graph, doc } = docCtx;
 
   const target = resolveComponentTarget(graph, doc, params.position);
   if (!target) return undefined;

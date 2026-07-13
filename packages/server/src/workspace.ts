@@ -149,6 +149,26 @@ export function getDocument(graph: WorkspaceGraph, path: string): OasisDocument 
   return graph.documents.get(path);
 }
 
+export interface DocContext {
+  entryPath: string;
+  graph: WorkspaceGraph;
+  doc: OasisDocument;
+}
+
+/**
+ * The common bootstrap most LSP feature handlers need: resolve `path`'s owning entry, load (or
+ * reuse) that entry's graph, and fetch `path`'s own document from it. Returns undefined whenever
+ * the document isn't in the graph (e.g. it was just deleted, or the graph load raced a change),
+ * which every caller here treats as "nothing to do" for this request.
+ */
+export async function resolveDocContext(ctx: ServerContext, path: string): Promise<DocContext | undefined> {
+  const entryPath = await resolveEntryForPath(ctx, path);
+  const graph = await getGraph(ctx, entryPath);
+  const doc = getDocument(graph, path);
+  if (!doc) return undefined;
+  return { entryPath, graph, doc };
+}
+
 /** Loaded projects in a deterministic order (by config path), so callers that need to pick a
  * single "owning" project among several candidates all agree on which one wins. Single source for
  * that ordering: `findOwningEntry` and `findProjectForEntry` both delegate to this. */

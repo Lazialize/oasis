@@ -7,7 +7,7 @@ import { findRefValueEditContext, parentPointer } from "../refs.ts";
 import { relativeRefPath } from "../ref-target-path.ts";
 import { mapKeys } from "../yaml-helpers.ts";
 import { indentationFallback } from "../indentation-fallback.ts";
-import { getDocument, getGraph, resolveEntryForPath } from "../workspace.ts";
+import { resolveDocContext } from "../workspace.ts";
 import type { ServerContext } from "../workspace.ts";
 
 export type CompletionItemKind = "key" | "ref";
@@ -100,10 +100,9 @@ export function refCompletionsForPointer(
 
 /** Dispatches to `$ref` completion or key completion based on what's under the cursor. */
 export async function getCompletions(ctx: ServerContext, params: CompletionParams): Promise<CompletionItem[]> {
-  const entryPath = await resolveEntryForPath(ctx, params.path);
-  const graph = await getGraph(ctx, entryPath);
-  const doc = getDocument(graph, params.path);
-  if (!doc) return [];
+  const docCtx = await resolveDocContext(ctx, params.path);
+  if (!docCtx) return [];
+  const { graph, doc } = docCtx;
 
   // Fragment files (e.g. a Path Item file with no top-level `openapi:` key) don't carry their own
   // version; fall back to the owning entry document's version.

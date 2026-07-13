@@ -1,7 +1,6 @@
-import { resolveRef } from "@oasis/core";
 import type { Position, Range } from "@oasis/core";
-import { findRefAtPosition } from "../refs.ts";
-import { getDocument, getGraph, resolveEntryForPath } from "../workspace.ts";
+import { resolveRefAtPosition } from "../refs.ts";
+import { resolveDocContext } from "../workspace.ts";
 import type { ServerContext } from "../workspace.ts";
 
 export interface DefinitionParams {
@@ -16,16 +15,11 @@ export interface DefinitionResult {
 
 /** Cursor on a `$ref` (or ref-like string) -> the range of the thing it points to. */
 export async function getDefinition(ctx: ServerContext, params: DefinitionParams): Promise<DefinitionResult | undefined> {
-  const entryPath = await resolveEntryForPath(ctx, params.path);
-  const graph = await getGraph(ctx, entryPath);
-  const doc = getDocument(graph, params.path);
-  if (!doc) return undefined;
+  const docCtx = await resolveDocContext(ctx, params.path);
+  if (!docCtx) return undefined;
 
-  const found = findRefAtPosition(doc, params.position);
-  if (!found) return undefined;
-
-  const result = resolveRef(graph, doc, found.refString);
-  if (!result.ok) return undefined;
+  const result = resolveRefAtPosition(docCtx.graph, docCtx.doc, params.position);
+  if (!result) return undefined;
 
   return { targetPath: result.doc.filePath, range: result.range };
 }

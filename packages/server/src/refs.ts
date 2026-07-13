@@ -1,6 +1,6 @@
 import { isScalar } from "yaml";
-import { nodeAtPosition, offsetAtPosition } from "@oasis/core";
-import type { OasisDocument, Position, Range } from "@oasis/core";
+import { nodeAtPosition, offsetAtPosition, resolveRef } from "@oasis/core";
+import type { OasisDocument, Position, Range, ResolvedRef, WorkspaceGraph } from "@oasis/core";
 
 export interface RefAtPosition {
   /** JSON Pointer of the `$ref` (or ref-like) scalar node itself. */
@@ -29,6 +29,21 @@ export function findRefAtPosition(doc: OasisDocument, position: Position): RefAt
   if (!looksLikeRef) return undefined;
 
   return { pointer: found.pointer, refString: value, range: found.range };
+}
+
+/**
+ * Cursor on a `$ref` (or ref-like string) -> its resolved target, or undefined if the cursor isn't
+ * on a ref, or the ref doesn't resolve. Shared by handlers (`definition`, `hover`) that both start
+ * with this exact "find the ref under the cursor, then resolve it" sequence.
+ */
+export function resolveRefAtPosition(graph: WorkspaceGraph, doc: OasisDocument, position: Position): ResolvedRef | undefined {
+  const found = findRefAtPosition(doc, position);
+  if (!found) return undefined;
+
+  const result = resolveRef(graph, doc, found.refString);
+  if (!result.ok) return undefined;
+
+  return result;
 }
 
 /** Drop the last segment of a JSON Pointer, e.g. "/a/b/$ref" -> "/a/b". */

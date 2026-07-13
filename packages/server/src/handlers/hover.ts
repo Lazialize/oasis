@@ -1,10 +1,10 @@
-import { detectVersion, resolveRef } from "@oasis/core";
+import { detectVersion } from "@oasis/core";
 import type { Position } from "@oasis/core";
 import { classifyPointer } from "../keywords.ts";
 import type { ObjectKind } from "../keywords.ts";
-import { findRefAtPosition } from "../refs.ts";
+import { resolveRefAtPosition } from "../refs.ts";
 import { getChildNode, getChildScalar, mapKeys } from "../yaml-helpers.ts";
-import { getDocument, getGraph, resolveEntryForPath } from "../workspace.ts";
+import { resolveDocContext } from "../workspace.ts";
 import type { ServerContext } from "../workspace.ts";
 
 export interface HoverParams {
@@ -35,16 +35,11 @@ const MAX_PROPERTIES_SHOWN = 10;
 
 /** Cursor on a `$ref` -> a short summary of the resolved target. */
 export async function getHover(ctx: ServerContext, params: HoverParams): Promise<HoverResult | undefined> {
-  const entryPath = await resolveEntryForPath(ctx, params.path);
-  const graph = await getGraph(ctx, entryPath);
-  const doc = getDocument(graph, params.path);
-  if (!doc) return undefined;
+  const docCtx = await resolveDocContext(ctx, params.path);
+  if (!docCtx) return undefined;
 
-  const found = findRefAtPosition(doc, params.position);
-  if (!found) return undefined;
-
-  const result = resolveRef(graph, doc, found.refString);
-  if (!result.ok) return undefined;
+  const result = resolveRefAtPosition(docCtx.graph, docCtx.doc, params.position);
+  if (!result) return undefined;
 
   const kind = classifyPointer(result.pointer) ?? "schema";
   const lines: string[] = [`**${KIND_LABEL[kind]}** \`${result.pointer || "/"}\``];
@@ -53,7 +48,7 @@ export async function getHover(ctx: ServerContext, params: HoverParams): Promise
   if (description) lines.push("", description);
 
   if (kind === "schema") {
-    const version = detectVersion(result.doc) ?? detectVersion(doc);
+    const version = detectVersion(result.doc) ?? detectVersion(docCtx.doc);
     const type = getChildScalar(result.node, "type");
     if (type) lines.push("", `Type: \`${type}\`${version ? ` (OpenAPI ${version})` : ""}`);
 

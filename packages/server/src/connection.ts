@@ -279,10 +279,27 @@ export function startServer(): Connection {
       case "standalone":
         scheduleValidate(route.entryPath);
         return;
-      case "ignored":
+      case "ignored": {
         // Not a project member and doesn't look like an OpenAPI document: ignore it rather than
         // linting it as a broken standalone entry (avoids spurious "Missing required field
         // openapi" noise now that the client may sync every yaml/json/jsonc file).
+        //
+        // `routeDocument` already dropped `path` from `openStandaloneEntries` (it's no longer a
+        // standalone entry), so cancel any debounced `validate` still pending for it — otherwise a
+        // stale timer can fire after this transition and republish diagnostics onto a document the
+        // server just decided to ignore — and clear every URI `validate` previously published for
+        // this entry (not just `path` itself: a standalone entry can publish diagnostics onto
+        // $ref'd fragment files too), mirroring what `onDidClose` does for a closed standalone entry.
+        const timer = debounceTimers.get(path);
+        if (timer) {
+          clearTimeout(timer);
+          debounceTimers.delete(path);
+        }
+        clearPublishedFor(path);
+        // `clearPublishedFor` only sends a publish for `path` when a previous `validate` recorded
+        // one (e.g. this document was a standalone entry before this edit); publish an empty set
+        // unconditionally too, so the client always hears about this document's own (lack of)
+        // diagnostics on this transition, even the first time it's ever seen (never validated).
         connection.sendDiagnostics({ uri: pathToUri(path), diagnostics: [] });
         // It may still be a $ref'd fragment of one or more open standalone entries (see
         // `routeDocument`'s "ignored" case): re-validate those so their published diagnostics don't
@@ -291,6 +308,7 @@ export function startServer(): Connection {
         // a project-member fragment's diagnostics ride along with its owning entry's validate.
         for (const entryPath of route.dependentStandaloneEntries ?? []) scheduleValidate(entryPath);
         return;
+      }
     }
   }
 
