@@ -1,0 +1,7 @@
+{
+  // Structurally invalid: "overrides" must be an array, "entries" must be an array (#33).
+  "entries": ["valid.yaml"],
+  "lint": {
+    "overrides": {},
+  },
+}

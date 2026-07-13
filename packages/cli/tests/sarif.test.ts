@@ -168,4 +168,39 @@ describe("toSarifLog (unit)", () => {
     const log = toSarifLog([diagnostic({ severity: "warn" })], "/repo");
     expect(log.runs[0]?.results[0]?.level).toBe("warning");
   });
+
+  test("percent-encodes a space in an absolute file:// URI (#32)", () => {
+    const log = toSarifLog([diagnostic({ range: { ...diagnostic().range, filePath: "/tmp/with space.yaml" } })], "/repo");
+    const uri = log.runs[0]?.results[0]?.locations[0]?.physicalLocation.artifactLocation.uri;
+    expect(uri).toBe("file:///tmp/with%20space.yaml");
+  });
+
+  test("percent-encodes a `#` fragment marker in an absolute file:// URI (#32)", () => {
+    const log = toSarifLog([diagnostic({ range: { ...diagnostic().range, filePath: "/tmp/with space#x.yaml" } })], "/repo");
+    const uri = log.runs[0]?.results[0]?.locations[0]?.physicalLocation.artifactLocation.uri;
+    expect(uri).toBe("file:///tmp/with%20space%23x.yaml");
+  });
+
+  test("percent-encodes a literal `%` in an absolute file:// URI (#32)", () => {
+    const log = toSarifLog([diagnostic({ range: { ...diagnostic().range, filePath: "/tmp/100%done.yaml" } })], "/repo");
+    const uri = log.runs[0]?.results[0]?.locations[0]?.physicalLocation.artifactLocation.uri;
+    expect(uri).toBe("file:///tmp/100%25done.yaml");
+  });
+
+  test("percent-encodes non-ASCII characters in an absolute file:// URI (#32)", () => {
+    const log = toSarifLog([diagnostic({ range: { ...diagnostic().range, filePath: "/tmp/café/仕様.yaml" } })], "/repo");
+    const uri = log.runs[0]?.results[0]?.locations[0]?.physicalLocation.artifactLocation.uri;
+    expect(uri).toBe("file:///tmp/caf%C3%A9/%E4%BB%95%E6%A7%98.yaml");
+  });
+
+  // `pathToFileURL` parses Windows drive letters/backslashes only when running on win32; this
+  // exercises the Windows-shaped path form without breaking the suite on POSIX CI runners.
+  test.skipIf(process.platform !== "win32")("percent-encodes a Windows-shaped absolute path with a space and `#` (#32)", () => {
+    const log = toSarifLog(
+      [diagnostic({ range: { ...diagnostic().range, filePath: "C:\\Users\\name\\with space#x.yaml" } })],
+      "C:\\elsewhere",
+    );
+    const uri = log.runs[0]?.results[0]?.locations[0]?.physicalLocation.artifactLocation.uri;
+    expect(uri).toBe("file:///C:/Users/name/with%20space%23x.yaml");
+  });
 });

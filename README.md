@@ -103,6 +103,11 @@ nothing, that's also a usage error.
 
 Exit code is `1` if any error-severity diagnostic is reported, `0` otherwise, `2` on usage/config errors.
 
+A bare `--` marks everything after it as positional, so an entry path that happens to look like a
+flag (`oasis lint -- --help`) is linted rather than triggering `--help`. An option value that looks
+like another flag is rejected (`--config --format` is a usage error, not `--config` set to
+`"--format"`); pass it explicitly with `--config=--format` if a path genuinely starts with `-`.
+
 ### `oasis bundle <entry>`
 
 Bundles a multi-file document into a single one.

@@ -436,3 +436,52 @@ describe("resolveConfigForEntry: single source of truth for config resolution", 
     expect((byFile.get(standalonePath) ?? []).some((d) => d.code === "operation/operation-id")).toBe(true);
   });
 });
+
+// #33: a config that parses as JSONC but has the wrong runtime shape (e.g. `lint.overrides` as an
+// object) must not crash project loading or lint runs — the invalid field is dropped at the load
+// boundary (`readConfigFile` -> `validateConfigShape`) and surfaced as a config warning.
+describe("structurally invalid config shapes (#33)", () => {
+  const SHAPE_ROOT = "/bad-shape";
+  const SHAPE_CONFIG_PATH = `${SHAPE_ROOT}/oasis.config.jsonc`;
+  const SHAPE_ENTRY_PATH = `${SHAPE_ROOT}/openapi.yaml`;
+  const SHAPE_ENTRY_TEXT = `openapi: 3.1.0\ninfo:\n  title: T\n  version: "1.0.0"\npaths: {}\n`;
+
+  test("a project config with lint.overrides as an object loads without crashing and carries a warning", async () => {
+    const ctx = createServerContext(
+      new InMemoryFileSystem({
+        [SHAPE_CONFIG_PATH]: `{ "entries": ["openapi.yaml"], "lint": { "overrides": {} } }`,
+        [SHAPE_ENTRY_PATH]: SHAPE_ENTRY_TEXT,
+      }),
+    );
+
+    const state = await loadProjectAtPath(ctx, SHAPE_CONFIG_PATH);
+    expect(state).toBeDefined();
+    expect(state?.entryPaths).toEqual([SHAPE_ENTRY_PATH]); // valid entries still load
+    expect(state?.warnings.some((w) => w.includes("lint.overrides"))).toBe(true);
+    // The invalid field was dropped, so downstream resolveConfig can't crash on it.
+    expect(state?.configFile.lint?.overrides).toBeUndefined();
+
+    // The lint run itself must not throw either.
+    const byFile = await getDiagnosticsByFile(ctx, SHAPE_ENTRY_PATH);
+    expect(byFile).toBeDefined();
+  });
+
+  test("a standalone entry governed by a shape-invalid config resolves with a warning, not a crash", async () => {
+    const configPath = `${SHAPE_ROOT}/standalone/oasis.config.jsonc`;
+    const docPath = `${SHAPE_ROOT}/standalone/openapi.yaml`;
+    const ctx = createServerContext(
+      new InMemoryFileSystem({
+        [configPath]: `{ "lint": { "rules": "not-an-object" } }`,
+        [docPath]: SHAPE_ENTRY_TEXT,
+      }),
+    );
+
+    const resolved = await resolveConfigForEntry(ctx, docPath);
+    expect(resolved.configPath).toBe(configPath);
+    expect(resolved.warnings.some((w) => w.includes("lint.rules"))).toBe(true);
+    expect(resolved.configFile.lint?.rules).toBeUndefined();
+
+    const byFile = await getDiagnosticsByFile(ctx, docPath);
+    expect(byFile).toBeDefined();
+  });
+});

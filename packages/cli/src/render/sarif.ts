@@ -1,3 +1,4 @@
+import { pathToFileURL } from "node:url";
 import type { LintDiagnostic, LintDiagnosticSeverity } from "@oasis/linter";
 import packageJson from "../../package.json" with { type: "json" };
 import { toRelativeFilePath } from "./paths.ts";
@@ -54,12 +55,14 @@ function toSarifLevel(severity: LintDiagnosticSeverity): "error" | "warning" | "
 
 /**
  * A repo-relative, forward-slashed URI for `filePath` when it lives under `cwd`; otherwise an
- * absolute `file://` URI. GitHub code scanning requires artifact locations relative to the
- * repository root, but diagnostics can point outside `cwd` (e.g. a `$ref`'d file elsewhere).
+ * absolute `file://` URI built with `pathToFileURL` so spaces, `#`, `%`, non-ASCII characters, and
+ * platform path syntax (e.g. Windows drive letters/backslashes) are correctly percent-encoded.
+ * GitHub code scanning requires artifact locations relative to the repository root, but
+ * diagnostics can point outside `cwd` (e.g. a `$ref`'d file elsewhere).
  */
 function toArtifactUri(filePath: string, cwd: string): string {
   const rel = toRelativeFilePath(filePath, cwd);
-  return rel === filePath ? `file://${filePath}` : rel;
+  return rel === filePath ? pathToFileURL(filePath).href : rel;
 }
 
 /** Internal ranges are 0-based (line and character); SARIF regions are 1-based. */

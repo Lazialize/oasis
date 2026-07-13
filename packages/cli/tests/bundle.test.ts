@@ -147,4 +147,12 @@ describe("oasis bundle CLI", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  test("`--` protects a positional entry literally named --help from being read as the help flag (#31)", async () => {
+    const result = await runCli(["bundle", "--", "--help"]);
+    expect(result.stdout).not.toContain("Options:");
+    // Treated as an entry path (which doesn't exist) rather than the help flag.
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("failed to parse the entry document");
+  });
 });

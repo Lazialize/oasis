@@ -1,6 +1,6 @@
 import { dirname, join, resolve as pathResolve, sep } from "node:path";
 import { parse as parseJsonc, type ParseError } from "jsonc-parser";
-import { CONFIG_FILE_NAME, expandGlobEntry, isGlobPattern } from "@oasis/linter";
+import { CONFIG_FILE_NAME, expandGlobEntry, isGlobPattern, validateConfigShape } from "@oasis/linter";
 import type { LintConfigFile } from "@oasis/linter";
 import type { ProjectState, ResolvedConfig, ServerContext } from "./workspace.ts";
 import { findProjectForEntry } from "./workspace.ts";
@@ -11,7 +11,7 @@ import { findProjectForEntry } from "./workspace.ts";
 
 /** Result of reading+parsing a config file, distinguishing "doesn't exist" from "exists but is invalid JSONC" so callers can react differently (see `loadProjectAtPath`). */
 export type ConfigReadResult =
-  | { ok: true; configFile: LintConfigFile }
+  | { ok: true; configFile: LintConfigFile; warnings: string[] }
   | { ok: false; reason: "missing" }
   | { ok: false; reason: "parse-error"; message: string };
 
@@ -23,9 +23,7 @@ export async function readConfigFile(ctx: ServerContext, path: string): Promise<
     return { ok: false, reason: "missing" };
   }
   const errors: ParseError[] = [];
-  const parsed = parseJsonc(text, errors, { allowTrailingComma: true, disallowComments: false }) as
-    | LintConfigFile
-    | undefined;
+  parseJsonc(text, errors, { allowTrailingComma: true, disallowComments: false });
   if (errors.length > 0) {
     return {
       ok: false,
@@ -33,7 +31,15 @@ export async function readConfigFile(ctx: ServerContext, path: string): Promise<
       message: `Failed to parse ${CONFIG_FILE_NAME}: invalid JSONC (error code ${errors[0]?.error})`,
     };
   }
-  return { ok: true, configFile: parsed ?? {} };
+  // Syntactically valid JSONC can still have the wrong runtime shape (e.g. `lint.overrides` as an
+  // object instead of an array), which callers previously assumed away; `validateConfigShape`
+  // drops any such field and reports it instead of letting `resolveConfig`/`resolveEntries` crash
+  // or silently misbehave on it (#33).
+  const { configFile, diagnostics } = validateConfigShape(text, path);
+  const warnings = diagnostics.map(
+    (d) => `${d.message} (${CONFIG_FILE_NAME}:${d.range.start.line + 1}:${d.range.start.character + 1})`,
+  );
+  return { ok: true, configFile, warnings };
 }
 
 interface ResolvedProjectEntries {
@@ -142,7 +148,8 @@ export async function loadProjectAtPath(ctx: ServerContext, rawConfigPath: strin
     return { configPath, configDir: dirname(configPath), entryPaths: [], configFile: {}, warnings: [result.message] };
   }
 
-  const { entries, warnings } = await resolveProjectEntries(ctx, configPath, result.configFile);
+  const { entries, warnings: entryWarnings } = await resolveProjectEntries(ctx, configPath, result.configFile);
+  const warnings = [...result.warnings, ...entryWarnings];
   if (entries.length === 0) {
     unloadProject(ctx, configPath);
     if (warnings.length === 0) return undefined;
@@ -275,6 +282,9 @@ export interface NearestConfigResult {
   /** Set when this config file exists but fails to parse as JSONC: `configFile` is then `{}` (an
    * empty fallback), not a stale or partial parse. */
   warning?: string;
+  /** Structural shape warnings (e.g. `lint.overrides` given as an object, not an array) for a
+   * config file that parsed fine as JSONC; empty when the config was fully valid. */
+  warnings: string[];
 }
 
 /**
@@ -298,11 +308,11 @@ export async function findNearestConfigFile(ctx: ServerContext, startPath: strin
   for (;;) {
     const candidate = join(dir, CONFIG_FILE_NAME);
     const result = await readConfigFile(ctx, candidate);
-    if (result.ok) return { configPath: candidate, configFile: result.configFile };
+    if (result.ok) return { configPath: candidate, configFile: result.configFile, warnings: result.warnings };
     if (result.reason === "parse-error") {
       // Nearest EXISTING config file: stop here rather than walking past it to an ancestor's
       // (possibly unrelated) config.
-      return { configPath: candidate, configFile: {}, warning: result.message };
+      return { configPath: candidate, configFile: {}, warning: result.message, warnings: [] };
     }
 
     if (boundary && dir === boundary) break;
@@ -337,7 +347,11 @@ export async function resolveConfigForEntry(ctx: ServerContext, entryPath: strin
 
   const nearest = await findNearestConfigFile(ctx, entryPath);
   const resolved: ResolvedConfig = nearest
-    ? { configFile: nearest.configFile, configPath: nearest.configPath, warnings: nearest.warning ? [nearest.warning] : [] }
+    ? {
+        configFile: nearest.configFile,
+        configPath: nearest.configPath,
+        warnings: nearest.warning ? [nearest.warning, ...nearest.warnings] : nearest.warnings,
+      }
     : { configFile: {}, configPath: undefined, warnings: [] };
   ctx.standaloneConfigCache.set(entryPath, resolved);
   return resolved;

@@ -1,9 +1,10 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join, relative as pathRelative, resolve as pathResolve, sep } from "node:path";
-import { parse as parseJsonc, type ParseError } from "jsonc-parser";
+import { findNodeAtLocation, getNodeValue, parseTree, type Node as JsoncNode, type ParseError } from "jsonc-parser";
+import type { Position, Range } from "@oasis/core";
 import { rules } from "./rules/index.ts";
-import type { Rule, RuleSeverity } from "./types.ts";
+import type { LintDiagnostic, Rule, RuleSeverity } from "./types.ts";
 
 export const CONFIG_FILE_NAME = "oasis.config.jsonc";
 
@@ -42,6 +43,14 @@ export interface LoadedConfig {
   configFile: LintConfigFile;
   /** Absolute path of the config file that was loaded, or undefined if none was found. */
   path: string | undefined;
+  /**
+   * Source-ranged diagnostics for structurally invalid fields (wrong type for `entries`,
+   * `lint.rules`, `lint.overrides`, or an override's `files`/`rules`); empty when no config was
+   * found or every field had a valid shape. The offending field is dropped from `configFile`
+   * rather than passed through, so callers (`resolveConfig`, `resolveEntries`) always see a safe
+   * shape. See `validateConfigShape`.
+   */
+  diagnostics: LintDiagnostic[];
 }
 
 /** Walk upward from `startDir` looking for `oasis.config.jsonc`. */
@@ -56,29 +65,175 @@ export function findConfigUpward(startDir: string): string | undefined {
   }
 }
 
+/** Zero-based line/character positions for every offset in `text` (`node:fs`-read, `\n`-delimited). */
+function computeLineStarts(text: string): number[] {
+  const starts = [0];
+  for (let i = 0; i < text.length; i++) {
+    if (text.charCodeAt(i) === 10 /* \n */) starts.push(i + 1);
+  }
+  return starts;
+}
+
+function positionAt(lineStarts: number[], offset: number): Position {
+  let lo = 0;
+  let hi = lineStarts.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if ((lineStarts[mid] ?? 0) <= offset) lo = mid;
+    else hi = mid - 1;
+  }
+  return { line: lo, character: offset - (lineStarts[lo] ?? 0) };
+}
+
+function rangeAt(filePath: string, lineStarts: number[], startOffset: number, endOffset: number): Range {
+  return {
+    filePath,
+    start: positionAt(lineStarts, startOffset),
+    end: positionAt(lineStarts, endOffset),
+    startOffset,
+    endOffset,
+  };
+}
+
+export interface ConfigValidationResult {
+  /** The config coerced to a safe shape: any field that failed validation is dropped/omitted. */
+  configFile: LintConfigFile;
+  /** Source-ranged diagnostics, one per invalid field. */
+  diagnostics: LintDiagnostic[];
+}
+
+/**
+ * Validate the structural shape of a parsed `oasis.config.jsonc` against `LintConfigFile`, since
+ * `parseJsonc`'s output is only checked for JSONC syntax, not runtime shape — a syntactically
+ * valid file can still have e.g. `lint.overrides` as an object instead of an array, which downstream
+ * code (`resolveConfig`, `resolveEntries`) previously assumed away and would crash or misbehave on.
+ *
+ * Invalid fields are reported as source-ranged diagnostics (rule `oasis/config`) and dropped from
+ * the returned `configFile`, so every caller gets a shape safe to hand to `resolveConfig`/
+ * `resolveEntries` without further checking. Nested content this function doesn't itself validate
+ * (individual rule config tuples/severities) is left in place: `resolveConfig` already validates
+ * those defensively and reports its own config warnings for them.
+ */
+export function validateConfigShape(text: string, filePath: string): ConfigValidationResult {
+  const diagnostics: LintDiagnostic[] = [];
+  const lineStarts = computeLineStarts(text);
+  const root = parseTree(text, [], { allowTrailingComma: true, disallowComments: false });
+
+  function report(node: JsoncNode | undefined, message: string): void {
+    const range = node
+      ? rangeAt(filePath, lineStarts, node.offset, node.offset + node.length)
+      : rangeAt(filePath, lineStarts, 0, 0);
+    diagnostics.push({ rule: "oasis/config", severity: "error", message, range });
+  }
+
+  if (!root) return { configFile: {}, diagnostics };
+  if (root.type !== "object") {
+    report(root, "Config file must be a JSON object at the top level; ignoring its contents.");
+    return { configFile: {}, diagnostics };
+  }
+
+  const configFile: LintConfigFile = {};
+
+  const entriesNode = findNodeAtLocation(root, ["entries"]);
+  if (entriesNode) {
+    if (entriesNode.type !== "array") {
+      report(entriesNode, '"entries" must be an array of strings; ignoring.');
+    } else {
+      const validEntries: string[] = [];
+      (entriesNode.children ?? []).forEach((child, i) => {
+        if (child.type !== "string") {
+          report(child, `"entries[${i}]" must be a string; ignoring this entry.`);
+          return;
+        }
+        validEntries.push(getNodeValue(child) as string);
+      });
+      configFile.entries = validEntries;
+    }
+  }
+
+  const lintNode = findNodeAtLocation(root, ["lint"]);
+  if (lintNode) {
+    if (lintNode.type !== "object") {
+      report(lintNode, '"lint" must be an object; ignoring.');
+    } else {
+      const lint: NonNullable<LintConfigFile["lint"]> = {};
+
+      const rulesNode = findNodeAtLocation(lintNode, ["rules"]);
+      if (rulesNode) {
+        if (rulesNode.type !== "object") {
+          report(rulesNode, '"lint.rules" must be an object; ignoring.');
+        } else {
+          lint.rules = getNodeValue(rulesNode) as Record<string, RuleConfigValue>;
+        }
+      }
+
+      const overridesNode = findNodeAtLocation(lintNode, ["overrides"]);
+      if (overridesNode) {
+        if (overridesNode.type !== "array") {
+          report(overridesNode, '"lint.overrides" must be an array; ignoring.');
+        } else {
+          const validOverrides: LintOverride[] = [];
+          (overridesNode.children ?? []).forEach((overrideNode, i) => {
+            if (overrideNode.type !== "object") {
+              report(overrideNode, `"lint.overrides[${i}]" must be an object; ignoring.`);
+              return;
+            }
+
+            const filesNode = findNodeAtLocation(overrideNode, ["files"]);
+            const filesValid =
+              filesNode?.type === "array" && (filesNode.children ?? []).every((f) => f.type === "string");
+            if (!filesValid) {
+              report(filesNode ?? overrideNode, `"lint.overrides[${i}].files" must be an array of strings; ignoring this override.`);
+              return;
+            }
+            const files = (filesNode.children ?? []).map((f) => getNodeValue(f) as string);
+
+            let overrideRules: Record<string, RuleConfigValue> = {};
+            const overrideRulesNode = findNodeAtLocation(overrideNode, ["rules"]);
+            if (overrideRulesNode) {
+              if (overrideRulesNode.type !== "object") {
+                report(overrideRulesNode, `"lint.overrides[${i}].rules" must be an object; ignoring.`);
+              } else {
+                overrideRules = getNodeValue(overrideRulesNode) as Record<string, RuleConfigValue>;
+              }
+            }
+
+            validOverrides.push({ files, rules: overrideRules });
+          });
+          lint.overrides = validOverrides;
+        }
+      }
+
+      configFile.lint = lint;
+    }
+  }
+
+  return { configFile, diagnostics };
+}
+
 /**
  * Load `oasis.config.jsonc`, either from an explicit path or by discovering it upward from `cwd`.
  * Returns an empty config (no error) when no config file is found. Throws if an explicit or
- * discovered config file exists but fails to parse.
+ * discovered config file exists but fails to parse as JSONC. A config file that parses but has an
+ * invalid shape (e.g. `lint.overrides` as an object) does not throw: see `validateConfigShape`.
  */
 export async function loadConfig(options: LoadConfigOptions = {}): Promise<LoadedConfig> {
   const path = options.configPath
     ? pathResolve(options.configPath)
     : findConfigUpward(options.cwd ?? process.cwd());
 
-  if (!path) return { configFile: {}, path: undefined };
+  if (!path) return { configFile: {}, path: undefined, diagnostics: [] };
 
   const text = await readFile(path, "utf-8");
   const errors: ParseError[] = [];
-  const parsed = parseJsonc(text, errors, { allowTrailingComma: true, disallowComments: false }) as
-    | LintConfigFile
-    | undefined;
+  parseTree(text, errors, { allowTrailingComma: true, disallowComments: false });
 
   if (errors.length > 0) {
     throw new Error(`Failed to parse config file "${path}": invalid JSONC (error code ${errors[0]?.error})`);
   }
 
-  return { configFile: parsed ?? {}, path };
+  const { configFile, diagnostics } = validateConfigShape(text, path);
+  return { configFile, path, diagnostics };
 }
 
 /** A rule's resolved severity and options, ready to hand to the engine / rule context. */
@@ -166,7 +321,8 @@ export function resolveConfig(configFile: LintConfigFile | undefined, ruleList: 
   }
 
   const overrides: ResolvedOverride[] = [];
-  for (const [i, override] of (configFile?.lint?.overrides ?? []).entries()) {
+  const rawOverrides = configFile?.lint?.overrides;
+  for (const [i, override] of (Array.isArray(rawOverrides) ? rawOverrides : []).entries()) {
     if (!Array.isArray(override?.files) || !override.files.every((f) => typeof f === "string")) {
       configWarnings.push(`Invalid "files" in lint.overrides[${i}] in config; expected an array of glob strings; ignoring override.`);
       continue;
@@ -265,7 +421,12 @@ export function resolveEntries(configFile: LintConfigFile | undefined, configDir
   const seen = new Set<string>();
   const warnings: string[] = [];
 
-  for (const raw of configFile?.entries ?? []) {
+  const rawEntries = configFile?.entries;
+  for (const raw of Array.isArray(rawEntries) ? rawEntries : []) {
+    if (typeof raw !== "string") {
+      warnings.push(`Entry ${JSON.stringify(raw)} in config is not a string; skipping.`);
+      continue;
+    }
     if (isGlobPattern(raw)) {
       const matches = expandGlobEntry(raw, configDir);
       if (matches.length === 0) {

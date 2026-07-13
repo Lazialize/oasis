@@ -112,6 +112,14 @@ describe("oasis lint CLI", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("No lint issues found.");
   });
+
+  test("`--` protects a positional entry literally named --help from being read as the help flag (#31)", async () => {
+    const result = await runCli(["lint", "--", "--help"]);
+    expect(result.stdout).not.toContain("Options:");
+    // Treated as an entry path (which doesn't exist) rather than the help flag.
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout || result.stderr).toContain("--help");
+  });
 });
 
 describe("oasis lint (no args, config entries)", () => {
@@ -187,5 +195,22 @@ describe("oasis lint (no args, config entries)", () => {
     expect(report.diagnostics.some((d: { rule: string }) => d.rule === "operation/operation-id")).toBe(true);
     expect(report.diagnostics.some((d: { rule: string }) => d.rule === "oasis/config")).toBe(false); // no zero-match warning
     expect(result.stdout).toContain("one.yaml");
+  });
+
+  test("a structurally invalid config field is a source-ranged diagnostic, not a crash (#33)", async () => {
+    // "lint": {"overrides": {}} used to throw a TypeError inside resolveConfig; now the invalid
+    // field is dropped with a diagnostic and the declared entry still lints (exit 1: the shape
+    // error itself is error-severity).
+    const result = await runCli(["lint", "--format", "json"], { cwd: `${fixturesRoot}/config-bad-shape` });
+    expect(result.stderr).not.toContain("TypeError");
+    expect(result.exitCode).toBe(1);
+    const report = JSON.parse(result.stdout);
+    const configDiag = report.diagnostics.find((d: { rule: string }) => d.rule === "oasis/config");
+    expect(configDiag).toBeDefined();
+    expect(configDiag.severity).toBe("error");
+    expect(configDiag.message).toContain("lint.overrides");
+    expect(configDiag.file).toContain("oasis.config.jsonc");
+    // Source-ranged: points at the offending value, not the top of the file.
+    expect(configDiag.range.start.line).toBeGreaterThan(0);
   });
 });
