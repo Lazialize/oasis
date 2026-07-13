@@ -61,8 +61,16 @@ export async function runLintCommand(args: string[], io: RunLintOptions): Promis
   }
   const resolved = resolveConfig(loaded.configFile);
 
+  /** Print structurally invalid config fields (wrong type for `entries`, `lint.overrides`, ...) to
+   * stderr before an early usage-error exit, since those paths never reach diagnostic rendering. */
+  function reportConfigDiagnosticsToStderr(): void {
+    for (const d of loaded.diagnostics) {
+      io.stderr(`${d.range.filePath}:${d.range.start.line + 1}:${d.range.start.character + 1}  ${d.message}\n`);
+    }
+  }
+
   let entries: string[];
-  const warningDiagnostics: LintDiagnostic[] = [];
+  const warningDiagnostics: LintDiagnostic[] = [...loaded.diagnostics];
 
   if (givenEntries.length > 0) {
     entries = givenEntries.map((entry) => pathResolve(process.cwd(), entry));
@@ -76,6 +84,7 @@ export async function runLintCommand(args: string[], io: RunLintOptions): Promis
     }
     const configEntries = loaded.configFile.entries ?? [];
     if (configEntries.length === 0) {
+      reportConfigDiagnosticsToStderr();
       io.stderr(
         `oasis lint: config "${loaded.path}" has no entries; pass an entry path or add "entries" to the config\n`,
       );
@@ -83,6 +92,7 @@ export async function runLintCommand(args: string[], io: RunLintOptions): Promis
     }
     const resolvedEntries = resolveEntries(loaded.configFile, dirname(loaded.path));
     if (resolvedEntries.entries.length === 0) {
+      reportConfigDiagnosticsToStderr();
       for (const warning of resolvedEntries.warnings) io.stderr(`oasis lint: ${warning}\n`);
       return 2;
     }

@@ -10,6 +10,7 @@ import {
   resolveConfig,
   resolveEntries,
   toGlobPath,
+  validateConfigShape,
 } from "../src/config.ts";
 import { rules } from "../src/rules/index.ts";
 import type { Rule, RuleContext } from "../src/types.ts";
@@ -242,9 +243,124 @@ describe("loadConfig", () => {
   });
 
   test("returns an empty config when none is found", async () => {
-    const { configFile, path } = await loadConfig({ cwd: "/" });
+    const { configFile, path, diagnostics } = await loadConfig({ cwd: "/" });
     expect(path).toBeUndefined();
     expect(configFile).toEqual({});
+    expect(diagnostics).toEqual([]);
+  });
+
+  test("a valid config loads with no shape diagnostics", async () => {
+    const { diagnostics } = await loadConfig({ configPath: `${fixturesRoot}/config/oasis.config.jsonc` });
+    expect(diagnostics).toEqual([]);
+  });
+});
+
+describe("validateConfigShape (#33)", () => {
+  const path = "/repo/oasis.config.jsonc";
+
+  test("an object lint.overrides is dropped and reported with a source range, not crashed on", () => {
+    const text = `{"lint": {"overrides": {}}}`;
+    const { configFile, diagnostics } = validateConfigShape(text, path);
+    expect(configFile.lint?.overrides).toBeUndefined();
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]?.rule).toBe("oasis/config");
+    expect(diagnostics[0]?.severity).toBe("error");
+    expect(diagnostics[0]?.message).toContain("lint.overrides");
+    expect(diagnostics[0]?.range).toMatchObject({
+      filePath: path,
+      start: { line: 0, character: 23 },
+      end: { line: 0, character: 25 },
+    });
+    // ...and the resulting shape is safe to hand to resolveConfig without a TypeError.
+    expect(() => resolveConfig(configFile)).not.toThrow();
+  });
+
+  test("diagnostic ranges use real line/character positions in multi-line JSONC", () => {
+    const text = `{
+  // a comment
+  "lint": {
+    "overrides": "nope"
+  }
+}`;
+    const { diagnostics } = validateConfigShape(text, path);
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]?.range.start.line).toBe(3);
+    expect(diagnostics[0]?.range.start.character).toBe(17);
+  });
+
+  test("non-array entries is dropped and reported", () => {
+    const { configFile, diagnostics } = validateConfigShape(`{"entries": "openapi.yaml"}`, path);
+    expect(configFile.entries).toBeUndefined();
+    expect(diagnostics.some((d) => d.message.includes('"entries"'))).toBe(true);
+    expect(() => resolveEntries(configFile, "/repo")).not.toThrow();
+  });
+
+  test("non-string members of entries are dropped individually, keeping valid ones", () => {
+    const { configFile, diagnostics } = validateConfigShape(`{"entries": ["a.yaml", 42, "b.yaml"]}`, path);
+    expect(configFile.entries).toEqual(["a.yaml", "b.yaml"]);
+    expect(diagnostics.some((d) => d.message.includes("entries[1]"))).toBe(true);
+  });
+
+  test("non-object lint is dropped and reported", () => {
+    const { configFile, diagnostics } = validateConfigShape(`{"lint": []}`, path);
+    expect(configFile.lint).toBeUndefined();
+    expect(diagnostics.some((d) => d.message.includes('"lint"'))).toBe(true);
+  });
+
+  test("non-object lint.rules is dropped and reported", () => {
+    const { configFile, diagnostics } = validateConfigShape(`{"lint": {"rules": ["operation/tags"]}}`, path);
+    expect(configFile.lint?.rules).toBeUndefined();
+    expect(diagnostics.some((d) => d.message.includes("lint.rules"))).toBe(true);
+  });
+
+  test("an override with invalid files is skipped with a diagnostic; valid overrides survive", () => {
+    const text = `{"lint": {"overrides": [
+      {"files": "not-an-array", "rules": {}},
+      {"files": ["paths/**"], "rules": {"operation/tags": "off"}}
+    ]}}`;
+    const { configFile, diagnostics } = validateConfigShape(text, path);
+    expect(configFile.lint?.overrides).toEqual([{ files: ["paths/**"], rules: { "operation/tags": "off" } }]);
+    expect(diagnostics.some((d) => d.message.includes("overrides[0].files"))).toBe(true);
+  });
+
+  test("a non-object override member is skipped with a diagnostic", () => {
+    const { configFile, diagnostics } = validateConfigShape(`{"lint": {"overrides": ["nope"]}}`, path);
+    expect(configFile.lint?.overrides).toEqual([]);
+    expect(diagnostics.some((d) => d.message.includes("overrides[0]"))).toBe(true);
+  });
+
+  test("an override with a non-object rules keeps the override (files only) and reports rules", () => {
+    const { configFile, diagnostics } = validateConfigShape(
+      `{"lint": {"overrides": [{"files": ["**"], "rules": []}]}}`,
+      path,
+    );
+    expect(configFile.lint?.overrides).toEqual([{ files: ["**"], rules: {} }]);
+    expect(diagnostics.some((d) => d.message.includes("overrides[0].rules"))).toBe(true);
+  });
+
+  test("a non-object top level is reported and yields an empty config", () => {
+    const { configFile, diagnostics } = validateConfigShape(`["not", "a", "config"]`, path);
+    expect(configFile).toEqual({});
+    expect(diagnostics).toHaveLength(1);
+  });
+
+  test("a fully valid config passes through unchanged with no diagnostics", () => {
+    const text = `{
+      "entries": ["openapi.yaml"],
+      "lint": {
+        "rules": {"operation/tags": "off"},
+        "overrides": [{"files": ["paths/**"], "rules": {"operation/tags": "warn"}}]
+      }
+    }`;
+    const { configFile, diagnostics } = validateConfigShape(text, path);
+    expect(diagnostics).toEqual([]);
+    expect(configFile).toEqual({
+      entries: ["openapi.yaml"],
+      lint: {
+        rules: { "operation/tags": "off" },
+        overrides: [{ files: ["paths/**"], rules: { "operation/tags": "warn" } }],
+      },
+    });
   });
 });
 

@@ -4,6 +4,7 @@ export type { LintOptions } from "./engine.ts";
 export { lint } from "./engine.ts";
 
 export type {
+  ConfigValidationResult,
   LintConfigFile,
   LintOverride,
   LoadConfigOptions,
@@ -23,6 +24,7 @@ export {
   loadConfig,
   resolveConfig,
   resolveEntries,
+  validateConfigShape,
 } from "./config.ts";
 
 export { rules } from "./rules/index.ts";
