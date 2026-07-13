@@ -1,0 +1,10 @@
+post:
+  operationId: onDataCallback
+  requestBody:
+    content:
+      application/json:
+        schema:
+          $ref: '../shared.yaml#/components/schemas/Event'
+  responses:
+    '200':
+      description: OK

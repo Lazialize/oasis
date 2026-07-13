@@ -1,0 +1,10 @@
+post:
+  operationId: newPetWebhook
+  requestBody:
+    content:
+      application/json:
+        schema:
+          $ref: '../shared.yaml#/components/schemas/Pet'
+  responses:
+    '200':
+      description: OK

@@ -1,0 +1,14 @@
+openapi: 3.1.0
+info:
+  title: Webhooks 3.1
+  version: "1.0.0"
+paths:
+  /ping:
+    $ref: './paths/ping.yaml'
+webhooks:
+  newPet:
+    $ref: './webhooks/new-pet.yaml'
+  updatedPet:
+    $ref: './webhooks/updated-pet.yaml#/UpdatedPet'
+    summary: Updated pet webhook
+    description: Fired when a pet changes

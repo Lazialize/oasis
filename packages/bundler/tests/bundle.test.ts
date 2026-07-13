@@ -157,6 +157,69 @@ describe("bundle", () => {
     expect(result.output).toContain("Missing path summary");
   });
 
+  test("root webhooks (3.1): path-item refs are inlined in place, not lifted into components", async () => {
+    const graph = await loadFixture("webhooks31");
+    const result = bundle(graph);
+    expect(result.diagnostics).toEqual([]);
+
+    // (a) whole-file webhook path-item ref is inlined in place; no external file leaks through.
+    expect(result.output).toContain("newPetWebhook");
+    expect(result.output).not.toContain("webhooks/new-pet.yaml");
+    expect(result.output).not.toContain("updated-pet.yaml");
+    // A path item must NOT be lifted into components (and definitely not a schemas fallback).
+    expect(result.output).not.toContain("#/components/schemas/newpet");
+    expect(result.output).not.toContain("#/components/schemas/newPet");
+
+    // (b) fragment webhook ref with summary/description siblings: siblings preserved and override.
+    expect(result.output).toContain("updatedPetWebhook");
+    expect(result.output).toContain("Updated pet webhook");
+    expect(result.output).toContain("Fired when a pet changes");
+
+    // (c) a nested component ref inside the inlined webhook path item is still lifted normally.
+    expect(result.output).toContain("#/components/schemas/Pet");
+    expect(result.output).toContain("Pet:");
+
+    // (e) existing behaviour: paths path-item inlining still works alongside webhooks.
+    expect(result.output).toContain("operationId: ping");
+    expect(result.output).not.toContain("paths/ping.yaml");
+
+    await assertSelfContained(result.output);
+
+    const bundledFs = new InMemoryFileSystem({ "/virtual/bundled.yaml": result.output });
+    const bundledGraph = await loadWorkspaceGraph(bundledFs, "/virtual/bundled.yaml");
+    const diagnostics = lint(bundledGraph, resolveConfig(undefined));
+    const errors = diagnostics.filter((d) => d.severity === "error");
+    expect(errors).toEqual([]);
+  });
+
+  test("callbacks (3.1): expression path-item ref inlined in place; callback-object ref lifted to components/callbacks", async () => {
+    const graph = await loadFixture("callbacks");
+    const result = bundle(graph);
+    expect(result.diagnostics).toEqual([]);
+
+    // (d1) path-item $ref under a callback expression key is inlined in place — the bare Path Item
+    // must NOT be lifted into components/callbacks (which would be an invalid Callback Object entry).
+    expect(result.output).toContain("onDataCallback");
+    expect(result.output).not.toContain("callbacks/on-data.yaml");
+    // A nested component ref inside that inlined callback path item is still lifted normally.
+    expect(result.output).toContain("#/components/schemas/Event");
+    expect(result.output).toContain("Event:");
+
+    // (d2) a $ref at callbacks/<name> targets a whole Callback Object -> lifted into
+    // components/callbacks (as a valid Callback Object, i.e. an expression -> Path Item map).
+    expect(result.output).toContain("#/components/callbacks/OnEvent");
+    expect(result.output).toContain("onEventCallback");
+    expect(result.output).not.toContain("callbacks/on-event.yaml");
+
+    await assertSelfContained(result.output);
+
+    const bundledFs = new InMemoryFileSystem({ "/virtual/bundled.yaml": result.output });
+    const bundledGraph = await loadWorkspaceGraph(bundledFs, "/virtual/bundled.yaml");
+    const diagnostics = lint(bundledGraph, resolveConfig(undefined));
+    const errors = diagnostics.filter((d) => d.severity === "error");
+    expect(errors).toEqual([]);
+  });
+
   test("$ref-as-literal-data (example/default/enum) is copied through unchanged, not lifted or rewritten", async () => {
     const graph = await loadFixture("literal-ref-data");
     const result = bundle(graph);
