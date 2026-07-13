@@ -15,7 +15,15 @@ export type { FileSystem } from "./filesystem.ts";
 export { InMemoryFileSystem, NodeFileSystem } from "./filesystem.ts";
 
 export type { FoundRef, RefParts, ResolvedRef, ResolveRefResult, UnresolvedRef } from "./ref.ts";
-export { findRefs, parseRefString, resolveRef } from "./ref.ts";
+export {
+  CONTAINER_KEYS,
+  findRefs,
+  isContainerKey,
+  isLiteralDataKey,
+  looksLikeMappingRef,
+  parseRefString,
+  resolveRef,
+} from "./ref.ts";
 
 export type { WorkspaceGraph } from "./graph.ts";
 export { allDiagnostics, loadWorkspaceGraph } from "./graph.ts";

@@ -210,6 +210,91 @@ describe("container entries named like literal-data keywords are still reference
   });
 });
 
+describe("discriminator.mapping values are references", () => {
+  test("a mapping value shaped like a $ref (file+pointer) is found by findRefs and its file is loaded into the workspace graph, even when nothing else references that file", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": [
+        "openapi: 3.0.3",
+        "components:",
+        "  schemas:",
+        "    Pet:",
+        "      type: object",
+        "      discriminator:",
+        "        propertyName: petType",
+        "        mapping:",
+        "          dog: './dog.yaml#/Dog'",
+        "          cat: Cat", // bare component name: must be left alone
+        "      oneOf:",
+        "        - $ref: '#/components/schemas/Cat'",
+        "    Cat:",
+        "      type: object",
+      ].join("\n"),
+      "/virtual/dog.yaml": "Dog:\n  type: object\n",
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+
+    // dog.yaml is referenced only from the mapping (no sibling $ref anywhere) but must still be
+    // loaded into the workspace graph.
+    expect(graph.documents.size).toBe(2);
+    expect(graph.documents.has("/virtual/dog.yaml")).toBe(true);
+    expect(allDiagnostics(graph)).toEqual([]);
+
+    const entryDoc = graph.documents.get("/virtual/entry.yaml")!;
+    const values = findRefs(entryDoc).map((r) => r.value).sort();
+    expect(values).toEqual(["#/components/schemas/Cat", "./dog.yaml#/Dog"].sort());
+    // The bare component name "Cat" mapping value must NOT show up as a discovered ref.
+    expect(values.includes("Cat")).toBe(false);
+  });
+
+  test("a same-document pointer mapping value is found and resolves", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": [
+        "openapi: 3.0.3",
+        "components:",
+        "  schemas:",
+        "    Pet:",
+        "      type: object",
+        "      discriminator:",
+        "        propertyName: petType",
+        "        mapping:",
+        "          cat: '#/components/schemas/Cat'",
+        "      oneOf:",
+        "        - $ref: '#/components/schemas/Cat'",
+        "    Cat:",
+        "      type: object",
+      ].join("\n"),
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const entryDoc = graph.documents.get("/virtual/entry.yaml")!;
+    const values = findRefs(entryDoc).map((r) => r.value);
+    expect(values.filter((v) => v === "#/components/schemas/Cat")).toHaveLength(2); // oneOf + mapping
+
+    const result = resolveRef(graph, entryDoc, "#/components/schemas/Cat");
+    expect(result.ok).toBe(true);
+  });
+
+  test("a mapping value that is not under a key literally named 'mapping' is unaffected (sanity: no false positives)", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": [
+        "openapi: 3.0.3",
+        "components:",
+        "  schemas:",
+        "    Foo:",
+        "      type: object",
+        "      properties:",
+        // A property literally named "mapping" whose value happens to look ref-like is plain data,
+        // not a discriminator mapping, and must not be treated as a reference.
+        "        mapping:",
+        "          type: string",
+        "          example: './not-a-ref.yaml#/x'",
+      ].join("\n"),
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    expect(graph.documents.size).toBe(1);
+    expect(allDiagnostics(graph)).toEqual([]);
+  });
+});
+
 describe("InMemoryFileSystem workspace graph", () => {
   test("resolves refs across in-memory buffers", async () => {
     const fs = new InMemoryFileSystem({

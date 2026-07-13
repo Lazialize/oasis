@@ -11,11 +11,15 @@ export function detectVersion(doc: OasisDocument): OpenApiVersion | undefined {
   const pair = root.items.find((p) => isScalar(p.key) && p.key.value === "openapi");
   if (!pair || !isScalar(pair.value)) return undefined;
 
-  let value = pair.value.value;
+  let value: unknown = pair.value.value;
 
-  // Handle YAML numbers (e.g., unquoted 3.1 in YAML): convert to string
+  // An unquoted `openapi: 3.0` (or `3.10`) parses as a YAML *number*, and JS's `String()` coercion
+  // loses information both ways: `3.0` -> `3` (undetectable) and `3.10` -> `3.1` (misdetected as
+  // 3.1.x). Recover the exact source text of the scalar instead of trusting the coerced JS value.
+  // Quoted values (`"3.0"`) already parse as strings and are unaffected.
   if (typeof value === "number") {
-    value = String(value);
+    const range = pair.value.range;
+    value = range ? doc.text.slice(range[0], range[1]) : String(value);
   }
 
   if (typeof value !== "string") return undefined;

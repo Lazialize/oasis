@@ -1,0 +1,30 @@
+openapi: 3.0.3
+info:
+  title: Discriminator mapping
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                discriminator:
+                  propertyName: petType
+                  mapping:
+                    dog: './dog.yaml#/Dog'
+                    cat: 'Cat'
+                oneOf:
+                  - $ref: './dog.yaml#/Dog'
+                  - $ref: '#/components/schemas/Cat'
+components:
+  schemas:
+    Cat:
+      type: object
+      properties:
+        petType:
+          type: string
