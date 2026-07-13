@@ -1,0 +1,28 @@
+openapi: 3.0.3
+info:
+  title: Extension Opaque
+  version: "1.0.0"
+  x-meta:
+    mapping:
+      dog: ./dog.yaml
+    schema:
+      $ref: ./dog.yaml
+    properties:
+      foo: ./dog.yaml
+    examples:
+      sample:
+        $ref: ./dog.yaml
+    $ref: ./dog.yaml
+paths:
+  /dog:
+    get:
+      operationId: getDog
+      tags: [dog]
+      description: Get dog.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: './dog.yaml#/components/schemas/Dog'

@@ -464,6 +464,17 @@ function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undef
         out[key] = value;
         continue;
       }
+      // A Specification Extension (`x-*`) key introduces an opaque payload: everything below it is
+      // arbitrary user data, so keys inside that happen to match OpenAPI structural fields
+      // (`$ref`, `mapping`, `schema`, `properties`, `examples`, ...) must be copied through
+      // unchanged, never interpreted as references to lift/rewrite. Descend with `literal` set.
+      // (Extensions are allowed on almost every OpenAPI object; this switch only ever sees an
+      // object's own member keys — user/spec-named container entries are routed via `mapChildren`
+      // and never reach here — so an `x-` key here is always a real extension, not a data name.)
+      if (!literal && key.startsWith("x-")) {
+        out[key] = convertValue(ctx, doc, value, hint, true);
+        continue;
+      }
       if (!literal && isLiteralDataKey(key, value)) {
         out[key] = convertValue(ctx, doc, value, hint, true);
         continue;
