@@ -1,0 +1,43 @@
+openapi: 3.0.3
+info:
+  title: T
+  version: "1.0.0"
+paths:
+  /pets/{id}:
+    parameters:
+      - name: traceId
+        in: header
+        style: form
+    get:
+      operationId: getPet
+      parameters:
+        - $ref: '#/components/parameters/Broken'
+        - name: id
+          in: path
+          schema:
+            type: string
+        - name: filter
+          in: query
+          schema:
+            type: object
+          content:
+            application/json:
+              schema:
+                type: object
+        - name: limit
+          in: query
+          explode: maybe
+          schema:
+            type: integer
+        - name: X-Debug
+          in: header
+          allowReserved: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+components:
+  parameters:
+    Broken:
+      description: missing name and in

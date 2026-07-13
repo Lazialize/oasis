@@ -140,6 +140,8 @@ function eachComponentEntry(
 export interface ParameterObjectInfo {
   doc: OasisDocument;
   node: Node;
+  /** JSON Pointer of `node` within `doc` (its resolved definition site, not the referencing site). */
+  pointer: string;
 }
 
 /**
@@ -165,7 +167,7 @@ export function collectParameterObjects(
       const key = `${resolved.doc.filePath}::${resolved.pointer}`;
       if (seen.has(key)) return;
       seen.add(key);
-      results.push({ doc: resolved.doc, node: resolved.node });
+      results.push({ doc: resolved.doc, node: resolved.node, pointer: resolved.pointer });
     });
   }
 
@@ -182,18 +184,18 @@ export function collectParameterObjects(
     if (!root || !isMap(root)) continue;
     const componentsNode = childAt(root, "components");
     if (!componentsNode || !isMap(componentsNode)) continue;
-    const parametersNode = childAt(componentsNode, "parameters");
-    if (!parametersNode || !isMap(parametersNode)) continue;
 
-    for (const pair of parametersNode.items) {
-      const name = keyToString(pair.key);
-      if (!isNode(pair.value) || !isMap(pair.value)) continue;
-      const pointer = `/components/parameters/${name}`;
-      const key = `${doc.filePath}::${pointer}`;
-      if (seen.has(key)) continue;
+    // Resolve through the workspace graph like every other components-level collector here
+    // (`eachComponentEntry`), so a `components/parameters` entry that is itself a Reference
+    // Object (same-document or cross-file) is validated at its resolved target rather than
+    // skipped or checked against the bare `{ $ref: ... }` wrapper.
+    eachComponentEntry(graph, doc, componentsNode, "parameters", (resolvedDoc, resolvedNode, pointer) => {
+      if (!isMap(resolvedNode)) return;
+      const key = `${resolvedDoc.filePath}::${pointer}`;
+      if (seen.has(key)) return;
       seen.add(key);
-      results.push({ doc, node: pair.value });
-    }
+      results.push({ doc: resolvedDoc, node: resolvedNode, pointer });
+    });
   }
 
   return results;

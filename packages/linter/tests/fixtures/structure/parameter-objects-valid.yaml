@@ -1,0 +1,43 @@
+openapi: 3.0.3
+info:
+  title: T
+  version: "1.0.0"
+paths:
+  /pets/{id}:
+    parameters:
+      - name: traceId
+        in: header
+        style: simple
+        schema:
+          type: string
+    get:
+      operationId: getPet
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: filter
+          in: query
+          style: deepObject
+          explode: true
+          schema:
+            type: object
+        - name: tags
+          in: query
+          allowReserved: true
+          schema:
+            type: array
+      responses:
+        '200':
+          description: OK
+components:
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      style: form
+      schema:
+        type: integer

@@ -170,6 +170,103 @@ paths:
   });
 });
 
+describe("structure/field-types — Parameter Objects (#46)", () => {
+  test("flags a components/parameters entry missing name and in", async () => {
+    const diagnostics = await lintFixture("structure/parameter-objects-bad.yaml");
+    const d = diagnostics.find(
+      (d) =>
+        d.rule === "structure/field-types" &&
+        d.message.includes("/components/parameters/Broken") &&
+        d.message.includes('missing required field "name"'),
+    );
+    expect(d).toBeDefined();
+    const d2 = diagnostics.find(
+      (d) =>
+        d.rule === "structure/field-types" &&
+        d.message.includes("/components/parameters/Broken") &&
+        d.message.includes('"in" set to one of'),
+    );
+    expect(d2).toBeDefined();
+  });
+
+  test("flags an in: path parameter without required: true", async () => {
+    const diagnostics = await lintFixture("structure/parameter-objects-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/field-types" && d.message.includes('"in: path"') && d.message.includes('"required: true"'),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags schema/content used together (mutually exclusive)", async () => {
+    const diagnostics = await lintFixture("structure/parameter-objects-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/field-types" && d.message.includes("must not have both") && d.message.includes('"schema"') && d.message.includes('"content"'),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags a non-boolean explode", async () => {
+    const diagnostics = await lintFixture("structure/parameter-objects-bad.yaml");
+    const d = diagnostics.find((d) => d.rule === "structure/field-types" && d.message.includes('"explode" must be a boolean'));
+    expect(d).toBeDefined();
+  });
+
+  test("flags allowReserved on a non-query (header) parameter", async () => {
+    const diagnostics = await lintFixture("structure/parameter-objects-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/field-types" && d.message.includes('"allowReserved"') && d.message.includes("only applies to"),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags an invalid style for the parameter's location (path-item-level header parameter)", async () => {
+    const diagnostics = await lintFixture("structure/parameter-objects-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/field-types" && d.message.includes('"style: form"') && d.message.includes('"in: header"'),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("resolves a $ref to a broken components/parameters entry used from an operation", async () => {
+    const diagnostics = await lintFixture("structure/parameter-objects-bad.yaml");
+    // The $ref'd operation parameter and the direct components/parameters entry are the same
+    // resolved location, so this should be reported exactly once (dedup by resolved pointer).
+    const matches = diagnostics.filter(
+      (d) => d.rule === "structure/field-types" && d.message.includes("/components/parameters/Broken") && d.message.includes('missing required field "name"'),
+    );
+    expect(matches.length).toBe(1);
+  });
+
+  test("valid fixture passes with no Parameter Object diagnostics", async () => {
+    const diagnostics = await lintFixture("structure/parameter-objects-valid.yaml");
+    expect(diagnostics.filter((d) => d.rule === "structure/field-types")).toEqual([]);
+  });
+
+  test("attributes a diagnostic to the file that owns a $ref'd operation parameter", async () => {
+    const fs = new NodeFileSystem();
+    const entry = `${fixturesRoot}/structure-multifile-parameter-objects/entry.yaml`;
+    const graph = await loadWorkspaceGraph(fs, entry);
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/field-types" && d.message.includes('missing required field "name"'),
+    );
+    expect(d).toBeDefined();
+    expect(d?.range.filePath).toBe(`${fixturesRoot}/structure-multifile-parameter-objects/params.yaml`);
+  });
+
+  test("resolves a components/parameters entry that is itself a cross-file $ref", async () => {
+    const fs = new NodeFileSystem();
+    const entry = `${fixturesRoot}/structure-multifile-parameter-component-ref/entry.yaml`;
+    const graph = await loadWorkspaceGraph(fs, entry);
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/field-types" && d.message.includes('missing required field "name"'),
+    );
+    expect(d).toBeDefined();
+    expect(d?.range.filePath).toBe(`${fixturesRoot}/structure-multifile-parameter-component-ref/shared.yaml`);
+  });
+});
+
 describe("structure/http-methods", () => {
   test("flags an invalid key under a path item", async () => {
     const diagnostics = await lintFixture("structure/bad-method.yaml");
