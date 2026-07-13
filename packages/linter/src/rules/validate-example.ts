@@ -33,19 +33,25 @@ export interface ValidateEnv {
   version: OpenApiVersion;
 }
 
-/** Follow a `$ref` chain on a schema node. Returns `"unresolved"` if any link can't be followed. */
+/**
+ * Follow a `$ref` chain on a schema node until a concrete (non-`$ref`) schema is reached. Returns
+ * `"unresolved"` if a link can't be followed or if a Reference Object recurs on the chain (a cycle);
+ * there is no fixed hop limit, so an acyclic chain of any length resolves fully.
+ */
 function resolveSchema(env: ValidateEnv, loc: SchemaLoc): SchemaLoc | "unresolved" {
   let current = loc;
-  for (let depth = 0; depth < 10; depth++) {
+  const visited = new Set<Node>();
+  for (;;) {
     if (!isMap(current.node)) return current;
     const refPair = current.node.items.find((p) => keyToString(p.key) === "$ref");
     if (!refPair) return current;
     if (!isScalar(refPair.value) || typeof refPair.value.value !== "string") return "unresolved";
+    if (visited.has(current.node)) return "unresolved";
+    visited.add(current.node);
     const result = resolveRef(env.graph, current.doc, refPair.value.value, undefined);
     if (!result.ok) return "unresolved";
     current = { doc: result.doc, node: result.node };
   }
-  return "unresolved";
 }
 
 function toPlain(node: Node | undefined): unknown {
@@ -328,9 +334,10 @@ function checkArray(env: ValidateEnv, doc: OasisDocument, schema: Node, exampleN
  * legitimately contributed by sibling branches — the common "inherit a base via allOf" idiom that
  * real JSON Schema validators (which combine allOf structurally) accept.
  */
-function collectAllOfPropertyNames(env: ValidateEnv, doc: OasisDocument, allOfNode: Node, depth = 0): Set<string> {
+function collectAllOfPropertyNames(env: ValidateEnv, doc: OasisDocument, allOfNode: Node, seen: Set<Node> = new Set()): Set<string> {
   const names = new Set<string>();
-  if (depth > 10 || !isSeq(allOfNode)) return names;
+  if (!isSeq(allOfNode) || seen.has(allOfNode)) return names;
+  seen.add(allOfNode);
   for (const item of allOfNode.items) {
     if (!isNode(item)) continue;
     const resolved = resolveSchema(env, { doc, node: item });
@@ -343,7 +350,7 @@ function collectAllOfPropertyNames(env: ValidateEnv, doc: OasisDocument, allOfNo
 
     const nestedAllOf = childAt(resolved.node, "allOf");
     if (isSeq(nestedAllOf)) {
-      for (const name of collectAllOfPropertyNames(env, resolved.doc, nestedAllOf, depth + 1)) names.add(name);
+      for (const name of collectAllOfPropertyNames(env, resolved.doc, nestedAllOf, seen)) names.add(name);
     }
   }
   return names;

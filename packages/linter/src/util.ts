@@ -34,8 +34,10 @@ export interface ResolvedLocation {
 
 /**
  * If `node` is a YAML map containing a `$ref` key, resolve it against the workspace graph and
- * return the target location. Otherwise return the location unchanged. Follows chained refs up
- * to a small depth to guard against surprises (the graph itself already guards against cycles).
+ * return the target location. Otherwise return the location unchanged. Reference chains are
+ * followed until a concrete (non-`$ref`) target is reached, resolution fails, or a Reference Object
+ * already visited on this chain proves a cycle — there is no fixed hop limit, so an acyclic chain of
+ * any length resolves fully. On a cycle or unresolved link the last reachable location is returned.
  */
 export function resolveMaybeRef(
   graph: WorkspaceGraph,
@@ -44,15 +46,18 @@ export function resolveMaybeRef(
   pointer: string,
 ): ResolvedLocation {
   let current: ResolvedLocation = { doc, node, pointer };
-  for (let depth = 0; depth < 10; depth++) {
+  const visited = new Set<Node>();
+  for (;;) {
     if (!isMap(current.node)) return current;
     const refPair = current.node.items.find((p) => keyToString(p.key) === "$ref");
     if (!refPair || !isScalar(refPair.value) || typeof refPair.value.value !== "string") return current;
+    // A Reference Object seen twice on this chain means the chain loops back on itself.
+    if (visited.has(current.node)) return current;
+    visited.add(current.node);
     const result = resolveRef(graph, current.doc, refPair.value.value, undefined);
     if (!result.ok) return current;
     current = { doc: result.doc, node: result.node, pointer: result.pointer };
   }
-  return current;
 }
 
 /** Get the node at `pointer` in `doc`, if any, without following $refs. */
