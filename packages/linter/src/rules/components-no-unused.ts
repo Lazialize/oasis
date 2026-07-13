@@ -64,9 +64,20 @@ function collectDiscriminatorMappingValues(doc: OasisDocument): string[] {
   }
 }
 
+/**
+ * Documents whose `$ref`s / discriminator mappings count as usage: this graph's own documents plus
+ * any `externalDocuments` from sibling project entries (see `RuleContext.externalDocuments`). Refs
+ * in an external document still resolve through `ctx.graph`: they only mark a component used when
+ * they land on a file this graph also loads (the shared file the two entries have in common), which
+ * is exactly the case that matters here.
+ */
+function usageDocuments(ctx: RuleContext): OasisDocument[] {
+  return ctx.externalDocuments && ctx.externalDocuments.length > 0 ? [...ctx.documents, ...ctx.externalDocuments] : ctx.documents;
+}
+
 /** Mark components resolved from `discriminator.mapping` values (pointer or bare-name form) as used. */
 function collectDiscriminatorMappingUsage(ctx: RuleContext, used: Set<string>): void {
-  for (const doc of ctx.documents) {
+  for (const doc of usageDocuments(ctx)) {
     for (const value of collectDiscriminatorMappingValues(doc)) {
       if (isUrlLike(value)) continue; // external target, not a workspace component
       const refString = value.includes("#") ? value : `#/components/schemas/${value}`;
@@ -83,7 +94,7 @@ export const noUnusedComponents: Rule = {
   defaultSeverity: "warn",
   check(ctx) {
     const used = new Set<string>();
-    for (const doc of ctx.documents) {
+    for (const doc of usageDocuments(ctx)) {
       for (const ref of findRefs(doc)) {
         const result = resolveRef(ctx.graph, doc, ref.value, ref.range);
         if (result.ok) used.add(`${result.doc.filePath}::${result.pointer}`);

@@ -28,6 +28,15 @@ export interface RuleContext {
   entryDoc: OasisDocument;
   /** All documents loaded into the workspace graph, entry document first. */
   documents: OasisDocument[];
+  /**
+   * Documents from *other* workspace graphs (sibling project entries) whose `$ref`s should also
+   * count as "usage" for whole-workspace rules like `components/no-unused`, without themselves being
+   * linted. A component in a file shared by two entries and referenced only from the sibling entry
+   * would otherwise be reported unused when linting this graph. Populated only by the server's
+   * project-mode lint path; absent/empty for a CLI lint (a single entry graph is whole-world by
+   * definition). Rules that don't do whole-workspace usage analysis ignore this.
+   */
+  externalDocuments?: OasisDocument[];
   /** OpenAPI version detected on the entry document, if any. */
   version: OpenApiVersion | undefined;
   /**

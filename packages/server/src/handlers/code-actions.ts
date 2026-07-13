@@ -2,6 +2,7 @@ import { isMap, isNode, isScalar, isSeq } from "yaml";
 import type { Node } from "yaml";
 import {
   detectVersion,
+  findRefs,
   formatPointer,
   nodeAtPointer,
   nodeAtPosition,
@@ -24,7 +25,7 @@ import {
   resolveMaybeRef,
 } from "@oasis/linter";
 import { relativeRefPath } from "../ref-target-path.ts";
-import { getDocument, getGraph, resolveEntryForPath } from "../workspace.ts";
+import { findAllGraphsContaining, getDocument, getGraph, resolveEntryForPath } from "../workspace.ts";
 import type { ServerContext } from "../workspace.ts";
 
 /** A single-file text edit, matching the shape used by rename/references. */
@@ -332,7 +333,32 @@ function keyNodeForValue(node: Node, child: Node): Node | undefined {
   return pair && isNode(pair.key) ? pair.key : undefined;
 }
 
-function buildRemoveUnusedComponent(doc: OasisDocument, diag: CodeActionDiagnosticInput, index: number): CodeActionResult | undefined {
+/**
+ * Whether any `$ref` in any of `graphs` resolves to `targetFilePath` + `pointer`. Guards the
+ * destructive "Remove unused component" quickfix: a component can look unused in the graph that
+ * produced the diagnostic yet still be referenced from a sibling project entry's graph, and
+ * deleting it would break that entry. Only graphs that actually load the target file can resolve a
+ * ref to it, so others are skipped.
+ */
+function isReferencedInAnyGraph(graphs: WorkspaceGraph[], targetFilePath: string, pointer: string): boolean {
+  for (const graph of graphs) {
+    if (!graph.documents.has(targetFilePath)) continue;
+    for (const fileDoc of graph.documents.values()) {
+      for (const ref of findRefs(fileDoc)) {
+        const resolved = resolveRef(graph, fileDoc, ref.value);
+        if (resolved.ok && resolved.doc.filePath === targetFilePath && resolved.pointer === pointer) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function buildRemoveUnusedComponent(
+  doc: OasisDocument,
+  diag: CodeActionDiagnosticInput,
+  index: number,
+  allGraphs: WorkspaceGraph[],
+): CodeActionResult | undefined {
   const { start, end } = toRangeOffsets(doc, diag.range);
   const root = doc.yamlDoc.contents;
   if (!isNode(root) || !isMap(root)) return undefined;
@@ -355,6 +381,11 @@ function buildRemoveUnusedComponent(doc: OasisDocument, diag: CodeActionDiagnost
       const keyNode = pair.key;
       if (!isNode(keyNode) || !keyNode.range) return undefined;
       const name = keyToString(keyNode);
+
+      // Don't offer to delete a component that a sibling entry's graph still references (the
+      // diagnostic may have been computed against a single graph, or be stale). Deleting it would
+      // leave that sibling with a dangling `$ref`.
+      if (isReferencedInAnyGraph(allGraphs, doc.filePath, `/components/${category}/${name}`)) return undefined;
 
       // Climb ancestors while the entry being removed is the sole item of its parent map: leaving
       // an empty `components/<category>: {}` (or `components: {}`) behind would be pointless, so
@@ -657,6 +688,10 @@ export async function getCodeActions(ctx: ServerContext, params: CodeActionsPara
 
   const results: CodeActionResult[] = [];
 
+  // Every loaded graph that holds the edited file, so the remove-unused quickfix can check for
+  // cross-entry references before offering a destructive delete. Computed once, lazily used.
+  const graphsWithDoc = await findAllGraphsContaining(ctx, doc.filePath);
+
   params.diagnostics.forEach((diag, index) => {
     let action: CodeActionResult | undefined;
     switch (diag.code) {
@@ -670,7 +705,7 @@ export async function getCodeActions(ctx: ServerContext, params: CodeActionsPara
         action = buildAddPathParam(graph, entryDoc, doc, diag, index);
         break;
       case "components/no-unused":
-        action = buildRemoveUnusedComponent(doc, diag, index);
+        action = buildRemoveUnusedComponent(doc, diag, index, graphsWithDoc);
         break;
       default:
         break;

@@ -1,7 +1,7 @@
 import { dirname } from "node:path";
 import type { Node } from "yaml";
 import { detectVersion, extractSuppressions, isSuppressed, nodeAtPointer, rangeFromOffsets, zeroRange } from "@oasis/core";
-import type { FileSuppressions, Range, WorkspaceGraph } from "@oasis/core";
+import type { FileSuppressions, OasisDocument, Range, WorkspaceGraph } from "@oasis/core";
 import { rules } from "./rules/index.ts";
 import type { LintDiagnostic, LintDiagnosticSeverity, ReportLocation, Rule, RuleContext, RuleSeverity } from "./types.ts";
 import { effectiveRuleConfig } from "./config.ts";
@@ -10,6 +10,12 @@ import type { ResolvedLintConfig } from "./config.ts";
 export interface LintOptions {
   /** Path to the config file actually used, for diagnostics that reference config problems. */
   configPath?: string;
+  /**
+   * Documents from sibling workspace graphs whose `$ref`s should count toward usage for
+   * whole-workspace rules (see `RuleContext.externalDocuments`). Passed through unchanged to every
+   * rule's context. Omitted by the CLI; supplied only by the server's project-mode lint path.
+   */
+  externalDocuments?: OasisDocument[];
 }
 
 /** Map a rule/config severity to the severity carried on emitted diagnostics. "off" never reaches here. */
@@ -90,6 +96,7 @@ export function lint(
       graph,
       entryDoc,
       documents,
+      externalDocuments: options.externalDocuments,
       version: detectVersion(entryDoc),
       options: base.options,
       report(location, message, opts) {

@@ -167,3 +167,72 @@ export function findProjectForEntry(ctx: ServerContext, entryPath: string): Proj
 export async function resolveEntryForPath(ctx: ServerContext, path: string): Promise<string> {
   return (await findOwningEntry(ctx, path)) ?? path;
 }
+
+/**
+ * Every currently-loaded workspace graph: each project entry's graph (lazily (re)loaded if it was
+ * evicted from the cache) plus any cached standalone graphs, deduplicated by graph identity. Unlike
+ * `resolveEntryForPath`/`findOwningEntry` — which pick a single owning graph — this is for features
+ * where *every* reaching graph matters (a file `$ref`'d by several entries lives in several graphs).
+ */
+export async function loadAllGraphs(ctx: ServerContext): Promise<WorkspaceGraph[]> {
+  for (const project of ctx.projects.values()) {
+    for (const entryPath of project.entryPaths) {
+      if (!ctx.graphCache.has(entryPath)) await getGraph(ctx, entryPath);
+    }
+  }
+  return [...new Set(ctx.graphCache.values())];
+}
+
+/**
+ * Every loaded workspace graph whose document set includes `path`. A file `$ref`'d by more than one
+ * project entry belongs to more than one graph; rename / find-references need all of them so a ref
+ * living in a sibling entry's graph isn't missed (see `findOwningEntry`, which stops at the first).
+ */
+export async function findAllGraphsContaining(ctx: ServerContext, path: string): Promise<WorkspaceGraph[]> {
+  return (await loadAllGraphs(ctx)).filter((graph) => graph.documents.has(path));
+}
+
+/**
+ * The distinct documents (deduped by file path) across every loaded graph that contains
+ * `targetPath`, each paired with one graph it belongs to so its `$ref`s can be resolved. Used by
+ * rename / find-references: to find every `$ref` to a component, we must scan the documents of all
+ * graphs that load the component's file — not just the first owning graph. Deduping by file path
+ * means a document shared by two graphs (and therefore a shared `$ref`) is considered once, so the
+ * same edit/location isn't produced twice.
+ */
+export async function referringDocumentsFor(
+  ctx: ServerContext,
+  targetPath: string,
+): Promise<Array<{ doc: OasisDocument; graph: WorkspaceGraph }>> {
+  const seen = new Set<string>();
+  const result: Array<{ doc: OasisDocument; graph: WorkspaceGraph }> = [];
+  for (const graph of await findAllGraphsContaining(ctx, targetPath)) {
+    for (const doc of graph.documents.values()) {
+      if (seen.has(doc.filePath)) continue;
+      seen.add(doc.filePath);
+      result.push({ doc, graph });
+    }
+  }
+  return result;
+}
+
+/**
+ * Documents from every *other* loaded graph that aren't already in `graph`, deduped by file path.
+ * Fed to the lint engine as `externalDocuments` so a whole-workspace rule (`components/no-unused`)
+ * counts usage from sibling project entries: a component in a shared file used only by entry B must
+ * not be flagged unused when linting entry A's graph. The CLI never calls this, so a CLI lint of a
+ * single entry graph keeps its existing whole-world semantics.
+ */
+export async function collectExternalDocuments(ctx: ServerContext, graph: WorkspaceGraph): Promise<OasisDocument[]> {
+  const seen = new Set<string>(graph.documents.keys());
+  const externals: OasisDocument[] = [];
+  for (const other of await loadAllGraphs(ctx)) {
+    if (other === graph) continue;
+    for (const doc of other.documents.values()) {
+      if (seen.has(doc.filePath)) continue;
+      seen.add(doc.filePath);
+      externals.push(doc);
+    }
+  }
+  return externals;
+}

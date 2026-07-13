@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { InMemoryFileSystem } from "@oasis/core";
 import { getDiagnosticsByFile } from "../src/diagnostics.ts";
 import { routeDocument } from "../src/document-routing.ts";
+import { getCodeActions } from "../src/handlers/code-actions.ts";
 import { getCompletions } from "../src/handlers/completion.ts";
 import { getDefinition } from "../src/handlers/definition.ts";
 import {
@@ -15,6 +16,13 @@ import {
 } from "../src/project.ts";
 import { createServerContext, findOwningEntry, invalidateGraph } from "../src/workspace.ts";
 import { positionOf } from "./helpers.ts";
+import {
+  ENTRY_A_PATH as MULTI_ENTRY_A_PATH,
+  ROOT as MULTI_ROOT,
+  SHARED_PATH as MULTI_SHARED_PATH,
+  SHARED_TWO_COMPONENTS_TEXT,
+  siblingUsageFiles,
+} from "./multi-entry-fixtures.ts";
 
 const ROOT = "/proj";
 const CONFIG_PATH = `${ROOT}/oasis.config.jsonc`;
@@ -287,6 +295,43 @@ describe("project mode", () => {
       expect(ctx.projects.get(configPath)?.warnings.length).toBe(1);
       expect(ctx.projects.get(configPath)?.warnings[0]).toContain("nowhere/*.yaml");
     });
+  });
+
+  test("components/no-unused does not flag a shared component that only a sibling entry uses", async () => {
+    const ctx = createServerContext(new InMemoryFileSystem(siblingUsageFiles()));
+    await scanWorkspaceRootsForProjects(ctx, [MULTI_ROOT]);
+
+    // Lint entry A's graph. `shared.yaml` is in it (A references `Common`), but `Pet` is used only
+    // by the sibling entry B. It must not be reported unused.
+    const byFile = await getDiagnosticsByFile(ctx, MULTI_ENTRY_A_PATH);
+
+    const sharedDiags = byFile.get(MULTI_SHARED_PATH) ?? [];
+    const unused = sharedDiags.filter((d) => d.code === "components/no-unused");
+    expect(unused).toEqual([]);
+  });
+
+  test("remove-unused quickfix is not offered for a component a sibling entry references", async () => {
+    const ctx = createServerContext(new InMemoryFileSystem(siblingUsageFiles()));
+    await scanWorkspaceRootsForProjects(ctx, [MULTI_ROOT]);
+
+    // Simulate a (stale/single-graph) components/no-unused diagnostic on `Pet` in shared.yaml and
+    // ask for code actions: the cross-graph guard must suppress the destructive delete.
+    const petLine = SHARED_TWO_COMPONENTS_TEXT.split("\n").findIndex((l) => l.trim() === "Pet:");
+    const bodyStart = { line: petLine + 1, character: 6 };
+    const bodyEnd = { line: petLine + 6, character: 0 };
+    const diag = {
+      code: "components/no-unused",
+      message: 'Component "Pet" in "components/schemas" is not used anywhere in the workspace.',
+      range: { start: bodyStart, end: bodyEnd },
+    };
+
+    const actions = await getCodeActions(ctx, {
+      path: MULTI_SHARED_PATH,
+      position: { line: petLine, character: 4 },
+      diagnostics: [diag],
+    });
+
+    expect(actions.some((a) => a.title.startsWith("Remove unused component"))).toBe(false);
   });
 
   test("loadProjectConfig with no entries in the config leaves project mode off", async () => {
