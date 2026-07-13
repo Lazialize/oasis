@@ -32,7 +32,7 @@ This rule hand-rolls a small, honest subset of JSON Schema / OpenAPI Schema Obje
 - `minItems` / `maxItems`
 - `minimum` / `maximum` / `exclusiveMinimum` / `exclusiveMaximum` (version-aware boolean vs. numeric exclusive bounds, per above)
 - `minLength` / `maxLength` / `pattern`
-- `allOf` (every branch must pass)
+- `allOf` (every branch must pass; properties declared by sibling `allOf` branches count as known when one branch sets `additionalProperties: false`, including via `$ref` and nested `allOf`)
 - `oneOf` / `anyOf` (at least one branch must pass — `oneOf` exclusivity, i.e. exactly-one-match, is not enforced)
 
 **Deliberately skipped** (to avoid a false positive from a keyword the validator can't confidently evaluate):

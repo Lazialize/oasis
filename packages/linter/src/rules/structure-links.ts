@@ -3,7 +3,7 @@ import type { Node } from "yaml";
 import { resolveRef } from "@oasis/core";
 import type { OasisDocument } from "@oasis/core";
 import { iterateOperations } from "../openapi-walk.ts";
-import { childAt, keyToString, resolveMaybeRef } from "../util.ts";
+import { childAt, keyToString, resolveMaybeRef, visitResolvedUnique } from "../util.ts";
 import type { Rule, RuleContext } from "../types.ts";
 
 const ALLOWED_LINK_KEYS = new Set(["operationRef", "operationId", "parameters", "requestBody", "description", "server"]);
@@ -140,12 +140,7 @@ export const structureLinks: Rule = {
     const seen = new Set<string>();
 
     const visit = (doc: OasisDocument, node: Node, pointer: string, label: string): void => {
-      const resolved = resolveMaybeRef(ctx.graph, doc, node, pointer);
-      if (!isMap(resolved.node)) return;
-      const key = `${resolved.doc.filePath}::${resolved.pointer}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      checkLinkObject(ctx, resolved.doc, resolved.node, label, operationIds);
+      visitResolvedUnique(ctx.graph, seen, doc, node, pointer, (d, n) => checkLinkObject(ctx, d, n, label, operationIds));
     };
 
     for (const doc of ctx.documents) {

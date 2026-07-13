@@ -1,0 +1,7 @@
+Dog:
+  type: object
+  properties:
+    petType:
+      type: string
+    breed:
+      type: string

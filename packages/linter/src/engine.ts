@@ -18,9 +18,8 @@ export interface LintOptions {
   externalDocuments?: OasisDocument[];
 }
 
-/** Map a rule/config severity to the severity carried on emitted diagnostics. "off" never reaches here. */
-function toDiagnosticSeverity(severity: RuleSeverity): LintDiagnosticSeverity {
-  if (severity === "off") return "info"; // unreachable in practice; kept exhaustive
+/** Map a rule/config severity to the severity carried on emitted diagnostics. Callers must have already excluded "off". */
+function toDiagnosticSeverity(severity: Exclude<RuleSeverity, "off">): LintDiagnosticSeverity {
   return severity;
 }
 
@@ -118,6 +117,7 @@ export function lint(
         const range = resolveLocation(location);
         if (!range) return;
         const effective = effectiveRuleConfig(config, rule.name, range.filePath, configDir);
+        if (effective.severity === "off") return;
         const effectiveSeverity = opts?.severity ?? effective.severity;
         if (effectiveSeverity === "off") return;
         const suppressions = suppressionsByFile.get(range.filePath);

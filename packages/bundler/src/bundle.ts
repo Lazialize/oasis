@@ -4,7 +4,9 @@ import {
   COMPONENT_SECTIONS,
   type Diagnostic,
   formatPointer,
+  isLiteralDataKey,
   keyToString,
+  looksLikeMappingRef,
   type OasisDocument,
   type Range,
   type ResolvedRef,
@@ -268,7 +270,25 @@ function withSiblings(ctx: BundleContext, doc: OasisDocument, mapNode: Node, new
  * consistent behavior for 3.1 too. Follows chained path-item refs with a depth guard for safety.
  */
 function convertPathItem(ctx: BundleContext, doc: OasisDocument, node: Node, depth = 0): unknown {
-  if (depth > 20) return convertValue(ctx, doc, node, undefined);
+  if (depth > 20) {
+    // Never route a Path Item `$ref` through `convertValue`/`convertRef`: with no section hint it
+    // would fall back to "schemas" (`deriveSection`) and lift a Path Item Object into
+    // `components/schemas`, producing a malformed document. Leave the ref unresolved in place and
+    // report it instead — core never throws for unresolved refs, and this mirrors that pattern.
+    const refPair = findRefPair(node);
+    if (refPair) {
+      const scalar = refPair.value as Scalar;
+      ctx.diagnostics.push({
+        message: `Path Item "$ref" chain exceeds maximum depth (20); leaving "${scalar.value as string}" unresolved to avoid an incorrect bundle`,
+        severity: "warning",
+        code: "ref-depth-exceeded",
+        source: "bundler",
+        range: rangeOfScalar(doc, scalar),
+      });
+      return withPathItemSiblings(ctx, doc, node, { $ref: scalar.value as string });
+    }
+    return convertValue(ctx, doc, node, undefined);
+  }
 
   const refPair = findRefPair(node);
   if (refPair) {
@@ -339,16 +359,60 @@ function convertCallbacks(ctx: BundleContext, doc: OasisDocument, mapNode: Node)
 }
 
 /**
- * Keys whose value is arbitrary literal instance data (JSON Schema `example`/`default`/`enum`/
- * `const`), where a `{"$ref": "..."}` appearing inside is plain data rather than a reference to
- * lift/rewrite. `examples` is ambiguous by name alone: as a *sequence* it's the 3.1 JSON Schema
- * `examples` keyword (literal instances, same as `example`), but as a *map* it's an OpenAPI Media
- * Type/Parameter/Header `examples` field (name -> Example Object) whose entries may legitimately
- * `$ref` into `components/examples` — so only the sequence form is treated as literal data.
+ * Resolve a `discriminator.mapping` value that looks like a reference (see `looksLikeMappingRef`)
+ * and compute the pointer it should be rewritten to in the bundled output: an unresolved value is
+ * left unchanged (with a warning diagnostic, mirroring `resolveRefPair`), a same-document target
+ * is rewritten to `#<pointer>`, and an external target is lifted into `components/<section>` using
+ * the exact same `identityMap`/`deriveSection`/`deriveName` machinery `convertRef` uses for a
+ * sibling `$ref` — so a mapping entry and an equivalent `oneOf` `$ref` pointing at the same target
+ * always agree on the final pointer. Mapping entries can't hold inlined content (they're always a
+ * bare string), so — unlike a sibling `$ref` in `--dereference` mode — external targets are always
+ * lifted into `components/*`, never inlined, regardless of `ctx.dereference`.
  */
-function isLiteralDataKey(key: string, value: Node): boolean {
-  if (key === "examples") return isSeq(value);
-  return key === "example" || key === "default" || key === "enum" || key === "const";
+function resolveMappingRefTarget(ctx: BundleContext, doc: OasisDocument, value: Scalar, hint: string | undefined): string {
+  const refValue = value.value as string;
+  const range = rangeOfScalar(doc, value);
+  const result = resolveRef(ctx.graph, doc, refValue, range);
+  if (!result.ok) {
+    ctx.diagnostics.push({ ...result.diagnostic, severity: "warning" });
+    return refValue;
+  }
+
+  if (result.doc.filePath === ctx.entryDoc.filePath) return `#${result.pointer}`;
+
+  const identityKey = identityKeyOf(result);
+  let assigned = ctx.identityMap.get(identityKey);
+  if (!assigned) {
+    const section = deriveSection(result.pointer, hint);
+    const name = deriveName(ctx, result.pointer, result.doc, section);
+    assigned = { section, name };
+    // Register before recursing so ref cycles among lifted components terminate (mirrors `convertRef`).
+    ctx.identityMap.set(identityKey, assigned);
+    const content = convertValue(ctx, result.doc, result.node, section);
+    ensureSectionObject(ctx, section)[name] = content;
+  }
+  return `#/components/${assigned.section}/${assigned.name}`;
+}
+
+/**
+ * Convert a `discriminator.mapping` object: entries whose value looks like a reference (a schema
+ * name URI or `$ref`-style pointer) are resolved and rewritten consistently with how the matching
+ * sibling `oneOf`/`anyOf` `$ref` is rewritten; entries that are a bare component name are left
+ * untouched, since they aren't a reference to load or rewrite.
+ */
+function convertDiscriminatorMapping(ctx: BundleContext, doc: OasisDocument, mapNode: Node): Record<string, unknown> {
+  if (!isMap(mapNode)) return convertValue(ctx, doc, mapNode, "schemas") as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const pair of mapNode.items) {
+    const value = pair.value;
+    if (!isNode(value)) continue;
+    if (isScalar(value) && typeof value.value === "string" && looksLikeMappingRef(value.value)) {
+      out[keyToString(pair.key)] = resolveMappingRefTarget(ctx, doc, value, "schemas");
+    } else {
+      out[keyToString(pair.key)] = convertValue(ctx, doc, value, "schemas");
+    }
+  }
+  return out;
 }
 
 /**
@@ -467,10 +531,15 @@ function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undef
         // genuine `$ref` inside it is lifted/rewritten), never mistaken for literal instance data.
         // `hint` is passed through as the fallback lift section, matching the old default-case path.
         case "variables":
-        case "mapping":
         case "encoding":
         case "scopes":
           out[key] = mapChildren(ctx, doc, value, hint ?? "schemas");
+          break;
+        // `discriminator.mapping` entries are references expressed as plain strings, not `{$ref}`
+        // objects (see `convertDiscriminatorMapping`), so they need their own conversion path
+        // instead of `mapChildren`'s generic per-entry `convertValue`.
+        case "mapping":
+          out[key] = convertDiscriminatorMapping(ctx, doc, value);
           break;
         default:
           out[key] = convertValue(ctx, doc, value, hint);

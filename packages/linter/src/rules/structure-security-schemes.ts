@@ -1,7 +1,7 @@
 import { isMap, isNode, isScalar } from "yaml";
 import type { Node } from "yaml";
 import type { OasisDocument } from "@oasis/core";
-import { childAt, keyToString, resolveMaybeRef } from "../util.ts";
+import { childAt, keyToString, visitResolvedUnique } from "../util.ts";
 import type { Rule, RuleContext } from "../types.ts";
 
 const SCHEME_TYPES_30 = new Set(["apiKey", "http", "oauth2", "openIdConnect"]);
@@ -130,11 +130,9 @@ export const structureSecuritySchemes: Rule = {
       for (const pair of schemesNode.items) {
         const name = keyToString(pair.key);
         if (!isNode(pair.value)) continue;
-        const resolved = resolveMaybeRef(ctx.graph, doc, pair.value, `/components/securitySchemes/${name}`);
-        const key = `${resolved.doc.filePath}::${resolved.pointer}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        checkSecurityScheme(ctx, resolved.doc, resolved.node, `Security scheme "${name}"`);
+        visitResolvedUnique(ctx.graph, seen, doc, pair.value, `/components/securitySchemes/${name}`, (d, n) =>
+          checkSecurityScheme(ctx, d, n, `Security scheme "${name}"`),
+        );
       }
     }
   },

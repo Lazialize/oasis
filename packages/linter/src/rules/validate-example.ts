@@ -224,7 +224,15 @@ function checkScalarConstraints(schema: Node, exampleNode: Node, version: OpenAp
   return [];
 }
 
-function checkObject(env: ValidateEnv, doc: OasisDocument, schema: Node, exampleNode: Node, path: string, chain: Set<Node>): ExampleFailure[] {
+function checkObject(
+  env: ValidateEnv,
+  doc: OasisDocument,
+  schema: Node,
+  exampleNode: Node,
+  path: string,
+  chain: Set<Node>,
+  extraKnownProps: Set<string> = new Set(),
+): ExampleFailure[] {
   if (!isMap(exampleNode)) return [];
   const failures: ExampleFailure[] = [];
   const exampleKeys = new Set(exampleNode.items.map((p) => keyToString(p.key)));
@@ -239,7 +247,7 @@ function checkObject(env: ValidateEnv, doc: OasisDocument, schema: Node, example
   }
 
   const propertiesNode = childAt(schema, "properties");
-  const knownProps = new Set<string>();
+  const knownProps = new Set<string>(extraKnownProps);
   if (isMap(propertiesNode)) {
     for (const pair of propertiesNode.items) {
       const propName = keyToString(pair.key);
@@ -313,13 +321,42 @@ function checkArray(env: ValidateEnv, doc: OasisDocument, schema: Node, exampleN
   return failures;
 }
 
+/**
+ * Collect the union of `properties` keys declared across every `allOf` branch (resolving `$ref`s
+ * and recursing into nested `allOf`s, bounded depth to guard against pathological/cyclic input).
+ * Used so that a branch's own `additionalProperties: false` doesn't false-positive on properties
+ * legitimately contributed by sibling branches — the common "inherit a base via allOf" idiom that
+ * real JSON Schema validators (which combine allOf structurally) accept.
+ */
+function collectAllOfPropertyNames(env: ValidateEnv, doc: OasisDocument, allOfNode: Node, depth = 0): Set<string> {
+  const names = new Set<string>();
+  if (depth > 10 || !isSeq(allOfNode)) return names;
+  for (const item of allOfNode.items) {
+    if (!isNode(item)) continue;
+    const resolved = resolveSchema(env, { doc, node: item });
+    if (resolved === "unresolved" || !isMap(resolved.node)) continue;
+
+    const propertiesNode = childAt(resolved.node, "properties");
+    if (isMap(propertiesNode)) {
+      for (const pair of propertiesNode.items) names.add(keyToString(pair.key));
+    }
+
+    const nestedAllOf = childAt(resolved.node, "allOf");
+    if (isSeq(nestedAllOf)) {
+      for (const name of collectAllOfPropertyNames(env, resolved.doc, nestedAllOf, depth + 1)) names.add(name);
+    }
+  }
+  return names;
+}
+
 function checkAllOf(env: ValidateEnv, doc: OasisDocument, schema: Node, exampleNode: Node, path: string, chain: Set<Node>): ExampleFailure[] {
   const allOfNode = childAt(schema, "allOf");
   if (!isSeq(allOfNode)) return [];
   const failures: ExampleFailure[] = [];
+  const siblingProps = collectAllOfPropertyNames(env, doc, allOfNode);
   for (const item of allOfNode.items) {
     if (!isNode(item)) continue;
-    failures.push(...checkSchema(env, { doc, node: item }, exampleNode, chain, path));
+    failures.push(...checkSchema(env, { doc, node: item }, exampleNode, chain, path, siblingProps));
   }
   return failures;
 }
@@ -339,7 +376,14 @@ function checkOneAnyOf(env: ValidateEnv, doc: OasisDocument, schema: Node, examp
   return failures;
 }
 
-function checkSchema(env: ValidateEnv, schemaLoc: SchemaLoc, exampleNode: Node, chain: Set<Node>, path: string): ExampleFailure[] {
+function checkSchema(
+  env: ValidateEnv,
+  schemaLoc: SchemaLoc,
+  exampleNode: Node,
+  chain: Set<Node>,
+  path: string,
+  extraKnownProps: Set<string> = new Set(),
+): ExampleFailure[] {
   const resolved = resolveSchema(env, schemaLoc);
   if (resolved === "unresolved") return [];
   const { doc, node: schema } = resolved;
@@ -364,7 +408,7 @@ function checkSchema(env: ValidateEnv, schemaLoc: SchemaLoc, exampleNode: Node, 
     const failures: ExampleFailure[] = [];
     failures.push(...checkEnumConst(schema, exampleNode, path));
     failures.push(...checkScalarConstraints(schema, exampleNode, env.version, path));
-    failures.push(...checkObject(env, doc, schema, exampleNode, path, chain));
+    failures.push(...checkObject(env, doc, schema, exampleNode, path, chain, extraKnownProps));
     failures.push(...checkArray(env, doc, schema, exampleNode, path, chain));
     failures.push(...checkAllOf(env, doc, schema, exampleNode, path, chain));
     failures.push(...checkOneAnyOf(env, doc, schema, exampleNode, path, chain));

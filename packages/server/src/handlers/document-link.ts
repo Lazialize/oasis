@@ -1,6 +1,6 @@
 import { findRefs, parseRefString, rangeFromOffsets } from "@oasis/core";
 import type { OasisDocument, Range } from "@oasis/core";
-import { getDocument, getGraph, resolveEntryForPath } from "../workspace.ts";
+import { resolveDocContext } from "../workspace.ts";
 import type { ServerContext } from "../workspace.ts";
 
 export interface DocumentLinkParams {
@@ -27,10 +27,9 @@ const URL_SCHEME_RE = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//;
  * disappearing (consistent with how definition/hover degrade for unresolved refs elsewhere).
  */
 export async function getDocumentLinks(ctx: ServerContext, params: DocumentLinkParams): Promise<DocumentLinkResult[]> {
-  const entryPath = await resolveEntryForPath(ctx, params.path);
-  const graph = await getGraph(ctx, entryPath);
-  const doc = getDocument(graph, params.path);
-  if (!doc) return [];
+  const docCtx = await resolveDocContext(ctx, params.path);
+  if (!docCtx) return [];
+  const { graph, doc } = docCtx;
 
   const results: DocumentLinkResult[] = [];
   for (const ref of findRefs(doc)) {

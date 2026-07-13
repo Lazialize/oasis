@@ -294,6 +294,68 @@ describe("examples/schema-match: allOf / oneOf / anyOf", () => {
     expect(diagnostics).toEqual([]);
   });
 
+  test("allOf: additionalProperties: false on one branch does not false-positive on a sibling branch's inherited property", async () => {
+    const entry = `
+openapi: 3.0.3
+info:
+  title: Example Match
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Base:
+      type: object
+      properties:
+        id:
+          type: integer
+    Child:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - type: object
+          additionalProperties: false
+          properties:
+            name:
+              type: string
+      example:
+        id: 1
+        name: Alice
+`;
+    const diagnostics = await lintFiles({ "/virtual/entry.yaml": entry });
+    expect(diagnostics).toEqual([]);
+  });
+
+  test("allOf: additionalProperties: false on one branch still flags a property unknown to every branch", async () => {
+    const entry = `
+openapi: 3.0.3
+info:
+  title: Example Match
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Base:
+      type: object
+      properties:
+        id:
+          type: integer
+    Child:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - type: object
+          additionalProperties: false
+          properties:
+            name:
+              type: string
+      example:
+        id: 1
+        name: Alice
+        extra: nope
+`;
+    const diagnostics = await lintFiles({ "/virtual/entry.yaml": entry });
+    expect(diagnostics.length).toBe(1);
+    expect(diagnostics[0]?.message).toContain('unexpected property "extra"');
+  });
+
   test("oneOf: passes if at least one branch matches (exclusivity not enforced)", async () => {
     const doc = wrap30(`oneOf:\n  - type: string\n  - type: integer\nexample: 5`);
     const diagnostics = await lintFiles({ "/virtual/entry.yaml": doc });

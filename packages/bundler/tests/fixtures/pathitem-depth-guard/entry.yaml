@@ -1,0 +1,8 @@
+openapi: 3.0.3
+info:
+  title: Path item ref chain exceeding the depth guard
+  version: "1.0.0"
+paths:
+  /loop:
+    $ref: './loop.yaml'
+components: {}

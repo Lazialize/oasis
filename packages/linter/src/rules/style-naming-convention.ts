@@ -1,8 +1,8 @@
-import { isMap, isNode, isScalar, isSeq } from "yaml";
+import { isMap, isNode, isScalar } from "yaml";
 import type { Node } from "yaml";
 import type { OasisDocument } from "@oasis/core";
-import { iterateOperations, iteratePathItems, iterateSchemas, walkSchemaTree } from "../openapi-walk.ts";
-import { childAt, keyToString, resolveMaybeRef } from "../util.ts";
+import { collectParameterObjects, iterateOperations, iterateSchemas, walkSchemaTree } from "../openapi-walk.ts";
+import { childAt, keyToString } from "../util.ts";
 import type { Rule, RuleContext } from "../types.ts";
 
 /** Supported casing styles for the `style/naming-convention` rule's options. */
@@ -98,65 +98,8 @@ function checkComponentNames(ctx: RuleContext): void {
   }
 }
 
-interface ParameterObject {
-  doc: OasisDocument;
-  node: Node;
-}
-
-/**
- * Collect every parameter object reachable from path items, operations, and `components/parameters`,
- * deduplicated by resolved location so a parameter shared via `$ref` across several operations (or
- * also registered under `components/parameters`) is only checked once.
- */
-function collectParameterObjects(ctx: RuleContext): ParameterObject[] {
-  const seen = new Set<string>();
-  const results: ParameterObject[] = [];
-
-  function addFromArray(doc: OasisDocument, arrNode: Node | undefined, pointerPrefix: string): void {
-    if (!arrNode || !isSeq(arrNode)) return;
-    arrNode.items.forEach((item, i) => {
-      if (!isNode(item)) return;
-      const resolved = resolveMaybeRef(ctx.graph, doc, item, `${pointerPrefix}/${i}`);
-      if (!isMap(resolved.node)) return;
-      const key = `${resolved.doc.filePath}::${resolved.pointer}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      results.push({ doc: resolved.doc, node: resolved.node });
-    });
-  }
-
-  for (const pathItem of iteratePathItems(ctx.graph, ctx.entryDoc, ctx.version)) {
-    if (!isMap(pathItem.node)) continue;
-    addFromArray(pathItem.doc, childAt(pathItem.node, "parameters"), `${pathItem.pointer}/parameters`);
-  }
-  for (const op of iterateOperations(ctx.graph, ctx.entryDoc, ctx.version)) {
-    if (!isMap(op.node)) continue;
-    addFromArray(op.doc, childAt(op.node, "parameters"), `${op.pointer}/parameters`);
-  }
-  for (const doc of ctx.documents) {
-    const root = doc.yamlDoc.contents;
-    if (!root || !isMap(root)) continue;
-    const componentsNode = childAt(root, "components");
-    if (!componentsNode || !isMap(componentsNode)) continue;
-    const parametersNode = childAt(componentsNode, "parameters");
-    if (!parametersNode || !isMap(parametersNode)) continue;
-
-    for (const pair of parametersNode.items) {
-      const name = keyToString(pair.key);
-      if (!isNode(pair.value) || !isMap(pair.value)) continue;
-      const pointer = `/components/parameters/${name}`;
-      const key = `${doc.filePath}::${pointer}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      results.push({ doc, node: pair.value });
-    }
-  }
-
-  return results;
-}
-
 function checkParameterNames(ctx: RuleContext): void {
-  for (const param of collectParameterObjects(ctx)) {
+  for (const param of collectParameterObjects(ctx.graph, ctx.entryDoc, ctx.documents, ctx.version)) {
     const style = optionsForDoc(ctx, param.doc).parameterName;
     if (!style) continue;
 

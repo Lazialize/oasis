@@ -116,6 +116,7 @@ oasis bundle openapi.yaml --dereference
 
 - External `$ref`s are lifted into `components/*` and rewritten to `#/components/...`; the same target is lifted once, and name conflicts are resolved deterministically (`User`, `User_2`, …)
 - Path Item `$ref`s (`paths: { /users: { $ref: './paths/users.yaml' } }`) are inlined in place — 3.0 has no `components/pathItems`, and the same strategy is used for 3.1 for consistency
+- `discriminator.mapping` values that are ref-like strings (file paths / pointers) are rewritten like `$ref`s, and files referenced only from a mapping are loaded; bare component-name mapping values are untouched
 - Reference cycles terminate correctly; unresolved refs are kept verbatim with a warning
 
 **`--dereference`**: instead of lifting external `$ref`s into `components/*`, every `$ref` — internal
@@ -320,11 +321,11 @@ documents don't support comments, so inline suppression isn't available for them
 }
 ```
 
-`rule` is either a built-in rule name (see [Built-in rules](#built-in-rules)) or `oasis/config` — a
-reserved id for diagnostics about the configuration or invocation itself (an unknown rule name in
-`oasis.config.jsonc`, a declared `entries` path that doesn't exist, …) rather than about the linted
-document. `oasis/config` isn't a real rule: it can't be configured or suppressed, and doesn't
-appear in the built-in rules table.
+`rule` is either a built-in rule name (see [Built-in rules](#built-in-rules)), `oasis/config`, or
+`syntax-error`. `oasis/config` is a reserved id for diagnostics about the configuration or invocation
+itself (an unknown rule name in `oasis.config.jsonc`, a declared `entries` path that doesn't exist, …)
+rather than about the linted document, and isn't a real rule: it can't be configured or suppressed,
+and doesn't appear in the built-in rules table. `syntax-error` is emitted for YAML/JSON parse errors.
 
 Pretty output (the default, no `--format` given) uses the same cwd-relative `file` paths and
 `error`/`warn`/`info` severity tokens.

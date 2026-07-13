@@ -171,9 +171,11 @@ function checkConsistency(ctx: RuleContext, doc: OasisDocument, schema: Node): v
   const additionalPropertiesIsFalse = !!additionalProperties && isScalar(additionalProperties) && additionalProperties.value === false;
   if (isSeq(requiredNode) && isMap(propertiesNode) && additionalPropertiesIsFalse) {
     const propertyNames = new Set(propertiesNode.items.map((p) => keyToString(p.key)));
+    // `patternProperties` is 3.1-only (JSON Schema 2020-12); on 3.0 there's no such escape hatch.
+    const patternRegexes = ctx.version === "3.1" ? compiledPatternProperties(schema) : [];
     for (const item of requiredNode.items) {
       const name = stringValue(isNode(item) ? item : undefined);
-      if (name !== undefined && !propertyNames.has(name)) {
+      if (name !== undefined && !propertyNames.has(name) && !patternRegexes.some((re) => re.test(name))) {
         ctx.report(
           { doc, node: isNode(item) ? item : requiredNode },
           `"required" lists "${name}", but "additionalProperties: false" and "properties" does not define it; this schema can never be satisfied.`,
@@ -181,6 +183,22 @@ function checkConsistency(ctx: RuleContext, doc: OasisDocument, schema: Node): v
       }
     }
   }
+}
+
+/** Compiled `patternProperties` (3.1) regexes on `schema`, skipping any that fail to compile. */
+function compiledPatternProperties(schema: Node): RegExp[] {
+  const patternPropertiesNode = childAt(schema, "patternProperties");
+  if (!isMap(patternPropertiesNode)) return [];
+  const regexes: RegExp[] = [];
+  for (const pair of patternPropertiesNode.items) {
+    const pattern = keyToString(pair.key);
+    try {
+      regexes.push(new RegExp(pattern));
+    } catch {
+      // Invalid/unsupported regex syntax: skip rather than false-positive/negative on it.
+    }
+  }
+  return regexes;
 }
 
 function checkPattern(ctx: RuleContext, doc: OasisDocument, schema: Node): void {

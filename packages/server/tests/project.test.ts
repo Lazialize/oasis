@@ -10,6 +10,7 @@ import { getCompletions } from "../src/handlers/completion.ts";
 import { getDefinition } from "../src/handlers/definition.ts";
 import {
   discoverProjectUpward,
+  isConfigFilePath,
   loadConfigFilesFromInit,
   loadProjectAtPath,
   scanWorkspaceRootsForProjects,
@@ -340,6 +341,29 @@ describe("project mode", () => {
     const ctx = createServerContext(new InMemoryFileSystem(files));
     await scanWorkspaceRootsForProjects(ctx, [ROOT]);
     expect(ctx.projects.has(CONFIG_PATH)).toBe(false);
+  });
+});
+
+describe("isConfigFilePath", () => {
+  test("matches a POSIX-style path", () => {
+    expect(isConfigFilePath("/proj/oasis.config.jsonc")).toBe(true);
+  });
+
+  test("matches a Windows-style path (backslash separators, as produced by URI.fsPath on Windows)", () => {
+    expect(isConfigFilePath("C:\\proj\\oasis.config.jsonc")).toBe(true);
+  });
+
+  test("matches the bare filename with no directory", () => {
+    expect(isConfigFilePath("oasis.config.jsonc")).toBe(true);
+  });
+
+  test("does not match a file that merely ends with the config name as a substring", () => {
+    expect(isConfigFilePath("/proj/not-oasis.config.jsonc")).toBe(false);
+  });
+
+  test("does not match an unrelated file", () => {
+    expect(isConfigFilePath("/proj/openapi.yaml")).toBe(false);
+    expect(isConfigFilePath("C:\\proj\\openapi.yaml")).toBe(false);
   });
 });
 

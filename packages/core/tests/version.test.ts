@@ -47,12 +47,15 @@ describe("detectVersion", () => {
     expect(detectVersion(doc("3.1-rc1"))).toBe("3.1");
   });
 
-  test("handles YAML unquoted numbers (coerced to strings)", () => {
-    // YAML unquoted 3.1 is parsed as the number 3.1, which stringifies as "3.1"
+  test("handles YAML unquoted numbers via raw source text, not JS coercion", () => {
+    // YAML unquoted 3.1 is parsed as the number 3.1; raw source text is "3.1".
     expect(detectVersion(docUnquoted("3.1"))).toBe("3.1");
-    // Note: YAML unquoted 3.0 becomes the number 3.0, which stringifies as "3" in JavaScript.
-    // This edge case is not supported since "3" does not match our regex.
-    expect(detectVersion(docUnquoted("3.0"))).toBeUndefined();
+    // YAML unquoted 3.0 is parsed as the number 3 (JS would stringify to "3", losing the ".0"),
+    // but the raw source text is "3.0", so detection now works correctly.
+    expect(detectVersion(docUnquoted("3.0"))).toBe("3.0");
+    // YAML unquoted 3.10 is parsed as the number 3.1 (JS would stringify to "3.1", wrongly
+    // matching 3.1.x), but the raw source text is "3.10", which correctly does NOT match 3.1.x.
+    expect(detectVersion(docUnquoted("3.10"))).toBeUndefined();
   });
 
   test("returns undefined when the field is absent", () => {

@@ -55,6 +55,52 @@ describe("structure/field-types", () => {
     const diagnostics = await lintFixture("valid/openapi.yaml");
     expect(diagnostics.some((d) => d.rule === "structure/field-types")).toBe(false);
   });
+
+  describe("responses status code keys are case-sensitive (lowercase default, uppercase XX ranges)", () => {
+    const docWithStatus = (status: string) => `
+openapi: 3.0.3
+info:
+  title: T
+  version: "1.0.0"
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '${status}':
+          description: OK
+`;
+
+    test('"2xx" (lowercase range) is flagged, not silently accepted', async () => {
+      const fs = new InMemoryFileSystem({ "/virtual/entry.yaml": docWithStatus("2xx") });
+      const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+      const diagnostics = lint(graph, resolveConfig(undefined));
+      const d = diagnostics.find((d) => d.rule === "structure/field-types" && d.message.includes("not a valid HTTP status code"));
+      expect(d).toBeDefined();
+    });
+
+    test('"DEFAULT" (uppercase) is flagged, not silently accepted', async () => {
+      const fs = new InMemoryFileSystem({ "/virtual/entry.yaml": docWithStatus("DEFAULT") });
+      const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+      const diagnostics = lint(graph, resolveConfig(undefined));
+      const d = diagnostics.find((d) => d.rule === "structure/field-types" && d.message.includes("not a valid HTTP status code"));
+      expect(d).toBeDefined();
+    });
+
+    test('"2XX" (correct uppercase range) is accepted', async () => {
+      const fs = new InMemoryFileSystem({ "/virtual/entry.yaml": docWithStatus("2XX") });
+      const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+      const diagnostics = lint(graph, resolveConfig(undefined));
+      expect(diagnostics.some((d) => d.rule === "structure/field-types" && d.message.includes("not a valid HTTP status code"))).toBe(false);
+    });
+
+    test('"default" (correct lowercase) is accepted', async () => {
+      const fs = new InMemoryFileSystem({ "/virtual/entry.yaml": docWithStatus("default") });
+      const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+      const diagnostics = lint(graph, resolveConfig(undefined));
+      expect(diagnostics.some((d) => d.rule === "structure/field-types" && d.message.includes("not a valid HTTP status code"))).toBe(false);
+    });
+  });
 });
 
 describe("structure/http-methods", () => {
@@ -295,6 +341,85 @@ describe("structure/schema-keywords", () => {
   test("valid 3.1 fixture passes", async () => {
     const diagnostics = await lintFixture("structure/schema-keywords-valid-31.yaml");
     expect(diagnostics.some((d) => d.rule === "structure/schema-keywords")).toBe(false);
+  });
+
+  describe('"required" vs "additionalProperties: false" consistency accounts for 3.1 patternProperties', () => {
+    const doc31 = (patternProperties: string) => `
+openapi: 3.1.0
+info:
+  title: T
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Thing:
+      type: object
+      required: [foo_id]
+      properties:
+        name:
+          type: string
+      additionalProperties: false
+${patternProperties}
+`;
+
+    test("a required name matched by a patternProperties regex is not flagged", async () => {
+      const fs = new InMemoryFileSystem({
+        "/virtual/entry.yaml": doc31("      patternProperties:\n        '^.*_id$':\n          type: integer"),
+      });
+      const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+      const diagnostics = lint(graph, resolveConfig(undefined));
+      expect(diagnostics.some((d) => d.rule === "structure/schema-keywords" && d.message.includes("can never be satisfied"))).toBe(false);
+    });
+
+    test("a required name matched by no patternProperties regex is still flagged", async () => {
+      const fs = new InMemoryFileSystem({
+        "/virtual/entry.yaml": doc31("      patternProperties:\n        '^bar_.*$':\n          type: integer"),
+      });
+      const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+      const diagnostics = lint(graph, resolveConfig(undefined));
+      const d = diagnostics.find(
+        (d) => d.rule === "structure/schema-keywords" && d.message.includes('"required" lists "foo_id"') && d.message.includes("can never be satisfied"),
+      );
+      expect(d).toBeDefined();
+    });
+
+    test("an invalid patternProperties regex is skipped rather than crashing or false-positive matching", async () => {
+      const fs = new InMemoryFileSystem({
+        "/virtual/entry.yaml": doc31("      patternProperties:\n        '(unclosed':\n          type: integer"),
+      });
+      const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+      const diagnostics = lint(graph, resolveConfig(undefined));
+      const d = diagnostics.find(
+        (d) => d.rule === "structure/schema-keywords" && d.message.includes('"required" lists "foo_id"') && d.message.includes("can never be satisfied"),
+      );
+      expect(d).toBeDefined();
+    });
+
+    test("3.0 documents don't get the patternProperties exemption (not a legal 3.0 keyword)", async () => {
+      const doc30 = `
+openapi: 3.0.3
+info:
+  title: T
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Thing:
+      type: object
+      required: [foo_id]
+      properties:
+        name:
+          type: string
+      additionalProperties: false
+`;
+      const fs = new InMemoryFileSystem({ "/virtual/entry.yaml": doc30 });
+      const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+      const diagnostics = lint(graph, resolveConfig(undefined));
+      const d = diagnostics.find(
+        (d) => d.rule === "structure/schema-keywords" && d.message.includes('"required" lists "foo_id"') && d.message.includes("can never be satisfied"),
+      );
+      expect(d).toBeDefined();
+    });
   });
 });
 

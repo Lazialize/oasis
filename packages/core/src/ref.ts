@@ -38,7 +38,7 @@ export function parseRefString(ref: string): RefParts {
  * Object), whose entries may legitimately `$ref` into `components/examples` — so only the
  * sequence form is treated as literal data.
  */
-function isLiteralDataKey(key: string, value: Node): boolean {
+export function isLiteralDataKey(key: string, value: Node): boolean {
   if (key === "examples") return isSeq(value);
   return key === "example" || key === "default" || key === "enum" || key === "const";
 }
@@ -51,7 +51,7 @@ function isLiteralDataKey(key: string, value: Node): boolean {
  * legitimately carry a real `$ref`), not literal instance data. `examples` qualifies only in its
  * *map* form (name -> Example Object); its *sequence* form is the JSON Schema literal keyword.
  */
-const CONTAINER_KEYS = new Set<string>([
+export const CONTAINER_KEYS = new Set<string>([
   "responses",
   "properties",
   "patternProperties",
@@ -70,9 +70,22 @@ const CONTAINER_KEYS = new Set<string>([
   "definitions",
 ]);
 
-function isContainerKey(key: string, value: Node): boolean {
+export function isContainerKey(key: string, value: Node): boolean {
   if (key === "examples") return isMap(value);
   return CONTAINER_KEYS.has(key);
+}
+
+/**
+ * Heuristic distinguishing a `discriminator.mapping` value that is a reference (a schema-name URI
+ * or `$ref`-style pointer, e.g. "./dog.yaml#/Dog" or "#/components/schemas/Dog") from one that is
+ * a bare component name (e.g. "Dog"), which OpenAPI's discriminator mapping also allows and which
+ * must be left untouched — it names a component, it isn't a place to load/rewrite. Per the OpenAPI
+ * spec, a mapping value may be either a schema name or a reference, with no syntactic marker other
+ * than "does it look like a path/URI/pointer", so this treats any value containing a path
+ * separator, fragment marker, or file-extension-ish dot as a reference.
+ */
+export function looksLikeMappingRef(value: string): boolean {
+  return value.includes("/") || value.includes("#") || value.includes(".");
 }
 
 export interface FoundRef {
@@ -110,7 +123,12 @@ export function findRefs(doc: OasisDocument): FoundRef[] {
   // `inContainer` marks that `node`'s own keys are user/spec-named entries (see `isContainerKey`),
   // so the literal-data key check is suppressed for them — an entry named `default`/`example` under
   // `responses`/`examples`/`properties`/... is a real object that may carry a genuine `$ref`.
-  function walk(node: Node, literal: boolean, inContainer: boolean): void {
+  //
+  // `isMappingObject` marks that `node` itself *is* a Discriminator Object's `mapping` map (not
+  // just any map that happens to be reached via a key named "mapping" — a Schema Object property
+  // named "mapping" is plain data, not a discriminator mapping). It's only ever set true for the
+  // direct `mapping` child of a node reached via `isDiscriminatorObject`.
+  function walk(node: Node, literal: boolean, inContainer: boolean, isMappingObject: boolean, isDiscriminatorObject = false): void {
     const resolved = resolveAlias(node, doc.yamlDoc);
     if (!resolved) return;
     const seen = literal ? seenLiteralContext : seenRefContext;
@@ -132,6 +150,23 @@ export function findRefs(doc: OasisDocument): FoundRef[] {
             });
           }
         }
+        // `discriminator.mapping` entries are references expressed as plain strings (e.g.
+        // `dog: './dog.yaml#/Dog'`), not `{$ref}` objects, so they're invisible to the check above.
+        // A bare component name (e.g. `dog: Dog`) is left alone (see `looksLikeMappingRef`).
+        if (isMappingObject) {
+          for (const pair of resolved.items) {
+            const value = pair.value;
+            if (isScalar(value) && typeof value.value === "string" && looksLikeMappingRef(value.value)) {
+              const range = value.range;
+              results.push({
+                value: value.value,
+                range: range
+                  ? rangeFromOffsets(doc.filePath, doc.lineCounter, range[0], range[1])
+                  : zeroRange(doc.filePath),
+              });
+            }
+          }
+        }
       }
       for (const pair of resolved.items) {
         if (!isNode(pair.value)) continue;
@@ -146,16 +181,21 @@ export function findRefs(doc: OasisDocument): FoundRef[] {
         // container (e.g. `Schema.properties`) is still recognised on the next descent.
         const childContainer =
           !inContainer && !literal && keyStr !== undefined && isContainerKey(keyStr, pair.value);
-        walk(pair.value, childLiteral, childContainer);
+        // Only a `mapping` key reached as the *direct* child of a Discriminator Object counts —
+        // an ordinary Schema Object property that happens to be named "mapping" (e.g.
+        // `properties: { mapping: { type: string } }`) is plain data, not a discriminator mapping.
+        const childIsMappingObject = !literal && isDiscriminatorObject && keyStr === "mapping" && isMap(pair.value);
+        const childIsDiscriminatorObject = !literal && keyStr === "discriminator" && isMap(pair.value);
+        walk(pair.value, childLiteral, childContainer, childIsMappingObject, childIsDiscriminatorObject);
       }
     } else if (isSeq(resolved)) {
       for (const item of resolved.items) {
-        if (isNode(item)) walk(item, literal, false);
+        if (isNode(item)) walk(item, literal, false, false, false);
       }
     }
   }
 
-  if (isNode(root)) walk(root, false, false);
+  if (isNode(root)) walk(root, false, false, false, false);
   findRefsCache.set(doc, results);
   return results;
 }

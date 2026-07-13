@@ -1,7 +1,7 @@
-import { isMap, isNode, isScalar, isSeq } from "yaml";
+import { isMap, isNode, isScalar } from "yaml";
 import type { Node } from "yaml";
 import type { OasisDocument } from "@oasis/core";
-import { iterateMediaTypes, iterateOperations, iteratePathItems } from "../openapi-walk.ts";
+import { collectParameterObjects, iterateMediaTypes } from "../openapi-walk.ts";
 import { childAt, isRefObject, keyToString, resolveMaybeRef } from "../util.ts";
 import type { Rule, RuleContext } from "../types.ts";
 
@@ -42,53 +42,6 @@ function checkExamplesMap(ctx: RuleContext, doc: OasisDocument, mapNode: Node, p
   }
 }
 
-/** Every Parameter Object reachable from path items, operations, and `components/parameters`. */
-function collectParameterObjects(ctx: RuleContext): { doc: OasisDocument; node: Node }[] {
-  const seen = new Set<string>();
-  const results: { doc: OasisDocument; node: Node }[] = [];
-
-  function addFromArray(doc: OasisDocument, arrNode: Node | undefined, pointerPrefix: string): void {
-    if (!arrNode || !isSeq(arrNode)) return;
-    arrNode.items.forEach((item, i) => {
-      if (!isNode(item)) return;
-      const resolved = resolveMaybeRef(ctx.graph, doc, item, `${pointerPrefix}/${i}`);
-      if (!isMap(resolved.node)) return;
-      const key = `${resolved.doc.filePath}::${resolved.pointer}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      results.push({ doc: resolved.doc, node: resolved.node });
-    });
-  }
-
-  for (const pathItem of iteratePathItems(ctx.graph, ctx.entryDoc, ctx.version)) {
-    if (!isMap(pathItem.node)) continue;
-    addFromArray(pathItem.doc, childAt(pathItem.node, "parameters"), `${pathItem.pointer}/parameters`);
-  }
-  for (const op of iterateOperations(ctx.graph, ctx.entryDoc, ctx.version)) {
-    if (!isMap(op.node)) continue;
-    addFromArray(op.doc, childAt(op.node, "parameters"), `${op.pointer}/parameters`);
-  }
-  for (const doc of ctx.documents) {
-    const root = doc.yamlDoc.contents;
-    if (!root || !isMap(root)) continue;
-    const componentsNode = childAt(root, "components");
-    if (!componentsNode || !isMap(componentsNode)) continue;
-    const parametersNode = childAt(componentsNode, "parameters");
-    if (!parametersNode || !isMap(parametersNode)) continue;
-    for (const pair of parametersNode.items) {
-      const name = keyToString(pair.key);
-      if (!isNode(pair.value) || !isMap(pair.value)) continue;
-      const pointer = `/components/parameters/${name}`;
-      const key = `${doc.filePath}::${pointer}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      results.push({ doc, node: pair.value });
-    }
-  }
-
-  return results;
-}
-
 export const structureExamples: Rule = {
   name: "structure/examples",
   description:
@@ -109,7 +62,7 @@ export const structureExamples: Rule = {
       if (examplesNode) checkExamplesMap(ctx, site.doc, examplesNode, `${site.pointer}/examples`, `"${site.pointer}"`);
     }
 
-    for (const param of collectParameterObjects(ctx)) {
+    for (const param of collectParameterObjects(ctx.graph, ctx.entryDoc, ctx.documents, ctx.version)) {
       const examplesNode = childAt(param.node, "examples");
       if (!examplesNode) continue;
       const nameNode = childAt(param.node, "name");

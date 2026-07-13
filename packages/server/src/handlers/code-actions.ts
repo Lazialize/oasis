@@ -25,7 +25,7 @@ import {
   resolveMaybeRef,
 } from "@oasis/linter";
 import { relativeRefPath } from "../ref-target-path.ts";
-import { findAllGraphsContaining, getDocument, getGraph, resolveEntryForPath } from "../workspace.ts";
+import { findAllGraphsContaining, getDocument, resolveDocContext } from "../workspace.ts";
 import type { ServerContext } from "../workspace.ts";
 
 /** A single-file text edit, matching the shape used by rename/references. */
@@ -680,11 +680,11 @@ function buildInlineRef(graph: WorkspaceGraph, entryDoc: OasisDocument, doc: Oas
  * since robust JSON-aware insertion (comma/formatting bookkeeping) is out of scope for now.
  */
 export async function getCodeActions(ctx: ServerContext, params: CodeActionsParams): Promise<CodeActionResult[]> {
-  const entryPath = await resolveEntryForPath(ctx, params.path);
-  const graph = await getGraph(ctx, entryPath);
-  const doc = getDocument(graph, params.path);
+  const docCtx = await resolveDocContext(ctx, params.path);
+  if (!docCtx) return [];
+  const { graph, doc, entryPath } = docCtx;
   const entryDoc = getDocument(graph, entryPath);
-  if (!doc || !entryDoc || !isYamlDocument(doc) || !isYamlDocument(entryDoc)) return [];
+  if (!entryDoc || !isYamlDocument(doc) || !isYamlDocument(entryDoc)) return [];
 
   const results: CodeActionResult[] = [];
 

@@ -6,7 +6,7 @@ import { iterateOperations, iteratePathItems } from "../openapi-walk.ts";
 import { childAt, isRefObject, keyToString } from "../util.ts";
 import type { Rule, RuleContext } from "../types.ts";
 
-const STATUS_CODE = /^(default|[1-5](\d{2}|XX))$/i;
+const STATUS_CODE = /^(default|[1-5](\d{2}|XX))$/;
 const PARAMETER_LOCATIONS = new Set(["query", "header", "path", "cookie"]);
 
 function reportWrongType(ctx: RuleContext, doc: OasisDocument, node: Node, fieldPath: string, expected: string): void {

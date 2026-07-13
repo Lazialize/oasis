@@ -3,13 +3,8 @@ import type { Node } from "yaml";
 import { resolveRef } from "@oasis/core";
 import type { OasisDocument } from "@oasis/core";
 import { iterateSchemas, walkSchemaTree } from "../openapi-walk.ts";
-import { childAt, isRefObject, keyToString, resolveMaybeRef } from "../util.ts";
+import { childAt, isRefObject, isUrlLike, keyToString, resolveMaybeRef, toSchemaRefString } from "../util.ts";
 import type { Rule, RuleContext } from "../types.ts";
-
-/** Mapping/URL-ish values (absolute URIs) are external targets; skip resolution for those. */
-function isUrlLike(value: string): boolean {
-  return /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(value) || value.startsWith("//");
-}
 
 function scalarStrings(node: Node | undefined): string[] {
   if (!isSeq(node)) return [];
@@ -78,8 +73,7 @@ function checkMapping(ctx: RuleContext, doc: OasisDocument, mappingNode: Node, l
     const value = pair.value.value;
     if (isUrlLike(value)) continue; // external target, skip
 
-    const refString = value.includes("#") ? value : `#/components/schemas/${value}`;
-    const result = resolveRef(ctx.graph, doc, refString);
+    const result = resolveRef(ctx.graph, doc, toSchemaRefString(value));
     if (!result.ok) {
       ctx.report(
         { doc, node: pair.value },
