@@ -42,4 +42,76 @@ describe("extractSuppressions", () => {
     expect(isSuppressed(suppressions, "not-a-real-rule", 1)).toBe(true);
     expect(isSuppressed(suppressions, "real-rule", 1)).toBe(false);
   });
+
+  test("a genuine trailing comment on the same line still suppresses (end-of-line directive)", () => {
+    const suppressions = extractSuppressions(
+      ["foo: 1 # oasis-disable-next-line rule-a", "bar: 2"].join("\n"),
+    );
+    expect(isSuppressed(suppressions, "rule-a", 1)).toBe(true);
+  });
+
+  test("directive-looking text inside a block scalar (|) is not a real directive", () => {
+    const text = [
+      "foo:",
+      "  description: |",
+      "    See the note below.",
+      "    #oasis-disable-next-line rule-a",
+      "    more text",
+      "bar: 2",
+    ].join("\n");
+    const suppressions = extractSuppressions(text);
+    // Line 5 (0-based) is `bar: 2`, immediately following the fake directive line; it must not
+    // be suppressed since the "directive" is just scalar content, not a YAML comment.
+    expect(isSuppressed(suppressions, "rule-a", 5)).toBe(false);
+    expect(suppressions.nextLine.size).toBe(0);
+    expect(suppressions.file).toBeUndefined();
+  });
+
+  test("directive-looking text inside a folded block scalar (>) is not a real directive", () => {
+    const text = [
+      "foo:",
+      "  description: >",
+      "    # oasis-disable-file rule-a",
+      "bar: 2",
+    ].join("\n");
+    const suppressions = extractSuppressions(text);
+    expect(isSuppressed(suppressions, "rule-a", 0)).toBe(false);
+    expect(suppressions.file).toBeUndefined();
+  });
+
+  test("directive-looking text inside a single-quoted string is not a real directive", () => {
+    const text = ["foo: 'text # oasis-disable-next-line rule-a more'", "bar: 2"].join("\n");
+    const suppressions = extractSuppressions(text);
+    expect(isSuppressed(suppressions, "rule-a", 1)).toBe(false);
+  });
+
+  test("directive-looking text inside a double-quoted string is not a real directive", () => {
+    const text = ["foo: \"text # oasis-disable-file rule-a more\"", "bar: 2"].join("\n");
+    const suppressions = extractSuppressions(text);
+    expect(isSuppressed(suppressions, "rule-a", 0)).toBe(false);
+    expect(suppressions.file).toBeUndefined();
+  });
+
+  test("a genuine oasis-disable-file comment nested after a block scalar still suppresses", () => {
+    const text = [
+      "foo:",
+      "  description: |",
+      "    hello",
+      "# oasis-disable-file rule-a",
+      "bar: 2",
+    ].join("\n");
+    const suppressions = extractSuppressions(text);
+    expect(isSuppressed(suppressions, "rule-a", 0)).toBe(true);
+    expect(isSuppressed(suppressions, "rule-a", 99)).toBe(true);
+  });
+
+  test("a malformed document does not crash extraction", () => {
+    expect(() => extractSuppressions("foo: [1, 2\nbar: }")).not.toThrow();
+  });
+
+  test("JSON documents are unaffected (no comments, no crash)", () => {
+    const suppressions = extractSuppressions('{"foo": 1, "bar": 2}');
+    expect(suppressions.file).toBeUndefined();
+    expect(suppressions.nextLine.size).toBe(0);
+  });
 });

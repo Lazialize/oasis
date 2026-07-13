@@ -1,0 +1,7 @@
+UpdatedPet:
+  post:
+    operationId: updatedPetWebhook
+    summary: Original summary
+    responses:
+      '200':
+        description: OK

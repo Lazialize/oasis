@@ -1,0 +1,7 @@
+OnEvent:
+  '{$request.body#/url}':
+    post:
+      operationId: onEventCallback
+      responses:
+        '200':
+          description: OK

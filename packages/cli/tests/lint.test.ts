@@ -90,6 +90,28 @@ describe("oasis lint CLI", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Usage:");
   });
+
+  test("a missing entry file is reported as an error diagnostic, not silently exit 0", async () => {
+    const result = await runCli(["lint", "/does/not/exist.yaml", "--format", "json"]);
+    const report = JSON.parse(result.stdout);
+    expect(report.diagnostics).toHaveLength(1);
+    expect(report.diagnostics[0]).toMatchObject({ rule: "refs/no-unresolved", severity: "error" });
+    expect(report.diagnostics[0].message).toContain("exist.yaml");
+    expect(report.summary).toMatchObject({ errors: 1 });
+    expect(result.exitCode).toBe(1);
+  });
+
+  test("exits 2 on a single-dash unknown flag (not silently treated as an entry path)", async () => {
+    const result = await runCli(["lint", "-format", "json"]);
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain('Unknown flag "-format"');
+  });
+
+  test("`--` allows linting an entry whose name starts with a dash", async () => {
+    const result = await runCli(["lint", "--", `${fixturesRoot}/-weird.yaml`]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("No lint issues found.");
+  });
 });
 
 describe("oasis lint (no args, config entries)", () => {

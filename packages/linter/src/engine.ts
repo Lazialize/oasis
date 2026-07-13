@@ -76,9 +76,21 @@ export function lint(
     });
   }
 
-  if (!entryDoc) return sortDiagnostics(diagnostics);
-
   const configDir = options.configPath ? dirname(options.configPath) : undefined;
+
+  if (!entryDoc) {
+    // The entry itself failed to load (e.g. the file doesn't exist). No document ever gets a
+    // chance to $ref it, so `refs/no-unresolved` never runs to surface `graph.diagnostics` for
+    // it the way it does for referenced-but-missing files. Fold it in here instead, once, so
+    // `lint` never silently reports zero diagnostics for a broken entry path.
+    for (const d of graph.diagnostics) {
+      if (d.code !== "no-unresolved-ref") continue;
+      const effective = effectiveRuleConfig(config, "refs/no-unresolved", d.range.filePath, configDir);
+      if (effective.severity === "off") continue;
+      diagnostics.push({ rule: "refs/no-unresolved", severity: toDiagnosticSeverity(effective.severity), message: d.message, range: d.range });
+    }
+    return sortDiagnostics(diagnostics);
+  }
 
   // Inline `# oasis-disable-*` comment directives, per file. Syntax-error diagnostics above are
   // pushed directly (not through `report()`) and are therefore never subject to suppression.

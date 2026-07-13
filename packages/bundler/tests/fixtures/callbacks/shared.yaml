@@ -1,0 +1,7 @@
+components:
+  schemas:
+    Event:
+      type: object
+      properties:
+        id:
+          type: string

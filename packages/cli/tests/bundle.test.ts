@@ -120,4 +120,18 @@ describe("oasis bundle CLI", () => {
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toContain("failed to parse");
   });
+
+  test("`--` allows bundling an entry whose name starts with a dash", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "oasis-bundle-dash-"));
+    const entryPath = join(dir, "-weird.yaml");
+    try {
+      await Bun.write(entryPath, await readFile(`${fixturesRoot}/bundle/entry.yaml`, "utf-8"));
+      await Bun.write(join(dir, "shared.yaml"), await readFile(`${fixturesRoot}/bundle/shared.yaml`, "utf-8"));
+      const result = await runCli(["bundle", "--", entryPath]);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("#/components/schemas/Pet");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

@@ -41,6 +41,27 @@ describe("security/defined", () => {
     expect(d?.range.filePath).toBe(`${fixturesRoot}/security/multifile/paths-pets.yaml`);
   });
 
+  test("flags an oauth2 scope not declared by any flow", async () => {
+    const diagnostics = await lintFixture("security/scopes-unknown.yaml");
+    const d = diagnostics.find((d) => d.rule === "security/defined");
+    expect(d).toBeDefined();
+    expect(d?.severity).toBe("error");
+    expect(d?.message).toContain('scope "write:pets"');
+    expect(d?.message).toContain('"oauth"');
+  });
+
+  test("flags a non-empty scope list on a non-oauth2/openIdConnect scheme", async () => {
+    const diagnostics = await lintFixture("security/scopes-on-apikey.yaml");
+    const d = diagnostics.find((d) => d.rule === "security/defined");
+    expect(d).toBeDefined();
+    expect(d?.message).toContain('type "apiKey"');
+  });
+
+  test("accepts declared oauth2 scopes (any flow), openIdConnect scopes, and empty scope lists", async () => {
+    const diagnostics = await lintFixture("security/scopes-valid.yaml");
+    expect(diagnostics.some((d) => d.rule === "security/defined")).toBe(false);
+  });
+
   test("valid fixture passes", async () => {
     const diagnostics = await lintFixture("valid/openapi.yaml");
     expect(diagnostics.some((d) => d.rule === "security/defined")).toBe(false);

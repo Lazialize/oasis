@@ -301,12 +301,39 @@ function withPathItemSiblings(ctx: BundleContext, doc: OasisDocument, node: Node
   return base;
 }
 
-function convertPathsMap(ctx: BundleContext, doc: OasisDocument, mapNode: Node): Record<string, unknown> {
+/**
+ * Convert a map whose values are Path Item Objects — the shared shape behind `paths`, 3.1
+ * root-level `webhooks`, and a Callback Object's runtime-expression entries. Each value is routed
+ * through `convertPathItem` so a path-item `$ref` is inlined in place (never lifted into
+ * `components`) while refs *inside* the inlined path item are lifted normally.
+ */
+function convertPathItemMap(ctx: BundleContext, doc: OasisDocument, mapNode: Node): Record<string, unknown> {
   if (!isMap(mapNode)) return convertValue(ctx, doc, mapNode, undefined) as Record<string, unknown>;
   const out: Record<string, unknown> = {};
   for (const pair of mapNode.items) {
     if (!isNode(pair.value)) continue;
     out[keyToString(pair.key)] = convertPathItem(ctx, doc, pair.value);
+  }
+  return out;
+}
+
+/**
+ * Convert an operation's `callbacks` field: a map of name -> (Callback Object | Reference Object).
+ * A `$ref` at `callbacks/<name>` is a reference to a whole Callback Object and is lifted into
+ * `components/callbacks` like any other component. Otherwise the value is a Callback Object — a map
+ * of runtime expression -> Path Item Object — whose entries must be treated as path items (via
+ * `convertPathItemMap`), NOT as liftable components, so an external path-item `$ref` under an
+ * expression key is inlined in place rather than lifted as a bare Path Item.
+ */
+function convertCallbacks(ctx: BundleContext, doc: OasisDocument, mapNode: Node): Record<string, unknown> {
+  if (!isMap(mapNode)) return convertValue(ctx, doc, mapNode, "callbacks") as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const pair of mapNode.items) {
+    const value = pair.value;
+    if (!isNode(value)) continue;
+    const refPair = findRefPair(value);
+    // `$ref` at callbacks/<name>: lift the whole Callback Object into components/callbacks.
+    out[keyToString(pair.key)] = refPair ? convertRef(ctx, doc, value, refPair, "callbacks") : convertPathItemMap(ctx, doc, value);
   }
   return out;
 }
@@ -387,7 +414,7 @@ function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undef
       }
       switch (key) {
         case "paths":
-          out[key] = convertPathsMap(ctx, doc, value);
+          out[key] = convertPathItemMap(ctx, doc, value);
           break;
         case "schema":
         case "items":
@@ -430,7 +457,7 @@ function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undef
           out[key] = mapChildren(ctx, doc, value, "links");
           break;
         case "callbacks":
-          out[key] = mapChildren(ctx, doc, value, "callbacks");
+          out[key] = convertCallbacks(ctx, doc, value);
           break;
         case "securitySchemes":
           out[key] = mapChildren(ctx, doc, value, "securitySchemes");
@@ -521,8 +548,11 @@ export function bundle(graph: WorkspaceGraph, options: BundleOptions = {}): Bund
       componentsInserted = true;
       continue;
     }
-    if (key === "paths") {
-      out[key] = convertPathsMap(ctx, entryDoc, value);
+    // `paths` and 3.1 root-level `webhooks` are both maps of Path Item Objects: path-item refs are
+    // inlined in place (never lifted — 3.0 has no components/pathItems), refs inside them lifted
+    // normally, and 3.1 summary/description siblings on a path-item ref preserved.
+    if (key === "paths" || key === "webhooks") {
+      out[key] = convertPathItemMap(ctx, entryDoc, value);
       continue;
     }
     out[key] = convertValue(ctx, entryDoc, value, undefined);

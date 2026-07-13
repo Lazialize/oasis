@@ -59,3 +59,15 @@ describe("duplicate key detection", () => {
     expect(dupDiagnostics[1]?.message).toContain("bar");
   });
 });
+
+describe("leading BOM handling", () => {
+  test("a BOM is stripped so first-line columns match what editors display", () => {
+    const doc = parseDocument('﻿openapi: 3.0.3\ninfo:\n  title: T\n', "/virtual/bom.yaml");
+    expect(doc.text.startsWith("﻿")).toBe(false);
+    const openapi = nodeAtPointer(doc, "/openapi");
+    expect(openapi).toBeDefined();
+    // "openapi: " is 9 characters; without stripping, the BOM shifted this to 10.
+    expect(openapi?.range.start.line).toBe(0);
+    expect(openapi?.range.start.character).toBe(9);
+  });
+});

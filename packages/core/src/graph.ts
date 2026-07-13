@@ -23,15 +23,19 @@ export async function loadWorkspaceGraph(fs: FileSystem, entryPath: string): Pro
   const documents = new Map<string, OasisDocument>();
   const diagnostics: Diagnostic[] = [];
   const visiting = new Set<string>();
+  // Negative cache: a path that already failed to load is not re-read (or re-diagnosed) for
+  // every additional `$ref` site pointing at it — one attempt, one diagnostic per file.
+  const failed = new Set<string>();
 
   async function loadFile(path: string, viaRefRange?: Range): Promise<void> {
-    if (documents.has(path)) return;
+    if (documents.has(path) || failed.has(path)) return;
     visiting.add(path);
 
     let text: string;
     try {
       text = await fs.readFile(path);
     } catch (err) {
+      failed.add(path);
       diagnostics.push({
         message: `Failed to load "${path}": ${err instanceof Error ? err.message : String(err)}`,
         severity: "error",

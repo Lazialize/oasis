@@ -1,0 +1,14 @@
+openapi: 3.0.3
+info:
+  title: Valid API
+  version: "1.0.0"
+  description: A valid test API.
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      tags: [pets]
+      description: List pets.
+      responses:
+        '200':
+          description: OK

@@ -21,6 +21,11 @@ export interface OasisDocument {
  * position-preserving AST. Never throws: syntax errors are reported as diagnostics.
  */
 export function parseDocument(text: string, filePath: string): OasisDocument {
+  // Strip a leading BOM before parsing: editors (and LSP clients) treat it as encoding metadata,
+  // not document content, so keeping it in the offset space would shift every first-line column
+  // by one relative to what the user sees. `text` is stored stripped for the same reason — all
+  // stored offsets index into it.
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
   const lineCounter = new LineCounter();
   const yamlDoc = yamlParseDocument(text, {
     lineCounter,

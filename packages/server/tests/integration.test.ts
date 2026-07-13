@@ -296,4 +296,56 @@ paths:
     );
     expect(publish.params.diagnostics.some((d: { code?: string }) => d.code === "operation/operation-id")).toBe(true);
   }, 20000);
+
+  test("closing a standalone (non-project) document clears its published diagnostics", async () => {
+    client = new LspClient();
+
+    const initResult = await client.request("initialize", {
+      processId: null,
+      rootUri: null,
+      capabilities: {},
+    });
+    expect(initResult.result?.capabilities).toBeDefined();
+    client.notify("initialized", {});
+
+    // No oasis.config.jsonc anywhere near this file, so routeDocument classifies it as
+    // `{ kind: "standalone" }`: its diagnostics only ever exist because the document is open, and
+    // only `oasis.config.jsonc` gets a file watcher -- so once it closes there's nothing left to
+    // refresh or clear the Problems panel entry unless the server does it on didClose itself.
+    const filePath = join(tmpdir(), `oasis-lsp-close-test-${Date.now()}.yaml`);
+    const uri = pathToFileURL(filePath).toString();
+    const badText = `openapi: 3.1.0
+info:
+  title: Bad
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Missing'
+`;
+
+    client.notify("textDocument/didOpen", {
+      textDocument: { uri, languageId: "yaml", version: 1, text: badText },
+    });
+
+    const publish = await client.waitFor(
+      (msg) => msg.method === "textDocument/publishDiagnostics" && msg.params?.uri === uri,
+      15000,
+    );
+    expect(publish.params.diagnostics.length).toBeGreaterThan(0);
+
+    client.notify("textDocument/didClose", { textDocument: { uri } });
+
+    const cleared = await client.waitFor(
+      (msg) => msg.method === "textDocument/publishDiagnostics" && msg.params?.uri === uri,
+      15000,
+    );
+    expect(cleared.params.diagnostics).toEqual([]);
+  }, 20000);
 });

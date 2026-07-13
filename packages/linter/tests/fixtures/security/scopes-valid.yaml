@@ -1,0 +1,39 @@
+openapi: 3.0.3
+info:
+  title: T
+  version: "1.0.0"
+security:
+  - oauth: [read:pets]
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      tags: [a]
+      description: x
+      security:
+        - oidc: [anything:goes]
+        - keyAuth: []
+        - {}
+      responses:
+        '200':
+          description: OK
+components:
+  securitySchemes:
+    oauth:
+      type: oauth2
+      flows:
+        implicit:
+          authorizationUrl: https://example.com/auth
+          scopes:
+            read:pets: Read pets
+        clientCredentials:
+          tokenUrl: https://example.com/token
+          scopes:
+            admin:pets: Admin
+    oidc:
+      type: openIdConnect
+      openIdConnectUrl: https://example.com/.well-known/openid-configuration
+    keyAuth:
+      type: apiKey
+      name: X-Key
+      in: header

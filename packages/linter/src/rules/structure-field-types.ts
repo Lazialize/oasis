@@ -103,7 +103,12 @@ function checkOperation(ctx: RuleContext, doc: OasisDocument, op: Node, fieldPat
 
   const responses = childAt(op, "responses");
   if (!responses) {
-    ctx.report({ doc, node: op }, `"${fieldPath}" is missing required field "responses".`);
+    // Operation.responses is REQUIRED in 3.0 but optional since 3.1 (webhook/async-style
+    // operations may legitimately have none). Only 3.0 documents get the structural error;
+    // the style-level nudge for 3.1 lives in operation/success-response.
+    if (ctx.version === "3.0") {
+      ctx.report({ doc, node: op }, `"${fieldPath}" is missing required field "responses".`);
+    }
   } else if (!isMap(responses)) {
     reportWrongType(ctx, doc, responses, `${fieldPath}.responses`, "an object");
   } else {

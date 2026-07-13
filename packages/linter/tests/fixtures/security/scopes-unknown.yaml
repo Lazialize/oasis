@@ -1,0 +1,25 @@
+openapi: 3.0.3
+info:
+  title: T
+  version: "1.0.0"
+security:
+  - oauth: [write:pets]
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      tags: [a]
+      description: x
+      responses:
+        '200':
+          description: OK
+components:
+  securitySchemes:
+    oauth:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://example.com/auth
+          tokenUrl: https://example.com/token
+          scopes:
+            read:pets: Read pets

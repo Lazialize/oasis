@@ -137,7 +137,15 @@ export function findRefs(doc: OasisDocument): FoundRef[] {
         if (!isNode(pair.value)) continue;
         const keyStr = isScalar(pair.key) ? String(pair.key.value) : undefined;
         const childLiteral = literal || (!inContainer && keyStr !== undefined && isLiteralDataKey(keyStr, pair.value));
-        const childContainer = !literal && keyStr !== undefined && isContainerKey(keyStr, pair.value);
+        // `!inContainer` (mirroring `childLiteral`): once we're inside a container, its entries are
+        // user/spec-named (a component/property/status-code name), so an entry that happens to be
+        // named like a container keyword (`parameters`, `headers`, `schemas`, ...) is a plain object
+        // — NOT a nested container. Treating it as a container would wrongly suppress the literal-data
+        // check one level down, so a `$ref`-shaped `example`/`default`/`enum`/`const` under it would
+        // be mistaken for a real reference. A named object resets `inContainer`, so a genuine nested
+        // container (e.g. `Schema.properties`) is still recognised on the next descent.
+        const childContainer =
+          !inContainer && !literal && keyStr !== undefined && isContainerKey(keyStr, pair.value);
         walk(pair.value, childLiteral, childContainer);
       }
     } else if (isSeq(resolved)) {

@@ -39,6 +39,33 @@ describe("parsePointer / formatPointer", () => {
   });
 });
 
+describe("formatPointer / parsePointer inverse property", () => {
+  test("round-trips a segment containing a literal % followed by hex digits", () => {
+    const segments = ["components", "schemas", "Foo%41Bar"];
+    expect(parsePointer(formatPointer(segments))).toEqual(segments);
+  });
+
+  test("encodes only the corruptible case, keeping other % literal", () => {
+    // "%zz" / a trailing "%" survive safeDecodeURIComponent unchanged, so they stay unencoded.
+    expect(formatPointer(["a", "100%"])).toBe("/a/100%");
+    expect(formatPointer(["a", "%zz"])).toBe("/a/%zz");
+    expect(formatPointer(["a", "%41"])).toBe("/a/%2541");
+    expect(parsePointer(formatPointer(["a", "100%"]))).toEqual(["a", "100%"]);
+    expect(parsePointer(formatPointer(["a", "%zz"]))).toEqual(["a", "%zz"]);
+  });
+
+  test("round-trips ~, /, unicode, and mixed segments", () => {
+    for (const segments of [
+      ["a~b", "c/d"],
+      ["日本語", "emoji 🐫"],
+      ["%7E0", "~0", "%2F"],
+      [""],
+    ]) {
+      expect(parsePointer(formatPointer(segments))).toEqual(segments);
+    }
+  });
+});
+
 describe("percent-decoding (URI-encoded $ref fragments)", () => {
   test("percent-decodes a segment before applying ~ unescaping", () => {
     // "%7E0" percent-decodes to the literal text "~0", which is then unescaped as a JSON Pointer
