@@ -248,15 +248,24 @@ function buildParamFix(
         isPreferred: true,
       };
     }
-    // An explicitly empty `parameters: []` — insert the first item just past the opening bracket.
+    // An explicitly empty `parameters: []`: replace the whole empty flow sequence with a block
+    // sequence carrying the new item, indented relative to the `parameters` *key*. The previous
+    // code inserted a block item at the node's start offset (the `[`), leaving the `[]` dangling
+    // after it and producing malformed YAML.
     if (!parametersNode.range) return undefined;
-    const propColumn = columnAt(targetDoc, parametersNode.range[0]) + 2;
-    const block = buildParamItemLines(propColumn, paramName);
-    const insertOffset = parametersNode.range[0];
+    const keyNode = keyNodeForValue(targetNode, parametersNode);
+    if (!keyNode || !keyNode.range) return undefined;
+    const keyColumn = columnAt(targetDoc, keyNode.range[0]);
+    const block = buildParamItemLines(keyColumn + 4, paramName);
+    // Back the replacement start up over the spaces between `parameters:` and `[` so the block
+    // sequence starts cleanly on its own line (no dangling trailing space after the colon).
+    let replaceStart = parametersNode.range[0];
+    while (replaceStart > 0 && (targetDoc.text[replaceStart - 1] === " " || targetDoc.text[replaceStart - 1] === "\t")) replaceStart--;
+    const replaceRange = rangeFromOffsets(targetDoc.filePath, targetDoc.lineCounter, replaceStart, parametersNode.range[1]);
     return {
       title: "Add parameter definition",
       kind: "quickfix",
-      edits: [{ filePath: targetDoc.filePath, range: zeroWidthRange(targetDoc, insertOffset), newText: `\n${block}\n${" ".repeat(Math.max(propColumn - 2, 0))}` }],
+      edits: [{ filePath: targetDoc.filePath, range: replaceRange, newText: `\n${block}` }],
       diagnosticIndex: index,
       isPreferred: true,
     };

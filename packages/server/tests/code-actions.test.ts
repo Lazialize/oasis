@@ -213,6 +213,70 @@ components:
   });
 });
 
+describe("Add parameter definition into an inline empty sequence (parameters: [])", () => {
+  const ENTRY_PATH = "/repo/openapi.yaml";
+
+  test("path item with parameters: [] and an operation: replaces [] with a valid block sequence", async () => {
+    const TEXT = `openapi: 3.1.0
+info:
+  title: Test API
+  version: "1.0.0"
+paths:
+  /pets/{petId}:
+    parameters: []
+    get:
+      operationId: getPet
+      description: Get a pet.
+      responses:
+        '200':
+          description: OK
+`;
+    const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: TEXT }));
+    const diagnostics = (await diagnosticsFor(ctx, ENTRY_PATH)).get(ENTRY_PATH) ?? [];
+    expect(diagnostics.some((d) => d.code === "paths/params-defined" && d.message.includes('"{petId}"'))).toBe(true);
+
+    const position = positionOf(TEXT, "/pets/{petId}:");
+    const results = await getCodeActions(ctx, { path: ENTRY_PATH, position, diagnostics });
+    const action = results.find((r) => r.title === "Add parameter definition");
+    expect(action).toBeDefined();
+
+    const newText = applyEdits(TEXT, action!.edits);
+    expect(newText).toContain(
+      "  /pets/{petId}:\n    parameters:\n      - name: petId\n        in: path\n        required: true\n        schema:\n          type: string\n    get:",
+    );
+
+    const diags2 = (await diagnosticsFor(createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: newText })), ENTRY_PATH)).get(ENTRY_PATH) ?? [];
+    expect(diags2.some((d) => d.code === "syntax-error")).toBe(false);
+    expect(diags2.some((d) => d.code === "paths/params-defined" && d.message.includes('"{petId}"'))).toBe(false);
+  });
+
+  test("path item with parameters: [] and no operation: replaces [] with a valid block sequence, preserving a trailing comment", async () => {
+    const TEXT = `openapi: 3.1.0
+info:
+  title: Test API
+  version: "1.0.0"
+paths:
+  /pets/{petId}:
+    parameters: [] # none yet
+`;
+    const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: TEXT }));
+    const diagnostics = (await diagnosticsFor(ctx, ENTRY_PATH)).get(ENTRY_PATH) ?? [];
+    expect(diagnostics.some((d) => d.code === "paths/params-defined" && d.message.includes('"{petId}"'))).toBe(true);
+
+    const position = positionOf(TEXT, "/pets/{petId}:");
+    const results = await getCodeActions(ctx, { path: ENTRY_PATH, position, diagnostics });
+    const action = results.find((r) => r.title === "Add parameter definition");
+    expect(action).toBeDefined();
+
+    const newText = applyEdits(TEXT, action!.edits);
+    expect(newText).toContain("    parameters:\n      - name: petId\n        in: path\n        required: true");
+
+    const diags2 = (await diagnosticsFor(createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: newText })), ENTRY_PATH)).get(ENTRY_PATH) ?? [];
+    expect(diags2.some((d) => d.code === "syntax-error")).toBe(false);
+    expect(diags2.some((d) => d.code === "paths/params-defined" && d.message.includes('"{petId}"'))).toBe(false);
+  });
+});
+
 describe("Remove unused component", () => {
   const ENTRY_PATH = "/repo/openapi.yaml";
   const TEXT = `openapi: 3.1.0
