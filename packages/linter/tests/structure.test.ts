@@ -634,6 +634,62 @@ describe("structure/server-variables", () => {
     const diagnostics = await lintFixture("valid/openapi.yaml");
     expect(diagnostics.some((d) => d.rule === "structure/server-variables")).toBe(false);
   });
+
+  describe("malformed Server Object shape (#45)", () => {
+    test("flags a root server missing url", async () => {
+      const diagnostics = await lintFixture("structure/server-variables-malformed.yaml");
+      const d = diagnostics.find(
+        (d) => d.rule === "structure/server-variables" && d.message.includes("Root") && d.message.includes('missing required field "url"'),
+      );
+      expect(d).toBeDefined();
+    });
+
+    test("flags a root server with a non-string url", async () => {
+      const diagnostics = await lintFixture("structure/server-variables-malformed.yaml");
+      const d = diagnostics.find(
+        (d) => d.rule === "structure/server-variables" && d.message.includes('"url" must be a string'),
+      );
+      expect(d).toBeDefined();
+    });
+
+    test("flags a root server whose variables is not an object", async () => {
+      const diagnostics = await lintFixture("structure/server-variables-malformed.yaml");
+      const d = diagnostics.find(
+        (d) => d.rule === "structure/server-variables" && d.message.includes('"variables" must be an object'),
+      );
+      expect(d).toBeDefined();
+    });
+
+    test("flags a declared variable missing default even when url is also missing", async () => {
+      const diagnostics = await lintFixture("structure/server-variables-malformed.yaml");
+      const d = diagnostics.find(
+        (d) =>
+          d.rule === "structure/server-variables" &&
+          d.message.includes('"host"') &&
+          d.message.includes('missing required field "default"'),
+      );
+      expect(d).toBeDefined();
+    });
+
+    test("flags a non-object item in a servers array (path item level)", async () => {
+      const diagnostics = await lintFixture("structure/server-variables-malformed.yaml");
+      const d = diagnostics.find(
+        (d) => d.rule === "structure/server-variables" && d.message.includes("Path item") && d.message.includes("must be an object"),
+      );
+      expect(d).toBeDefined();
+    });
+
+    test("flags an operation-level server missing url", async () => {
+      const diagnostics = await lintFixture("structure/server-variables-malformed.yaml");
+      const d = diagnostics.find(
+        (d) =>
+          d.rule === "structure/server-variables" &&
+          d.message.includes("Operation") &&
+          d.message.includes('missing required field "url"'),
+      );
+      expect(d).toBeDefined();
+    });
+  });
 });
 
 describe("structure/encoding", () => {

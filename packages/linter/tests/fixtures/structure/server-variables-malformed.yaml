@@ -1,0 +1,26 @@
+openapi: 3.0.3
+info:
+  title: T
+  version: "1.0.0"
+servers:
+  - description: missing-url
+  - url: 42
+  - url: https://api.example.com
+    variables: not-an-object
+  - description: missing-url-but-has-bad-variable
+    variables:
+      host:
+        description: no default, and url itself is missing too
+paths:
+  /pets:
+    servers:
+      - not-an-object-item
+    get:
+      operationId: listPets
+      tags: [a]
+      description: x
+      responses:
+        '200':
+          description: OK
+      servers:
+        - description: op-level missing-url
