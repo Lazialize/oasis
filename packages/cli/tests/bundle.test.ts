@@ -115,6 +115,19 @@ describe("oasis bundle CLI", () => {
     expect(result.stderr).toContain("requires a value");
   });
 
+  test("preserves an unresolved external ref as a warning, exit 0 (#30)", async () => {
+    const bundlerFixtures = `${import.meta.dir}/../../bundler/tests/fixtures`;
+    const result = await runCli(["bundle", `${bundlerFixtures}/unresolved/entry.yaml`]);
+    // Only an external target is missing; the entry parses fine, so the bundle succeeds.
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("openapi: 3.0.3");
+    // The unresolved reference is kept verbatim in the output.
+    expect(result.stdout).toContain("./missing.yaml#/components/schemas/Foo");
+    // ...and reported as a warning on stderr.
+    expect(result.stderr).toContain("warning:");
+    expect(result.stderr).not.toContain("failed to parse");
+  });
+
   test("exits 2 when the entry document fails to load/parse", async () => {
     const result = await runCli(["bundle", `${fixturesRoot}/does-not-exist.yaml`]);
     expect(result.exitCode).toBe(2);

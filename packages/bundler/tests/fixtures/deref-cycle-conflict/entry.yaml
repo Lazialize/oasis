@@ -1,0 +1,22 @@
+openapi: 3.1.0
+info:
+  title: Deref Cycle Conflict
+  version: "1.0.0"
+paths:
+  /root:
+    get:
+      operationId: getRoot
+      tags: [root]
+      description: Get root.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: './ext.yaml#/components/schemas/child'
+components:
+  schemas:
+    child:
+      description: User-defined child, must not be overwritten
+      type: string

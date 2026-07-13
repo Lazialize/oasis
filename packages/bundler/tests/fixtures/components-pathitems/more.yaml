@@ -1,0 +1,10 @@
+components:
+  pathItems:
+    Special:
+      get:
+        operationId: getSpecial
+        tags: [special]
+        description: Special.
+        responses:
+          '200':
+            description: OK

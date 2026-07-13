@@ -183,26 +183,39 @@ function convertRef(ctx: BundleContext, doc: OasisDocument, mapNode: Node, refPa
 }
 
 /**
- * Pick (or reuse) a `components/*` slot for a ref target that participates in a cycle. Entry-
- * document targets keep their original component name (already reserved in `usedNames`, so no
- * renaming is needed); cross-file targets get a fresh deterministic name like any lifted target.
+ * Pick (or reuse) a `components/*` slot for a ref target that participates in a cycle. A ref that
+ * points *exactly* at one of the entry document's own components (`/components/<section>/<name>`)
+ * keeps that component's real name — the slot simply populates that same component, and its name is
+ * already reserved in `usedNames`. Every other target — a cross-file ref, or an entry-document ref
+ * whose pointer isn't itself a component (e.g. `/paths/~1x/get`) — gets a fresh unique name via the
+ * same `deriveName`/`uniqueName` machinery lifted components use, so a cycle slot can never
+ * overwrite an unrelated existing component (e.g. a schema whose name collides with the pointer's
+ * sanitized tail). Returns whether the slot was newly created so the caller can emit exactly one
+ * diagnostic per cycle site.
  */
-function assignCycleSlot(ctx: BundleContext, result: ResolvedRef, hint: string | undefined): { section: string; name: string } {
+function assignCycleSlot(
+  ctx: BundleContext,
+  result: ResolvedRef,
+  hint: string | undefined,
+): { assigned: { section: string; name: string }; isNew: boolean } {
   const identityKey = identityKeyOf(result);
   const existing = ctx.cycleAssignments.get(identityKey);
-  if (existing) return existing;
+  if (existing) return { assigned: existing, isNew: false };
 
   const section = deriveSection(result.pointer, hint);
   const segs = parsePointer(result.pointer);
-  const rawTail = segs.length > 0 ? segs[segs.length - 1] : undefined;
-  const name =
-    result.doc.filePath === ctx.entryDoc.filePath && rawTail
-      ? sanitizeName(rawTail)
-      : deriveName(ctx, result.pointer, result.doc, section);
+  const pointsAtEntryComponent =
+    result.doc.filePath === ctx.entryDoc.filePath &&
+    segs.length === 3 &&
+    segs[0] === "components" &&
+    COMPONENT_SECTION_SET.has(segs[1] ?? "");
+  const name = pointsAtEntryComponent
+    ? sanitizeName(segs[2] as string)
+    : deriveName(ctx, result.pointer, result.doc, section);
 
   const assigned = { section, name };
   ctx.cycleAssignments.set(identityKey, assigned);
-  return assigned;
+  return { assigned, isNew: true };
 }
 
 /** Merge sibling keys (alongside `$ref`) into an already-dereferenced value, converted with the same mode. */
@@ -230,14 +243,18 @@ function convertRefDereference(ctx: BundleContext, doc: OasisDocument, mapNode: 
   if (result.doc.filePath === ctx.entryDoc.filePath) ctx.visitedEntryIdentities.add(identityKey);
 
   if (ctx.expansionStack.has(identityKey)) {
-    const assigned = assignCycleSlot(ctx, result, hint);
-    ctx.diagnostics.push({
-      message: `Reference cycle detected: "${result.doc.filePath}#${result.pointer || "/"}" cannot be fully dereferenced; kept as "$ref: #/components/${assigned.section}/${assigned.name}" to break the cycle`,
-      severity: "warning",
-      code: "ref-cycle",
-      source: "bundler",
-      range: rangeOfScalar(doc, scalar),
-    });
+    const { assigned, isNew } = assignCycleSlot(ctx, result, hint);
+    // One diagnostic per cycle target: a diamond can revisit the same cycle site repeatedly, but a
+    // single deduplicated warning is emitted the first time the slot is allocated.
+    if (isNew) {
+      ctx.diagnostics.push({
+        message: `Reference cycle detected: "${result.doc.filePath}#${result.pointer || "/"}" cannot be fully dereferenced; kept as "$ref: #/components/${assigned.section}/${assigned.name}" to break the cycle`,
+        severity: "warning",
+        code: "ref-cycle",
+        source: "bundler",
+        range: rangeOfScalar(doc, scalar),
+      });
+    }
     return withSiblings(ctx, doc, mapNode, `#/components/${assigned.section}/${assigned.name}`, hint);
   }
 
@@ -464,6 +481,17 @@ function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undef
         out[key] = value;
         continue;
       }
+      // A Specification Extension (`x-*`) key introduces an opaque payload: everything below it is
+      // arbitrary user data, so keys inside that happen to match OpenAPI structural fields
+      // (`$ref`, `mapping`, `schema`, `properties`, `examples`, ...) must be copied through
+      // unchanged, never interpreted as references to lift/rewrite. Descend with `literal` set.
+      // (Extensions are allowed on almost every OpenAPI object; this switch only ever sees an
+      // object's own member keys — user/spec-named container entries are routed via `mapChildren`
+      // and never reach here — so an `x-` key here is always a real extension, not a data name.)
+      if (!literal && key.startsWith("x-")) {
+        out[key] = convertValue(ctx, doc, value, hint, true);
+        continue;
+      }
       if (!literal && isLiteralDataKey(key, value)) {
         out[key] = convertValue(ctx, doc, value, hint, true);
         continue;
@@ -525,6 +553,14 @@ function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undef
           break;
         case "securitySchemes":
           out[key] = mapChildren(ctx, doc, value, "securitySchemes");
+          break;
+        // 3.1-only `components/pathItems`: a map of name -> (Path Item Object | Reference Object).
+        // Unlike a path-item `$ref` under `paths` (inlined in place — 3.0 has no pathItems section),
+        // a whole-document `$ref` here IS a component reference and is lifted into
+        // `components/pathItems` like any other component (never `components/schemas`). Refs *inside*
+        // a lifted path item are lifted normally by the recursive `convertValue`.
+        case "pathItems":
+          out[key] = mapChildren(ctx, doc, value, "pathItems");
           break;
         // Maps of user/spec-named entries (not JSON Schema keywords): route through `mapChildren`
         // so an entry named `default`/`example`/`enum`/... is converted as a real object (and any
@@ -647,6 +683,14 @@ export function bundle(graph: WorkspaceGraph, options: BundleOptions = {}): Bund
  */
 function addUnreferencedEntryComponents(ctx: BundleContext, componentsNode: Node): void {
   if (!isMap(componentsNode)) return;
+
+  // Decide membership in a fixed pass over the post-walk reachability state *before* emitting any
+  // component. Serializing a preserved component dereferences its content, which can mark other
+  // entry components visited; if that ran interleaved with the retain check (as it once did),
+  // whether a component was kept depended on source order (#63). Snapshotting the set of
+  // components to preserve first, then serializing, makes retention independent of declaration
+  // order — semantically equivalent component maps always retain the same members.
+  const toEmit: Array<{ section: string; name: string; value: Node }> = [];
   for (const sectionPair of componentsNode.items) {
     const section = keyToString(sectionPair.key);
     if (!isNode(sectionPair.value) || !isMap(sectionPair.value)) continue;
@@ -656,9 +700,12 @@ function addUnreferencedEntryComponents(ctx: BundleContext, componentsNode: Node
       const pointer = formatPointer(["components", section, name]);
       const identityKey = `${ctx.entryDoc.filePath} ${pointer}`;
       if (ctx.visitedEntryIdentities.has(identityKey) || ctx.cycleAssignments.has(identityKey)) continue;
-
-      const content = convertValue(ctx, ctx.entryDoc, entryPair.value, section);
-      ensureSectionObject(ctx, section)[name] = content;
+      toEmit.push({ section, name, value: entryPair.value });
     }
+  }
+
+  for (const { section, name, value } of toEmit) {
+    const content = convertValue(ctx, ctx.entryDoc, value, section);
+    ensureSectionObject(ctx, section)[name] = content;
   }
 }

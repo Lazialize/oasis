@@ -1,0 +1,25 @@
+openapi: 3.1.0
+info:
+  title: Deref Order (B before A)
+  version: "1.0.0"
+paths:
+  /ping:
+    get:
+      operationId: ping
+      tags: [ping]
+      description: Ping.
+      responses:
+        '200':
+          description: OK
+components:
+  schemas:
+    B:
+      type: object
+      properties:
+        value:
+          type: string
+    A:
+      type: object
+      properties:
+        b:
+          $ref: '#/components/schemas/B'
