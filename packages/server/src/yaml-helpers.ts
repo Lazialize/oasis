@@ -19,7 +19,7 @@ export function nodeRange(doc: OasisDocument, node: Node): Range {
 /** Existing string keys on a map node, or []  if `node` is not a map. */
 export function mapKeys(node: Node | undefined): string[] {
   if (!node || !isMap(node)) return [];
-  return node.items.map((p) => (isScalar(p.key) ? String(p.key.value) : String(p.key))).filter((k): k is string => typeof k === "string");
+  return node.items.map((p) => (isScalar(p.key) ? String(p.key.value) : String(p.key)));
 }
 
 /** The string value of `node.key`, or undefined if it doesn't have one. */

@@ -1,5 +1,5 @@
 export { runLspServer } from "./server.ts";
-export { startServer } from "./connection.ts";
+export { runSafely, startServer } from "./connection.ts";
 
 export type { ProjectState, ServerContext } from "./workspace.ts";
 export { createServerContext, findOwningEntry, getGraph, getDocument, invalidateGraph, resolveEntryForPath } from "./workspace.ts";

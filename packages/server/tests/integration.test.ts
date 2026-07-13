@@ -153,4 +153,63 @@ paths:
     expect(publish.params.diagnostics.length).toBeGreaterThan(0);
     expect(publish.params.diagnostics.some((d: { code?: string }) => d.code === "refs/no-unresolved")).toBe(true);
   }, 20000);
+
+  test("an exception thrown mid-validate is caught and logged, not crashed on, and the server keeps answering requests", async () => {
+    client = new LspClient();
+
+    const initResult = await client.request("initialize", {
+      processId: null,
+      rootUri: null,
+      capabilities: {},
+    });
+    expect(initResult.result?.capabilities).toBeDefined();
+    client.notify("initialized", {});
+
+    // Force a *real* synchronous throw inside the reload-config path (`reloadProjectAtConfigPath`
+    // in connection.ts -> `loadProjectAtPath` -> `resolveProjectEntries` in project.ts ->
+    // `expandGlobEntry` in @oasis/linter/config.ts), which expands a glob `entries` pattern with
+    // `Bun.Glob(...).scanSync({ cwd: configDir, ... })` directly against the real filesystem
+    // (deliberately bypassing the overlay FS - see that function's own comment). Opening a document
+    // named `oasis.config.jsonc` (so `routeDocument` classifies it as `{ kind: "config" }`) whose
+    // *directory* doesn't exist on real disk, but whose content is served entirely from the
+    // in-editor overlay (so `readConfigFile` succeeds), makes `scanSync` hit a real ENOENT and throw
+    // synchronously out of the async chain. Before the crash-safety fix, `documents.onDidOpen`
+    // invoked this as a bare `void handleDocumentEvent(...)` with no `.catch`, so the exception
+    // would have escaped as an unhandled rejection and killed the process.
+    const missingDir = join(tmpdir(), `oasis-lsp-crash-test-${Date.now()}-does-not-exist`);
+    const configPath = join(missingDir, "oasis.config.jsonc");
+    const configUri = pathToFileURL(configPath).toString();
+
+    client.notify("textDocument/didOpen", {
+      textDocument: {
+        uri: configUri,
+        languageId: "jsonc",
+        version: 1,
+        text: JSON.stringify({ entries: ["*.yaml"] }),
+      },
+    });
+
+    // Give the (now-safe) rejection a moment to be caught and logged rather than crash the process.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    expect(client.proc.killed).toBe(false);
+    expect(client.proc.exitCode).toBeNull();
+
+    // The server must still be able to answer a normal request afterwards.
+    const filePath = join(tmpdir(), `oasis-lsp-test-survives-${Date.now()}.yaml`);
+    const uri = pathToFileURL(filePath).toString();
+    client.notify("textDocument/didOpen", {
+      textDocument: {
+        uri,
+        languageId: "yaml",
+        version: 1,
+        text: 'openapi: 3.1.0\ninfo:\n  title: Ok\n  version: "1.0.0"\npaths: {}\n',
+      },
+    });
+    const publish = await client.waitFor(
+      (msg) => msg.method === "textDocument/publishDiagnostics" && msg.params?.uri === uri,
+      15000,
+    );
+    expect(Array.isArray(publish.params.diagnostics)).toBe(true);
+  }, 20000);
 });
