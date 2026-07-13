@@ -68,10 +68,10 @@ function checkVersionOnlyKeywords(ctx: RuleContext, doc: OasisDocument, schema: 
 
 function checkExclusive(ctx: RuleContext, doc: OasisDocument, schema: Node, key: "exclusiveMinimum" | "exclusiveMaximum"): void {
   const node = childAt(schema, key);
-  if (!node || !isScalar(node)) return;
-  if (ctx.version === "3.0" && typeof node.value === "number") {
+  if (!node) return;
+  if (ctx.version === "3.0" && !isBooleanScalar(node)) {
     ctx.report({ doc, node }, `"${key}" must be a boolean in OpenAPI 3.0 (used alongside "minimum"/"maximum"); the numeric form is a 3.1 (JSON Schema 2020-12) feature.`);
-  } else if (ctx.version === "3.1" && typeof node.value === "boolean") {
+  } else if (ctx.version === "3.1" && !isNumberScalar(node)) {
     ctx.report({ doc, node }, `"${key}" must be a number in OpenAPI 3.1 (JSON Schema 2020-12); the boolean form alongside "minimum"/"maximum" is OpenAPI 3.0.`);
   }
 }

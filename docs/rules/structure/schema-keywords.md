@@ -4,7 +4,7 @@ This rule validates the keywords used inside every schema in the document (walke
 
 - **Dialect-restricted keywords**: on OpenAPI 3.0, keywords that only exist in JSON Schema 2020-12 (`const`, `prefixItems`, `contentMediaType`, `contentEncoding`, `patternProperties`, `propertyNames`, `unevaluatedProperties`, `unevaluatedItems`, `dependentRequired`, `dependentSchemas`, `if`/`then`/`else`, `$defs`, `examples`) are flagged as unsupported.
 - **`type`**: must be a recognized type name for the version (a string in 3.0; a string or array of strings in 3.1, with array entries checked for validity and duplicates).
-- **`exclusiveMinimum`/`exclusiveMaximum`**: must be the boolean form in 3.0 and the numeric form in 3.1.
+- **`exclusiveMinimum`/`exclusiveMaximum`**: must be the boolean form in 3.0 and the numeric form in 3.1; any other node kind (object, array, `null`, string, ...) is flagged too, not just the other version's scalar form.
 - **Numeric keywords**: `minimum`/`maximum` must be numbers, `multipleOf` must be a number greater than 0, and `minLength`/`maxLength`/`minItems`/`maxItems`/`minProperties`/`maxProperties` must be non-negative integers.
 - **Internal consistency**: a `min*`/`max*` pair (`minimum`/`maximum`, `minLength`/`maxLength`, `minItems`/`maxItems`, `minProperties`/`maxProperties`) where the minimum exceeds the maximum makes the schema unsatisfiable and is flagged; likewise a `required` property that's excluded by `properties` + `additionalProperties: false` is flagged as unsatisfiable.
 - **`pattern`**: must be a string that's a valid regular expression.

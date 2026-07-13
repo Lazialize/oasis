@@ -20,6 +20,26 @@ components:
       minimum: 0
       exclusiveMinimum: true
 
+    MapExclusive31:
+      type: number
+      minimum: 0
+      exclusiveMinimum: {}
+
+    SeqExclusive31:
+      type: number
+      maximum: 10
+      exclusiveMaximum: []
+
+    NullExclusive31:
+      type: number
+      minimum: 0
+      exclusiveMinimum: null
+
+    StringExclusive31:
+      type: number
+      maximum: 10
+      exclusiveMaximum: "5"
+
     InvalidTypeInArray:
       type: [string, potato]
 

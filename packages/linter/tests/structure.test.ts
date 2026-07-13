@@ -180,6 +180,23 @@ describe("structure/schema-keywords", () => {
     expect(d).toBeDefined();
   });
 
+  test("flags non-boolean exclusiveMinimum/exclusiveMaximum node kinds on OpenAPI 3.0 (#41)", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-30-bad.yaml");
+    const minDiagnostics = diagnostics.filter(
+      (d) => d.rule === "structure/schema-keywords" && d.message.includes('"exclusiveMinimum" must be a boolean'),
+    );
+    const maxDiagnostics = diagnostics.filter(
+      (d) => d.rule === "structure/schema-keywords" && d.message.includes('"exclusiveMaximum" must be a boolean'),
+    );
+    // NumericExclusive (number), MapExclusive ({}), and NullExclusive (null) all use exclusiveMinimum.
+    expect(minDiagnostics.length).toBeGreaterThanOrEqual(3);
+    // SeqExclusive ([]) and StringExclusive ("5") both use exclusiveMaximum.
+    expect(maxDiagnostics.length).toBeGreaterThanOrEqual(2);
+    for (const d of [...minDiagnostics, ...maxDiagnostics]) {
+      expect(typeof d.range.start.line).toBe("number");
+    }
+  });
+
   test("flags an unrecognized type name in OpenAPI 3.0", async () => {
     const diagnostics = await lintFixture("structure/schema-keywords-30-bad.yaml");
     const d = diagnostics.find((d) => d.rule === "structure/schema-keywords" && d.message.includes('"type: file"'));
@@ -291,6 +308,23 @@ describe("structure/schema-keywords", () => {
     const diagnostics = await lintFixture("structure/schema-keywords-31-bad.yaml");
     const d = diagnostics.find((d) => d.rule === "structure/schema-keywords" && d.message.includes('"exclusiveMinimum" must be a number'));
     expect(d).toBeDefined();
+  });
+
+  test("flags non-numeric exclusiveMinimum/exclusiveMaximum node kinds on OpenAPI 3.1 (#41)", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-31-bad.yaml");
+    const minDiagnostics = diagnostics.filter(
+      (d) => d.rule === "structure/schema-keywords" && d.message.includes('"exclusiveMinimum" must be a number'),
+    );
+    const maxDiagnostics = diagnostics.filter(
+      (d) => d.rule === "structure/schema-keywords" && d.message.includes('"exclusiveMaximum" must be a number'),
+    );
+    // BooleanExclusive (true), MapExclusive31 ({}), and NullExclusive31 (null) all use exclusiveMinimum.
+    expect(minDiagnostics.length).toBeGreaterThanOrEqual(3);
+    // SeqExclusive31 ([]) and StringExclusive31 ("5") both use exclusiveMaximum.
+    expect(maxDiagnostics.length).toBeGreaterThanOrEqual(2);
+    for (const d of [...minDiagnostics, ...maxDiagnostics]) {
+      expect(typeof d.range.start.line).toBe("number");
+    }
   });
 
   test("flags an unrecognized type name inside a 3.1 type array", async () => {
