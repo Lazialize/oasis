@@ -1,5 +1,5 @@
 import { extname, resolve as pathResolve } from "node:path";
-import { allDiagnostics, loadWorkspaceGraph, NodeFileSystem } from "@oasis/core";
+import { loadWorkspaceGraph, NodeFileSystem } from "@oasis/core";
 import { bundle } from "@oasis/bundler";
 import { parseBundleArgs } from "../args.ts";
 
@@ -45,8 +45,12 @@ export async function runBundleCommand(args: string[], io: RunBundleOptions): Pr
     return 2;
   }
 
+  // Separate genuine parse/syntax failures (per-document diagnostics) from graph-load diagnostics
+  // (unresolved external `$ref` targets, ref cycles). An unresolved external target is NOT a fatal
+  // error here: the bundler preserves the `$ref` verbatim and returns a warning, matching its API,
+  // so only an entry that failed to load or a real syntax error aborts the command (#30).
   const entryDoc = graph.documents.get(absEntry);
-  const parseErrors = allDiagnostics(graph).filter((d) => d.severity === "error");
+  const parseErrors = [...graph.documents.values()].flatMap((d) => d.diagnostics).filter((d) => d.severity === "error");
   if (!entryDoc || parseErrors.length > 0) {
     for (const d of parseErrors) {
       io.stderr(`${d.range.filePath}:${d.range.start.line + 1}:${d.range.start.character + 1}  ${d.message}\n`);
