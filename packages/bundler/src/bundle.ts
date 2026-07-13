@@ -683,6 +683,14 @@ export function bundle(graph: WorkspaceGraph, options: BundleOptions = {}): Bund
  */
 function addUnreferencedEntryComponents(ctx: BundleContext, componentsNode: Node): void {
   if (!isMap(componentsNode)) return;
+
+  // Decide membership in a fixed pass over the post-walk reachability state *before* emitting any
+  // component. Serializing a preserved component dereferences its content, which can mark other
+  // entry components visited; if that ran interleaved with the retain check (as it once did),
+  // whether a component was kept depended on source order (#63). Snapshotting the set of
+  // components to preserve first, then serializing, makes retention independent of declaration
+  // order — semantically equivalent component maps always retain the same members.
+  const toEmit: Array<{ section: string; name: string; value: Node }> = [];
   for (const sectionPair of componentsNode.items) {
     const section = keyToString(sectionPair.key);
     if (!isNode(sectionPair.value) || !isMap(sectionPair.value)) continue;
@@ -692,9 +700,12 @@ function addUnreferencedEntryComponents(ctx: BundleContext, componentsNode: Node
       const pointer = formatPointer(["components", section, name]);
       const identityKey = `${ctx.entryDoc.filePath} ${pointer}`;
       if (ctx.visitedEntryIdentities.has(identityKey) || ctx.cycleAssignments.has(identityKey)) continue;
-
-      const content = convertValue(ctx, ctx.entryDoc, entryPair.value, section);
-      ensureSectionObject(ctx, section)[name] = content;
+      toEmit.push({ section, name, value: entryPair.value });
     }
+  }
+
+  for (const { section, name, value } of toEmit) {
+    const content = convertValue(ctx, ctx.entryDoc, value, section);
+    ensureSectionObject(ctx, section)[name] = content;
   }
 }
