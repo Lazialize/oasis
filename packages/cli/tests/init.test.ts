@@ -90,6 +90,20 @@ describe("oasis init", () => {
     expect(result.stderr).toContain("unexpected argument");
   });
 
+  test("--help prints usage and exits 0", async () => {
+    const result = await runCli(["init", "--help"]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("oasis init");
+    expect(result.stdout).toContain("--help");
+  });
+
+  test("-h prints usage and exits 0", async () => {
+    const result = await runCli(["init", "-h"]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("oasis init");
+    expect(result.stdout).toContain("--help");
+  });
+
   test("the generated config is immediately usable by `oasis lint` (no args)", async () => {
     const dir = tempDir();
     writeFileSync(join(dir, "openapi.yaml"), OPENAPI_YAML);

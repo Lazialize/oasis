@@ -79,6 +79,12 @@ describe("oasis lint CLI", () => {
     expect(result.exitCode).toBe(2);
   });
 
+  test("exits 2 when --format has no value", async () => {
+    const result = await runCli(["lint", `${fixturesRoot}/valid.yaml`, "--format"]);
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("requires a value");
+  });
+
   test("--help prints usage and exits 0", async () => {
     const result = await runCli(["--help"]);
     expect(result.exitCode).toBe(0);

@@ -24,6 +24,7 @@ export function parseLintArgs(args: string[]): ParseResult<ParsedLintArgs> {
       configPath = value;
     } else if (arg === "--format") {
       const value = args[++i];
+      if (!value) return { ok: false, error: "--format requires a value argument" };
       if (value !== "pretty" && value !== "json" && value !== "sarif") {
         return { ok: false, error: '--format must be "pretty", "json", or "sarif"' };
       }
@@ -62,6 +63,7 @@ export function parseBundleArgs(args: string[]): ParseResult<ParsedBundleArgs> {
       outPath = value;
     } else if (arg === "--format") {
       const value = args[++i];
+      if (!value) return { ok: false, error: "--format requires a value argument" };
       if (value !== "yaml" && value !== "json") {
         return { ok: false, error: '--format must be "yaml" or "json"' };
       }
