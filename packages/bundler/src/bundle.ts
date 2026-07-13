@@ -183,26 +183,39 @@ function convertRef(ctx: BundleContext, doc: OasisDocument, mapNode: Node, refPa
 }
 
 /**
- * Pick (or reuse) a `components/*` slot for a ref target that participates in a cycle. Entry-
- * document targets keep their original component name (already reserved in `usedNames`, so no
- * renaming is needed); cross-file targets get a fresh deterministic name like any lifted target.
+ * Pick (or reuse) a `components/*` slot for a ref target that participates in a cycle. A ref that
+ * points *exactly* at one of the entry document's own components (`/components/<section>/<name>`)
+ * keeps that component's real name — the slot simply populates that same component, and its name is
+ * already reserved in `usedNames`. Every other target — a cross-file ref, or an entry-document ref
+ * whose pointer isn't itself a component (e.g. `/paths/~1x/get`) — gets a fresh unique name via the
+ * same `deriveName`/`uniqueName` machinery lifted components use, so a cycle slot can never
+ * overwrite an unrelated existing component (e.g. a schema whose name collides with the pointer's
+ * sanitized tail). Returns whether the slot was newly created so the caller can emit exactly one
+ * diagnostic per cycle site.
  */
-function assignCycleSlot(ctx: BundleContext, result: ResolvedRef, hint: string | undefined): { section: string; name: string } {
+function assignCycleSlot(
+  ctx: BundleContext,
+  result: ResolvedRef,
+  hint: string | undefined,
+): { assigned: { section: string; name: string }; isNew: boolean } {
   const identityKey = identityKeyOf(result);
   const existing = ctx.cycleAssignments.get(identityKey);
-  if (existing) return existing;
+  if (existing) return { assigned: existing, isNew: false };
 
   const section = deriveSection(result.pointer, hint);
   const segs = parsePointer(result.pointer);
-  const rawTail = segs.length > 0 ? segs[segs.length - 1] : undefined;
-  const name =
-    result.doc.filePath === ctx.entryDoc.filePath && rawTail
-      ? sanitizeName(rawTail)
-      : deriveName(ctx, result.pointer, result.doc, section);
+  const pointsAtEntryComponent =
+    result.doc.filePath === ctx.entryDoc.filePath &&
+    segs.length === 3 &&
+    segs[0] === "components" &&
+    COMPONENT_SECTION_SET.has(segs[1] ?? "");
+  const name = pointsAtEntryComponent
+    ? sanitizeName(segs[2] as string)
+    : deriveName(ctx, result.pointer, result.doc, section);
 
   const assigned = { section, name };
   ctx.cycleAssignments.set(identityKey, assigned);
-  return assigned;
+  return { assigned, isNew: true };
 }
 
 /** Merge sibling keys (alongside `$ref`) into an already-dereferenced value, converted with the same mode. */
@@ -230,14 +243,18 @@ function convertRefDereference(ctx: BundleContext, doc: OasisDocument, mapNode: 
   if (result.doc.filePath === ctx.entryDoc.filePath) ctx.visitedEntryIdentities.add(identityKey);
 
   if (ctx.expansionStack.has(identityKey)) {
-    const assigned = assignCycleSlot(ctx, result, hint);
-    ctx.diagnostics.push({
-      message: `Reference cycle detected: "${result.doc.filePath}#${result.pointer || "/"}" cannot be fully dereferenced; kept as "$ref: #/components/${assigned.section}/${assigned.name}" to break the cycle`,
-      severity: "warning",
-      code: "ref-cycle",
-      source: "bundler",
-      range: rangeOfScalar(doc, scalar),
-    });
+    const { assigned, isNew } = assignCycleSlot(ctx, result, hint);
+    // One diagnostic per cycle target: a diamond can revisit the same cycle site repeatedly, but a
+    // single deduplicated warning is emitted the first time the slot is allocated.
+    if (isNew) {
+      ctx.diagnostics.push({
+        message: `Reference cycle detected: "${result.doc.filePath}#${result.pointer || "/"}" cannot be fully dereferenced; kept as "$ref: #/components/${assigned.section}/${assigned.name}" to break the cycle`,
+        severity: "warning",
+        code: "ref-cycle",
+        source: "bundler",
+        range: rangeOfScalar(doc, scalar),
+      });
+    }
     return withSiblings(ctx, doc, mapNode, `#/components/${assigned.section}/${assigned.name}`, hint);
   }
 

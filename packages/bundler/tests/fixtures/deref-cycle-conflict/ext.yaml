@@ -1,0 +1,11 @@
+components:
+  schemas:
+    child:
+      type: object
+      properties:
+        value:
+          type: string
+        self:
+          $ref: '#/components/schemas/child'
+        self2:
+          $ref: '#/components/schemas/child'
