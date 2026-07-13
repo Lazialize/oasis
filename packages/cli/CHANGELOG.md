@@ -1,5 +1,15 @@
 # @oasis/cli
 
+## 0.8.4
+
+### Patch Changes
+
+- Updated dependencies [[`8251964`](https://github.com/Lazialize/oasis/commit/8251964082c2e24be03cb2852006b372e9a55153), [`ec5cd99`](https://github.com/Lazialize/oasis/commit/ec5cd99015e984f2bb20ae5435b2ede90a2ba324), [`8872738`](https://github.com/Lazialize/oasis/commit/8872738104cb5569345801648a16c98a14be5b35)]:
+  - @oasis/core@0.8.4
+  - @oasis/bundler@0.8.4
+  - @oasis/linter@0.8.4
+  - @oasis/server@0.8.4
+
 ## 0.8.3
 
 ### Patch Changes

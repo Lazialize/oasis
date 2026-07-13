@@ -1,5 +1,16 @@
 # @oasis/server
 
+## 0.8.4
+
+### Patch Changes
+
+- [#23](https://github.com/Lazialize/oasis/pull/23) [`8872738`](https://github.com/Lazialize/oasis/commit/8872738104cb5569345801648a16c98a14be5b35) Thanks [@Lazialize](https://github.com/Lazialize)! - fix: LSP server no longer leaks a pending validation timer or orphans diagnostics when a document
+  transitions to the ignored route, and config-file detection now recognizes Windows-style
+  backslash paths so config watch/reload works on Windows
+- Updated dependencies [[`8251964`](https://github.com/Lazialize/oasis/commit/8251964082c2e24be03cb2852006b372e9a55153), [`ec5cd99`](https://github.com/Lazialize/oasis/commit/ec5cd99015e984f2bb20ae5435b2ede90a2ba324)]:
+  - @oasis/core@0.8.4
+  - @oasis/linter@0.8.4
+
 ## 0.8.3
 
 ### Patch Changes
