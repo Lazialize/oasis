@@ -1,6 +1,7 @@
-import { isMap, isNode, isScalar, isSeq } from "yaml";
+import { isMap, isNode, isScalar } from "yaml";
 import type { Node } from "yaml";
 import { nodeAtPointer } from "./document.ts";
+import { walkNodes } from "./walk.ts";
 import type { OasisDocument } from "./parse.ts";
 import { rangeFromOffsets, zeroRange } from "./position.ts";
 import type { Diagnostic, Range } from "./types.ts";
@@ -41,12 +42,9 @@ export function findRefs(doc: OasisDocument): FoundRef[] {
 
   const results: FoundRef[] = [];
   const root = doc.yamlDoc.contents;
-  if (isNode(root)) walk(root);
-  findRefsCache.set(doc, results);
-  return results;
-
-  function walk(node: Node): void {
-    if (isMap(node)) {
+  if (isNode(root)) {
+    walkNodes(root, doc.yamlDoc, (node) => {
+      if (!isMap(node)) return;
       for (const pair of node.items) {
         const key = pair.key;
         const value = pair.value;
@@ -59,14 +57,11 @@ export function findRefs(doc: OasisDocument): FoundRef[] {
               : zeroRange(doc.filePath),
           });
         }
-        if (isNode(value)) walk(value);
       }
-    } else if (isSeq(node)) {
-      for (const item of node.items) {
-        if (isNode(item)) walk(item);
-      }
-    }
+    });
   }
+  findRefsCache.set(doc, results);
+  return results;
 }
 
 export interface ResolvedRef {

@@ -1,4 +1,4 @@
-import { isMap, isNode, isScalar, isSeq, stringify as yamlStringify } from "yaml";
+import { isAlias, isMap, isNode, isScalar, isSeq, stringify as yamlStringify } from "yaml";
 import type { Node, Pair, Scalar } from "yaml";
 import {
   COMPONENT_SECTIONS,
@@ -46,6 +46,10 @@ function rangeOfScalar(doc: OasisDocument, scalar: Scalar): Range {
   return scalar.range ? rangeFromOffsets(doc.filePath, doc.lineCounter, scalar.range[0], scalar.range[1]) : zeroRange(doc.filePath);
 }
 
+function rangeOfNode(doc: OasisDocument, node: Node): Range {
+  return node.range ? rangeFromOffsets(doc.filePath, doc.lineCounter, node.range[0], node.range[1]) : zeroRange(doc.filePath);
+}
+
 interface BundleContext {
   graph: WorkspaceGraph;
   entryDoc: OasisDocument;
@@ -64,6 +68,8 @@ interface BundleContext {
   cycleAssignments: Map<string, { section: string; name: string }>;
   /** Identity keys of entry-document components that were reached via some `$ref` during dereferencing. */
   visitedEntryIdentities: Set<string>;
+  /** Anchor-target nodes currently being expanded, to break cyclic YAML `*alias` references. */
+  aliasStack: Set<Node>;
 }
 
 function identityKeyOf(result: ResolvedRef): string {
@@ -290,6 +296,34 @@ function convertPathsMap(ctx: BundleContext, doc: OasisDocument, mapNode: Node):
 function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undefined, hint: string | undefined): unknown {
   if (!node) return undefined;
 
+  if (isAlias(node)) {
+    const target = node.resolve(doc.yamlDoc);
+    if (!target) {
+      ctx.diagnostics.push({
+        message: `Unresolved YAML alias "*${node.source}": no matching anchor`,
+        severity: "warning",
+        code: "unresolved-alias",
+        source: "bundler",
+        range: rangeOfNode(doc, node),
+      });
+      return undefined;
+    }
+    if (ctx.aliasStack.has(target)) {
+      ctx.diagnostics.push({
+        message: `Cyclic YAML alias "*${node.source}" cannot be inlined; omitted to break the cycle`,
+        severity: "warning",
+        code: "cyclic-alias",
+        source: "bundler",
+        range: rangeOfNode(doc, node),
+      });
+      return undefined;
+    }
+    ctx.aliasStack.add(target);
+    const converted = convertValue(ctx, doc, target, hint);
+    ctx.aliasStack.delete(target);
+    return converted;
+  }
+
   if (isMap(node)) {
     const refPair = findRefPair(node);
     if (refPair) return convertRef(ctx, doc, node, refPair, hint);
@@ -392,6 +426,7 @@ export function bundle(graph: WorkspaceGraph, options: BundleOptions = {}): Bund
     expansionStack: new Set(),
     cycleAssignments: new Map(),
     visitedEntryIdentities: new Set(),
+    aliasStack: new Set(),
   };
 
   const componentsPair = root.items.find((p) => keyToString(p.key) === "components");

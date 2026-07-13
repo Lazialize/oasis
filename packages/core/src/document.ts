@@ -19,7 +19,7 @@ export function nodeAtPointer(doc: OasisDocument, pointer: string): PointerLooku
 
   let current: Node = root;
   for (const seg of segments) {
-    const next = childAt(current, seg);
+    const next = childAt(current, seg, doc.yamlDoc);
     if (!next) return undefined;
     current = next;
   }

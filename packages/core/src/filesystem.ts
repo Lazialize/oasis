@@ -11,14 +11,19 @@ export interface FileSystem {
   resolve(fromPath: string, ref: string): string;
 }
 
+/** Resolve `ref` relative to the directory containing `fromPath` into an absolute path. */
+function resolvePath(fromPath: string, ref: string): string {
+  if (isAbsolute(ref)) return pathResolve(ref);
+  return pathResolve(dirname(fromPath), ref);
+}
+
 export class NodeFileSystem implements FileSystem {
   async readFile(path: string): Promise<string> {
     return fsReadFile(path, "utf-8");
   }
 
   resolve(fromPath: string, ref: string): string {
-    if (isAbsolute(ref)) return pathResolve(ref);
-    return pathResolve(dirname(fromPath), ref);
+    return resolvePath(fromPath, ref);
   }
 }
 
@@ -51,7 +56,6 @@ export class InMemoryFileSystem implements FileSystem {
   }
 
   resolve(fromPath: string, ref: string): string {
-    if (isAbsolute(ref)) return pathResolve(ref);
-    return pathResolve(dirname(fromPath), ref);
+    return resolvePath(fromPath, ref);
   }
 }
