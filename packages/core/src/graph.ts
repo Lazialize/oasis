@@ -74,9 +74,14 @@ export async function loadWorkspaceGraph(fs: FileSystem, entryPath: string): Pro
     visiting.delete(path);
   }
 
-  await loadFile(entryPath);
+  // Canonicalize the entry before traversal so it shares one identity with any path a `$ref`
+  // resolves it to (`fs.resolve` always yields canonical paths). Otherwise a relative entry is
+  // stored under its verbatim key while a back-reference reaches it under its absolute path — the
+  // entry gets parsed twice and cycle detection misfires against the duplicate identity.
+  const canonicalEntry = fs.canonicalize(entryPath);
+  await loadFile(canonicalEntry);
 
-  return { entryPath, documents, diagnostics, fileSystem: fs };
+  return { entryPath: canonicalEntry, documents, diagnostics, fileSystem: fs };
 }
 
 /** All diagnostics in the graph: per-document parse diagnostics plus graph-level ones. */
