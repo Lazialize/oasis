@@ -21,7 +21,7 @@ Together these catch schemas that look plausible but are either invalid for the 
 
 ## Version notes
 
-Several checks are dialect-specific, as detailed above: `ONLY_31_KEYWORDS` are flagged only on 3.0 documents; `exclusiveMinimum`/`exclusiveMaximum` expect the boolean form on 3.0 and the numeric form on 3.1; `type` accepts only a single string on 3.0 versus a string or array on 3.1 (with 3.0 `type` arrays and `type: null` left to `structure/schema-nullable` rather than double-reported here); and `$ref` sibling keys are only flagged on 3.0. All other checks (numeric bounds, `pattern`, `required`, `enum`, `items` shape, `properties`/`additionalProperties` shape, `format`, min/max consistency) apply identically to both versions.
+Several checks are dialect-specific, as detailed above: `ONLY_31_KEYWORDS` are flagged only on 3.0 documents; `exclusiveMinimum`/`exclusiveMaximum` expect the boolean form on 3.0 and the numeric form on 3.1; `type` accepts only a single string on 3.0 versus a string or array on 3.1 (with 3.0 `type` arrays and `type: null` left to `structure/schema-nullable` rather than double-reported here); and `$ref` sibling keys are only flagged on 3.0. On 3.1 documents specifically, a `required` name matched by a `patternProperties` pattern is not flagged as unsatisfiable under `additionalProperties: false`. All other checks (numeric bounds, `pattern`, `required`, `enum`, `items` shape, `properties`/`additionalProperties` shape, `format`, min/max consistency) apply identically to both versions.
 
 ## Options
 
