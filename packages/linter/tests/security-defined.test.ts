@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { loadWorkspaceGraph, NodeFileSystem } from "@oasis/core";
+import { InMemoryFileSystem, loadWorkspaceGraph, NodeFileSystem } from "@oasis/core";
 import { lint } from "../src/engine.ts";
 import { resolveConfig } from "../src/config.ts";
 
@@ -65,5 +65,148 @@ describe("security/defined", () => {
   test("valid fixture passes", async () => {
     const diagnostics = await lintFixture("valid/openapi.yaml");
     expect(diagnostics.some((d) => d.rule === "security/defined")).toBe(false);
+  });
+});
+
+async function lintFiles(files: Record<string, string>, entry = "/virtual/entry.yaml") {
+  const fs = new InMemoryFileSystem(files);
+  const graph = await loadWorkspaceGraph(fs, entry);
+  return lint(graph, resolveConfig(undefined));
+}
+
+describe("security/defined scheme scope resolution (issue #37)", () => {
+  test("a same-named scheme in an unrelated referenced file does not satisfy a requirement", async () => {
+    const diagnostics = await lintFiles({
+      "/virtual/entry.yaml": `openapi: 3.1.0
+info:
+  title: Scope
+  version: "1.0.0"
+security:
+  - api_key: []
+paths:
+  /pets:
+    $ref: "./paths.yaml#/pets"
+`,
+      "/virtual/paths.yaml": `pets:
+  get:
+    operationId: listPets
+    tags: [a]
+    description: x
+    responses:
+      '200':
+        description: OK
+components:
+  securitySchemes:
+    api_key:
+      type: apiKey
+      name: X-Key
+      in: header
+`,
+    });
+    const d = diagnostics.find((d) => d.rule === "security/defined");
+    expect(d).toBeDefined();
+    expect(d?.message).toContain('"api_key"');
+    // The diagnostic stays source-ranged to the requirement in the entry document.
+    expect(d?.range.filePath).toBe("/virtual/entry.yaml");
+  });
+
+  test("a scheme defined in the entry document satisfies requirements in referenced files", async () => {
+    const diagnostics = await lintFiles({
+      "/virtual/entry.yaml": `openapi: 3.1.0
+info:
+  title: Scope
+  version: "1.0.0"
+paths:
+  /pets:
+    $ref: "./paths.yaml#/pets"
+components:
+  securitySchemes:
+    api_key:
+      type: apiKey
+      name: X-Key
+      in: header
+`,
+      "/virtual/paths.yaml": `pets:
+  get:
+    operationId: listPets
+    tags: [a]
+    description: x
+    security:
+      - api_key: []
+    responses:
+      '200':
+        description: OK
+`,
+    });
+    expect(diagnostics.some((d) => d.rule === "security/defined")).toBe(false);
+  });
+});
+
+describe("security/defined role names on non-OAuth schemes (issue #38)", () => {
+  const docWith = (version: string, requirement: string, schemeYaml: string) => `openapi: ${version}
+info:
+  title: Roles
+  version: "1.0.0"
+security:
+${requirement}
+paths: {}
+components:
+  securitySchemes:
+${schemeYaml}
+`;
+
+  const apiKeyScheme = `    api_key:
+      type: apiKey
+      name: X-Key
+      in: header`;
+
+  test("3.1 allows role names for an apiKey scheme", async () => {
+    const diagnostics = await lintFiles({
+      "/virtual/entry.yaml": docWith("3.1.0", "  - api_key: [admin, read]", apiKeyScheme),
+    });
+    expect(diagnostics.some((d) => d.rule === "security/defined")).toBe(false);
+  });
+
+  test("3.1 allows role names for http and mutualTLS schemes", async () => {
+    const diagnostics = await lintFiles({
+      "/virtual/entry.yaml": docWith(
+        "3.1.0",
+        "  - bearer: [admin]\n  - mtls: [system]",
+        `    bearer:
+      type: http
+      scheme: bearer
+    mtls:
+      type: mutualTLS`,
+      ),
+    });
+    expect(diagnostics.some((d) => d.rule === "security/defined")).toBe(false);
+  });
+
+  test("3.0 still rejects a non-empty array for an apiKey scheme", async () => {
+    const diagnostics = await lintFiles({
+      "/virtual/entry.yaml": docWith("3.0.3", "  - api_key: [admin]", apiKeyScheme),
+    });
+    const d = diagnostics.find((d) => d.rule === "security/defined");
+    expect(d).toBeDefined();
+    expect(d?.message).toContain('type "apiKey"');
+  });
+
+  test("3.1 still validates oauth2 values as declared scopes", async () => {
+    const diagnostics = await lintFiles({
+      "/virtual/entry.yaml": docWith(
+        "3.1.0",
+        "  - oauth: [unknown:scope]",
+        `    oauth:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://example.com/token
+          scopes:
+            read:pets: Read pets`,
+      ),
+    });
+    const d = diagnostics.find((d) => d.rule === "security/defined");
+    expect(d).toBeDefined();
+    expect(d?.message).toContain('scope "unknown:scope"');
   });
 });

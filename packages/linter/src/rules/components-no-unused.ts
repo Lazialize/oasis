@@ -133,7 +133,11 @@ export const noUnusedComponents: Rule = {
           const name = keyToString(pair.key);
           const pointer = `/components/${category}/${name}`;
           if (used.has(`${doc.filePath}::${pointer}`)) continue;
-          if (category === "securitySchemes" && usedSecuritySchemeNames.has(name)) continue;
+          // Requirement keys are implicit component-name references that resolve against the
+          // *entry* document per OpenAPI scope rules (see `security/defined`), so a by-name usage
+          // only exempts the entry document's scheme — a same-named scheme in a referenced file is
+          // a different, unreachable component.
+          if (category === "securitySchemes" && doc === ctx.entryDoc && usedSecuritySchemeNames.has(name)) continue;
 
           ctx.report({ doc, pointer }, `Component "${name}" in "components/${category}" is not used anywhere in the workspace.`);
         }
