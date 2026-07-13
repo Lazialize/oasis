@@ -1,0 +1,7 @@
+get:
+  operationId: listWidgets
+  tags: [widgets]
+  description: List widgets.
+  responses:
+    '200':
+      description: OK

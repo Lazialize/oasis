@@ -1,0 +1,12 @@
+openapi: 3.1.0
+info:
+  title: Path Item Siblings
+  version: "1.0.0"
+paths:
+  /widgets:
+    $ref: './widgets.yaml'
+    summary: Widgets summary override
+    description: Widgets description override
+  /missing:
+    $ref: './does-not-exist.yaml'
+    summary: Missing path summary

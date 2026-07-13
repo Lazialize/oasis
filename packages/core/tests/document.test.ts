@@ -44,4 +44,17 @@ describe("pointer <-> position round trips", () => {
     const byPointer = nodeAtPointer(doc, byPosition!.pointer);
     expect(byPointer?.range).toEqual(byPosition!.range);
   });
+
+  test("nodeAtPosition on a map *key* resolves to that pair's pointer, not the containing map", () => {
+    // Cursor inside the "summary" key text of "summary: List users" (/paths/~1users/get/summary).
+    const keyIdx = text.indexOf("summary: List users");
+    expect(keyIdx).toBeGreaterThan(-1);
+    const offset = keyIdx + 2; // inside "summary", before the colon
+
+    const result = nodeAtPosition(doc, offset);
+    expect(result).toBeDefined();
+    expect(result?.pointer).toBe("/paths/~1users/get/summary");
+    // Resolves to the pair's value (the scalar "List users"), matching a hit on the value itself.
+    expect(isScalar(result?.node) && result?.node.value).toBe("List users");
+  });
 });

@@ -38,3 +38,21 @@ describe("parsePointer / formatPointer", () => {
     expect(formatPointer([])).toBe("");
   });
 });
+
+describe("percent-decoding (URI-encoded $ref fragments)", () => {
+  test("percent-decodes a segment before applying ~ unescaping", () => {
+    // "%7E0" percent-decodes to the literal text "~0", which is then unescaped as a JSON Pointer
+    // escape to "~" -- same final result as writing the escape directly, unencoded.
+    expect(parsePointer("/a/%7E0")).toEqual(["a", "~"]);
+    expect(parsePointer("/a/~0")).toEqual(["a", "~"]);
+  });
+
+  test("percent-decodes a plain (non ~-escaped) segment", () => {
+    expect(parsePointer("/pet%20store/Foo")).toEqual(["pet store", "Foo"]);
+  });
+
+  test("a malformed percent-encoding is treated as literal text instead of throwing", () => {
+    expect(() => parsePointer("/a%/b")).not.toThrow();
+    expect(parsePointer("/a%/b")).toEqual(["a%", "b"]);
+  });
+});

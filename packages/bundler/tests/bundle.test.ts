@@ -144,4 +144,28 @@ describe("bundle", () => {
     expect(result.output).toContain("listWidgets");
     await assertSelfContained(result.output);
   });
+
+  test("path item $ref siblings (summary/description) are preserved, both resolved and unresolved", async () => {
+    const graph = await loadFixture("pathitem-siblings");
+    const result = bundle(graph);
+    // Resolved case: target is inlined, and the sibling summary/description override it.
+    expect(result.output).toContain("listWidgets");
+    expect(result.output).toContain("Widgets summary override");
+    expect(result.output).toContain("Widgets description override");
+    // Unresolved case: $ref preserved verbatim, but its sibling isn't dropped either.
+    expect(result.output).toContain("./does-not-exist.yaml");
+    expect(result.output).toContain("Missing path summary");
+  });
+
+  test("$ref-as-literal-data (example/default/enum) is copied through unchanged, not lifted or rewritten", async () => {
+    const graph = await loadFixture("literal-ref-data");
+    const result = bundle(graph);
+    expect(result.diagnostics).toEqual([]);
+    // The literal $ref-shaped data must survive verbatim; it must not be treated as a real
+    // reference (no lifting into components, no rewriting, no unresolved-ref diagnostic).
+    expect(result.output).toContain("./does-not-exist.yaml");
+    expect(result.output).toContain("./also-missing.yaml");
+    expect(result.output).toContain("./enum-missing.yaml");
+    expect(result.output).not.toContain("components:");
+  });
 });
