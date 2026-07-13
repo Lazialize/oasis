@@ -34,7 +34,8 @@ function checkCallbackPathItem(ctx: RuleContext, doc: OasisDocument, node: Node,
       ctx.report({ doc: resolved.doc, node: resolved.node }, `${label}.${method} must be an object.`);
       continue;
     }
-    if (!childAt(resolved.node, "responses")) {
+    // Operation.responses is REQUIRED in 3.0 but optional since 3.1 (see structure/field-types).
+    if (ctx.version === "3.0" && !childAt(resolved.node, "responses")) {
       ctx.report({ doc: resolved.doc, node: resolved.node }, `${label}.${method} is missing required field "responses".`);
     }
   }

@@ -765,6 +765,78 @@ describe("structure/http-methods and structure/field-types across a $ref'd path 
   });
 });
 
+describe('Operation "responses" requiredness by version', () => {
+  const docWithoutResponses = (version: string) => `
+openapi: ${version}
+info:
+  title: T
+  version: "1.0.0"
+paths:
+  /ping:
+    get:
+      operationId: ping
+      tags: [a]
+      description: x
+`;
+
+  test('3.0: structure/field-types reports a missing "responses"', async () => {
+    const fs = new InMemoryFileSystem({ "/virtual/entry.yaml": docWithoutResponses("3.0.3") });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    const d = diagnostics.find((d) => d.rule === "structure/field-types" && d.message.includes('missing required field "responses"'));
+    expect(d).toBeDefined();
+    expect(d?.severity).toBe("error");
+  });
+
+  test('3.1: structure/field-types accepts an operation without "responses" (optional since 3.1)', async () => {
+    const fs = new InMemoryFileSystem({ "/virtual/entry.yaml": docWithoutResponses("3.1.0") });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    expect(
+      diagnostics.some((d) => d.rule === "structure/field-types" && d.message.includes('missing required field "responses"')),
+    ).toBe(false);
+  });
+
+  const callbackDoc = (version: string) => `
+openapi: ${version}
+info:
+  title: T
+  version: "1.0.0"
+paths:
+  /subscribe:
+    post:
+      operationId: subscribe
+      tags: [a]
+      description: x
+      callbacks:
+        onData:
+          "{$request.body#/callbackUrl}":
+            post:
+              operationId: onData
+      responses:
+        '200':
+          description: OK
+`;
+
+  test('3.0: structure/callbacks reports a callback operation missing "responses"', async () => {
+    const fs = new InMemoryFileSystem({ "/virtual/entry.yaml": callbackDoc("3.0.3") });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    expect(
+      diagnostics.some((d) => d.rule === "structure/callbacks" && d.message.includes('missing required field "responses"')),
+    ).toBe(true);
+  });
+
+  test('3.1: structure/callbacks accepts a callback operation without "responses"', async () => {
+    const fs = new InMemoryFileSystem({ "/virtual/entry.yaml": callbackDoc("3.1.0") });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    expect(
+      diagnostics.some((d) => d.rule === "structure/callbacks" && d.message.includes('missing required field "responses"')),
+    ).toBe(false);
+  });
+});
+
 describe("structure/http-methods and structure/field-types on 3.1 webhooks", () => {
   test("structure/http-methods flags an invalid key under a webhook path item", async () => {
     const fs = new InMemoryFileSystem({

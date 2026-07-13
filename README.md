@@ -250,7 +250,7 @@ checks and why, version notes, options, and good/bad examples). Compact summary:
 | [`paths/params-defined`](docs/rules/paths/params-defined.md) | error | `{param}` templates ↔ `in: path` parameters agree |
 | [`components/no-unused`](docs/rules/components/no-unused.md) | warn | Components nothing references |
 | [`paths/no-duplicates`](docs/rules/paths/no-duplicates.md) | error | Path templates equivalent up to parameter names |
-| [`security/defined`](docs/rules/security/defined.md) | error | `security` scheme names exist in `components/securitySchemes` |
+| [`security/defined`](docs/rules/security/defined.md) | error | `security` scheme names exist in `components/securitySchemes`; oauth2 scopes are declared |
 | [`tags/defined`](docs/rules/tags/defined.md) | off | Operation tags are declared in the root `tags` list |
 | [`tags/no-unused`](docs/rules/tags/no-unused.md) | warn | Root `tags` list entries are used by an operation |
 | [`style/naming-convention`](docs/rules/style/naming-convention.md) | off | Configurable casing for ids, component/parameter/property names |

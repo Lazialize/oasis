@@ -59,6 +59,28 @@ describe("refs/no-cycle", () => {
   });
 });
 
+describe("missing entry document", () => {
+  test("surfaces a single refs/no-unresolved error instead of silently reporting nothing", async () => {
+    const fs = new NodeFileSystem();
+    const entry = `${fixturesRoot}/does-not-exist.yaml`;
+    const graph = await loadWorkspaceGraph(fs, entry);
+    const config = resolveConfig(undefined);
+    const diagnostics = lint(graph, config);
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]).toMatchObject({ rule: "refs/no-unresolved", severity: "error" });
+    expect(diagnostics[0]?.range.filePath).toBe(entry);
+  });
+
+  test("respects a config that turns refs/no-unresolved off", async () => {
+    const fs = new NodeFileSystem();
+    const entry = `${fixturesRoot}/does-not-exist.yaml`;
+    const graph = await loadWorkspaceGraph(fs, entry);
+    const config = resolveConfig({ lint: { rules: { "refs/no-unresolved": "off" } } });
+    const diagnostics = lint(graph, config);
+    expect(diagnostics).toEqual([]);
+  });
+});
+
 describe("syntax errors", () => {
   test("are always emitted as errors, ignoring config severity for other rules", async () => {
     const mem = new InMemoryFileSystem({ "/virtual/entry.yaml": "openapi: 3.0.3\ninfo: [unterminated\n" });
