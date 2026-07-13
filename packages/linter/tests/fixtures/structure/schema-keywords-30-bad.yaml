@@ -40,6 +40,26 @@ components:
       minimum: 0
       exclusiveMinimum: 5
 
+    MapExclusive:
+      type: number
+      minimum: 0
+      exclusiveMinimum: {}
+
+    SeqExclusive:
+      type: number
+      maximum: 10
+      exclusiveMaximum: []
+
+    NullExclusive:
+      type: number
+      minimum: 0
+      exclusiveMinimum: null
+
+    StringExclusive:
+      type: number
+      maximum: 10
+      exclusiveMaximum: "5"
+
     BadTypeName:
       type: file
 

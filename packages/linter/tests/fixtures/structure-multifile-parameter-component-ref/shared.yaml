@@ -1,0 +1,2 @@
+BrokenParam:
+  description: missing name and in, defined in an external file via a component-level $ref

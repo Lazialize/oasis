@@ -1,0 +1,4 @@
+PetsPath:
+  get:
+    operationId: listPets
+    responses: {}

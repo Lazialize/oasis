@@ -101,6 +101,170 @@ paths:
       expect(diagnostics.some((d) => d.rule === "structure/field-types" && d.message.includes("not a valid HTTP status code"))).toBe(false);
     });
   });
+
+  describe("empty Responses Object (#44)", () => {
+    test("flags an operation's empty responses: {}", async () => {
+      const diagnostics = await lintFixture("structure/empty-responses.yaml");
+      const d = diagnostics.find(
+        (d) =>
+          d.rule === "structure/field-types" &&
+          d.message.includes("paths./pets.get.responses") &&
+          d.message.includes("at least one response code"),
+      );
+      expect(d).toBeDefined();
+    });
+
+    test("does not flag a responses object with a valid entry", async () => {
+      const diagnostics = await lintFixture("structure/empty-responses.yaml");
+      const d = diagnostics.find(
+        (d) =>
+          d.rule === "structure/field-types" &&
+          d.message.includes("paths./pets.post.responses") &&
+          d.message.includes("at least one response code"),
+      );
+      expect(d).toBeUndefined();
+    });
+
+    test("accepts an extension (x-*) field as a valid responses entry", async () => {
+      const fs = new InMemoryFileSystem({
+        "/virtual/entry.yaml": `
+openapi: 3.1.0
+info:
+  title: T
+  version: "1.0.0"
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        x-custom: {}
+`,
+      });
+      const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+      const diagnostics = lint(graph, resolveConfig(undefined));
+      expect(diagnostics.some((d) => d.rule === "structure/field-types" && d.message.includes("at least one response code"))).toBe(false);
+    });
+
+    test("flags an empty responses in a callback operation", async () => {
+      const diagnostics = await lintFixture("structure/empty-responses.yaml");
+      const d = diagnostics.find(
+        (d) => d.rule === "structure/callbacks" && d.message.includes("at least one response code"),
+      );
+      expect(d).toBeDefined();
+    });
+
+    test("attributes the diagnostic to the file that owns a $ref'd Path Item's operation", async () => {
+      const fs = new NodeFileSystem();
+      const entry = `${fixturesRoot}/structure-multifile-empty-responses/entry.yaml`;
+      const graph = await loadWorkspaceGraph(fs, entry);
+      const diagnostics = lint(graph, resolveConfig(undefined));
+      const d = diagnostics.find((d) => d.rule === "structure/field-types" && d.message.includes("at least one response code"));
+      expect(d).toBeDefined();
+      expect(d?.range.filePath).toBe(`${fixturesRoot}/structure-multifile-empty-responses/paths-pets.yaml`);
+    });
+
+    test("valid fixture passes", async () => {
+      const diagnostics = await lintFixture("valid/openapi.yaml");
+      expect(diagnostics.some((d) => d.rule === "structure/field-types" && d.message.includes("at least one response code"))).toBe(false);
+    });
+  });
+});
+
+describe("structure/field-types — Parameter Objects (#46)", () => {
+  test("flags a components/parameters entry missing name and in", async () => {
+    const diagnostics = await lintFixture("structure/parameter-objects-bad.yaml");
+    const d = diagnostics.find(
+      (d) =>
+        d.rule === "structure/field-types" &&
+        d.message.includes("/components/parameters/Broken") &&
+        d.message.includes('missing required field "name"'),
+    );
+    expect(d).toBeDefined();
+    const d2 = diagnostics.find(
+      (d) =>
+        d.rule === "structure/field-types" &&
+        d.message.includes("/components/parameters/Broken") &&
+        d.message.includes('"in" set to one of'),
+    );
+    expect(d2).toBeDefined();
+  });
+
+  test("flags an in: path parameter without required: true", async () => {
+    const diagnostics = await lintFixture("structure/parameter-objects-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/field-types" && d.message.includes('"in: path"') && d.message.includes('"required: true"'),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags schema/content used together (mutually exclusive)", async () => {
+    const diagnostics = await lintFixture("structure/parameter-objects-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/field-types" && d.message.includes("must not have both") && d.message.includes('"schema"') && d.message.includes('"content"'),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags a non-boolean explode", async () => {
+    const diagnostics = await lintFixture("structure/parameter-objects-bad.yaml");
+    const d = diagnostics.find((d) => d.rule === "structure/field-types" && d.message.includes('"explode" must be a boolean'));
+    expect(d).toBeDefined();
+  });
+
+  test("flags allowReserved on a non-query (header) parameter", async () => {
+    const diagnostics = await lintFixture("structure/parameter-objects-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/field-types" && d.message.includes('"allowReserved"') && d.message.includes("only applies to"),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags an invalid style for the parameter's location (path-item-level header parameter)", async () => {
+    const diagnostics = await lintFixture("structure/parameter-objects-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/field-types" && d.message.includes('"style: form"') && d.message.includes('"in: header"'),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("resolves a $ref to a broken components/parameters entry used from an operation", async () => {
+    const diagnostics = await lintFixture("structure/parameter-objects-bad.yaml");
+    // The $ref'd operation parameter and the direct components/parameters entry are the same
+    // resolved location, so this should be reported exactly once (dedup by resolved pointer).
+    const matches = diagnostics.filter(
+      (d) => d.rule === "structure/field-types" && d.message.includes("/components/parameters/Broken") && d.message.includes('missing required field "name"'),
+    );
+    expect(matches.length).toBe(1);
+  });
+
+  test("valid fixture passes with no Parameter Object diagnostics", async () => {
+    const diagnostics = await lintFixture("structure/parameter-objects-valid.yaml");
+    expect(diagnostics.filter((d) => d.rule === "structure/field-types")).toEqual([]);
+  });
+
+  test("attributes a diagnostic to the file that owns a $ref'd operation parameter", async () => {
+    const fs = new NodeFileSystem();
+    const entry = `${fixturesRoot}/structure-multifile-parameter-objects/entry.yaml`;
+    const graph = await loadWorkspaceGraph(fs, entry);
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/field-types" && d.message.includes('missing required field "name"'),
+    );
+    expect(d).toBeDefined();
+    expect(d?.range.filePath).toBe(`${fixturesRoot}/structure-multifile-parameter-objects/params.yaml`);
+  });
+
+  test("resolves a components/parameters entry that is itself a cross-file $ref", async () => {
+    const fs = new NodeFileSystem();
+    const entry = `${fixturesRoot}/structure-multifile-parameter-component-ref/entry.yaml`;
+    const graph = await loadWorkspaceGraph(fs, entry);
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/field-types" && d.message.includes('missing required field "name"'),
+    );
+    expect(d).toBeDefined();
+    expect(d?.range.filePath).toBe(`${fixturesRoot}/structure-multifile-parameter-component-ref/shared.yaml`);
+  });
 });
 
 describe("structure/http-methods", () => {
@@ -178,6 +342,23 @@ describe("structure/schema-keywords", () => {
     const diagnostics = await lintFixture("structure/schema-keywords-30-bad.yaml");
     const d = diagnostics.find((d) => d.rule === "structure/schema-keywords" && d.message.includes('"exclusiveMinimum" must be a boolean'));
     expect(d).toBeDefined();
+  });
+
+  test("flags non-boolean exclusiveMinimum/exclusiveMaximum node kinds on OpenAPI 3.0 (#41)", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-30-bad.yaml");
+    const minDiagnostics = diagnostics.filter(
+      (d) => d.rule === "structure/schema-keywords" && d.message.includes('"exclusiveMinimum" must be a boolean'),
+    );
+    const maxDiagnostics = diagnostics.filter(
+      (d) => d.rule === "structure/schema-keywords" && d.message.includes('"exclusiveMaximum" must be a boolean'),
+    );
+    // NumericExclusive (number), MapExclusive ({}), and NullExclusive (null) all use exclusiveMinimum.
+    expect(minDiagnostics.length).toBeGreaterThanOrEqual(3);
+    // SeqExclusive ([]) and StringExclusive ("5") both use exclusiveMaximum.
+    expect(maxDiagnostics.length).toBeGreaterThanOrEqual(2);
+    for (const d of [...minDiagnostics, ...maxDiagnostics]) {
+      expect(typeof d.range.start.line).toBe("number");
+    }
   });
 
   test("flags an unrecognized type name in OpenAPI 3.0", async () => {
@@ -291,6 +472,23 @@ describe("structure/schema-keywords", () => {
     const diagnostics = await lintFixture("structure/schema-keywords-31-bad.yaml");
     const d = diagnostics.find((d) => d.rule === "structure/schema-keywords" && d.message.includes('"exclusiveMinimum" must be a number'));
     expect(d).toBeDefined();
+  });
+
+  test("flags non-numeric exclusiveMinimum/exclusiveMaximum node kinds on OpenAPI 3.1 (#41)", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-31-bad.yaml");
+    const minDiagnostics = diagnostics.filter(
+      (d) => d.rule === "structure/schema-keywords" && d.message.includes('"exclusiveMinimum" must be a number'),
+    );
+    const maxDiagnostics = diagnostics.filter(
+      (d) => d.rule === "structure/schema-keywords" && d.message.includes('"exclusiveMaximum" must be a number'),
+    );
+    // BooleanExclusive (true), MapExclusive31 ({}), and NullExclusive31 (null) all use exclusiveMinimum.
+    expect(minDiagnostics.length).toBeGreaterThanOrEqual(3);
+    // SeqExclusive31 ([]) and StringExclusive31 ("5") both use exclusiveMaximum.
+    expect(maxDiagnostics.length).toBeGreaterThanOrEqual(2);
+    for (const d of [...minDiagnostics, ...maxDiagnostics]) {
+      expect(typeof d.range.start.line).toBe("number");
+    }
   });
 
   test("flags an unrecognized type name inside a 3.1 type array", async () => {
@@ -532,6 +730,62 @@ describe("structure/server-variables", () => {
   test("valid fixture passes", async () => {
     const diagnostics = await lintFixture("valid/openapi.yaml");
     expect(diagnostics.some((d) => d.rule === "structure/server-variables")).toBe(false);
+  });
+
+  describe("malformed Server Object shape (#45)", () => {
+    test("flags a root server missing url", async () => {
+      const diagnostics = await lintFixture("structure/server-variables-malformed.yaml");
+      const d = diagnostics.find(
+        (d) => d.rule === "structure/server-variables" && d.message.includes("Root") && d.message.includes('missing required field "url"'),
+      );
+      expect(d).toBeDefined();
+    });
+
+    test("flags a root server with a non-string url", async () => {
+      const diagnostics = await lintFixture("structure/server-variables-malformed.yaml");
+      const d = diagnostics.find(
+        (d) => d.rule === "structure/server-variables" && d.message.includes('"url" must be a string'),
+      );
+      expect(d).toBeDefined();
+    });
+
+    test("flags a root server whose variables is not an object", async () => {
+      const diagnostics = await lintFixture("structure/server-variables-malformed.yaml");
+      const d = diagnostics.find(
+        (d) => d.rule === "structure/server-variables" && d.message.includes('"variables" must be an object'),
+      );
+      expect(d).toBeDefined();
+    });
+
+    test("flags a declared variable missing default even when url is also missing", async () => {
+      const diagnostics = await lintFixture("structure/server-variables-malformed.yaml");
+      const d = diagnostics.find(
+        (d) =>
+          d.rule === "structure/server-variables" &&
+          d.message.includes('"host"') &&
+          d.message.includes('missing required field "default"'),
+      );
+      expect(d).toBeDefined();
+    });
+
+    test("flags a non-object item in a servers array (path item level)", async () => {
+      const diagnostics = await lintFixture("structure/server-variables-malformed.yaml");
+      const d = diagnostics.find(
+        (d) => d.rule === "structure/server-variables" && d.message.includes("Path item") && d.message.includes("must be an object"),
+      );
+      expect(d).toBeDefined();
+    });
+
+    test("flags an operation-level server missing url", async () => {
+      const diagnostics = await lintFixture("structure/server-variables-malformed.yaml");
+      const d = diagnostics.find(
+        (d) =>
+          d.rule === "structure/server-variables" &&
+          d.message.includes("Operation") &&
+          d.message.includes('missing required field "url"'),
+      );
+      expect(d).toBeDefined();
+    });
   });
 });
 

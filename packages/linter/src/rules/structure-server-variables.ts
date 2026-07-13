@@ -53,33 +53,54 @@ function checkServerVariable(ctx: RuleContext, doc: OasisDocument, name: string,
 }
 
 function checkServerObject(ctx: RuleContext, doc: OasisDocument, node: Node, label: string): void {
-  if (!isMap(node)) return;
-
-  const urlNode = childAt(node, "url");
-  const variablesNode = childAt(node, "variables");
-  if (!urlNode || !isScalar(urlNode) || typeof urlNode.value !== "string") return;
-
-  const urlVars = new Set(extractVars(urlNode.value));
-  const declared = new Map<string, Node>();
-  if (variablesNode && isMap(variablesNode)) {
-    for (const pair of variablesNode.items) {
-      if (isNode(pair.value)) declared.set(keyToString(pair.key), pair.value);
-    }
-  } else if (variablesNode) {
-    ctx.report({ doc, node: variablesNode }, `${label} "variables" must be an object.`);
+  if (!isMap(node)) {
+    ctx.report({ doc, node }, `${label} must be an object.`);
+    return;
   }
 
+  const urlNode = childAt(node, "url");
+  let urlValue: string | undefined;
+  if (!urlNode) {
+    ctx.report({ doc, node }, `${label} is missing required field "url" (string).`);
+  } else if (!isScalar(urlNode) || typeof urlNode.value !== "string") {
+    ctx.report({ doc, node: urlNode }, `${label} "url" must be a string.`);
+  } else {
+    urlValue = urlNode.value;
+  }
+
+  const variablesNode = childAt(node, "variables");
+  const declared = new Map<string, Node>();
+  if (variablesNode) {
+    if (isMap(variablesNode)) {
+      for (const pair of variablesNode.items) {
+        if (isNode(pair.value)) declared.set(keyToString(pair.key), pair.value);
+      }
+    } else {
+      ctx.report({ doc, node: variablesNode }, `${label} "variables" must be an object.`);
+    }
+  }
+
+  // Shape validation for each declared Server Variable Object runs regardless of whether "url"
+  // itself is present/valid, so a variable missing "default" is still reported.
+  for (const [name, varNode] of declared) {
+    checkServerVariable(ctx, doc, name, varNode, label);
+  }
+
+  // Cross-checks between "url" placeholders and declared "variables" only make sense once "url"
+  // resolved to an actual string above.
+  if (urlValue === undefined) return;
+
+  const urlVars = new Set(extractVars(urlValue));
   for (const varName of urlVars) {
     if (!declared.has(varName)) {
       ctx.report(
-        { doc, node: variablesNode ?? urlNode },
+        { doc, node: variablesNode ?? urlNode! },
         `${label} url references "{${varName}}" but "variables" does not define it.`,
       );
     }
   }
 
   for (const [name, varNode] of declared) {
-    checkServerVariable(ctx, doc, name, varNode, label);
     if (!urlVars.has(name)) {
       ctx.report(
         { doc, node: varNode },
