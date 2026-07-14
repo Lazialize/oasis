@@ -11,6 +11,12 @@ export { escapePointerSegment, formatPointer, parsePointer, unescapePointerSegme
 export type { OpenApiVersion } from "./version.ts";
 export { detectVersion } from "./version.ts";
 
+export {
+  isNamedEntryContainer,
+  NAMED_ENTRY_CONTAINER_KEYS,
+  NAMED_ENTRY_CONTAINER_KEYS_31,
+} from "./named-containers.ts";
+
 export type { FileSystem } from "./filesystem.ts";
 export { InMemoryFileSystem, NodeFileSystem } from "./filesystem.ts";
 

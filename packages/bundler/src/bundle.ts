@@ -3,8 +3,10 @@ import type { Node, Pair, Scalar } from "yaml";
 import {
   COMPONENT_SECTIONS,
   type Diagnostic,
+  detectVersion,
   formatPointer,
   isLiteralDataKey,
+  isNamedEntryContainer,
   keyToString,
   looksLikeMappingRef,
   type OasisDocument,
@@ -534,6 +536,7 @@ function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undef
           break;
         case "properties":
         case "patternProperties":
+        case "dependentSchemas":
         case "schemas":
         case "$defs":
         case "definitions":
@@ -596,7 +599,13 @@ function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undef
           setKey(out, key, convertDiscriminatorMapping(ctx, doc, value));
           break;
         default:
-          setKey(out, key, convertValue(ctx, doc, value, hint));
+          setKey(
+            out,
+            key,
+            isNamedEntryContainer(key, value, detectVersion(doc) ?? detectVersion(ctx.entryDoc))
+              ? mapChildren(ctx, doc, value, hint ?? "schemas")
+              : convertValue(ctx, doc, value, hint),
+          );
       }
     }
     return out;

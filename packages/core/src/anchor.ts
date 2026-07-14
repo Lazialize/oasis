@@ -1,5 +1,6 @@
 import { isMap, isNode, isScalar, isSeq } from "yaml";
 import type { Node, Scalar } from "yaml";
+import { isNamedEntryContainer } from "./named-containers.ts";
 import type { OasisDocument } from "./parse.ts";
 import { safeDecodeURIComponent } from "./pointer.ts";
 import { rangeFromOffsets, zeroRange } from "./position.ts";
@@ -61,7 +62,7 @@ export function buildAnchorIndex(doc: OasisDocument): AnchorIndex {
   }
 
   const root = doc.yamlDoc.contents;
-  const seen = new Set<Node>();
+  const seenByContext = new Map<string, Set<Node>>();
 
   function rangeOf(node: Node): Range {
     return node.range ? rangeFromOffsets(doc.filePath, doc.lineCounter, node.range[0], node.range[1]) : zeroRange(doc.filePath);
@@ -73,9 +74,16 @@ export function buildAnchorIndex(doc: OasisDocument): AnchorIndex {
     if (!index.byName.has(name)) index.byName.set(name, entry);
   }
 
-  function walk(node: Node, scope: string, literal: boolean): void {
+  function walk(node: Node, scope: string, literal: boolean, inContainer: boolean): void {
     const resolved = resolveAlias(node, doc.yamlDoc);
-    if (!resolved || seen.has(resolved)) return;
+    if (!resolved) return;
+    const context = `${literal}:${inContainer}`;
+    let seen = seenByContext.get(context);
+    if (!seen) {
+      seen = new Set<Node>();
+      seenByContext.set(context, seen);
+    }
+    if (seen.has(resolved)) return;
     seen.add(resolved);
 
     if (isMap(resolved)) {
@@ -95,17 +103,20 @@ export function buildAnchorIndex(doc: OasisDocument): AnchorIndex {
       for (const pair of resolved.items) {
         if (!isNode(pair.value)) continue;
         const key = scalarString(pair.key);
-        const childLiteral = literal || (key !== undefined && isLiteralSchemaDataKey(key, pair.value));
-        walk(pair.value, nodeScope, childLiteral);
+        const childLiteral = literal ||
+          (!inContainer && key !== undefined && isLiteralSchemaDataKey(key, pair.value));
+        const childContainer = !literal && !inContainer && key !== undefined &&
+          isNamedEntryContainer(key, pair.value, "3.1");
+        walk(pair.value, nodeScope, childLiteral, childContainer);
       }
     } else if (isSeq(resolved)) {
       for (const item of resolved.items) {
-        if (isNode(item)) walk(item, scope, literal);
+        if (isNode(item)) walk(item, scope, literal, false);
       }
     }
   }
 
-  if (isNode(root)) walk(root, "", false);
+  if (isNode(root)) walk(root, "", false, false);
   anchorIndexCache.set(doc, index);
   return index;
 }

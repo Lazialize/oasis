@@ -9,6 +9,12 @@ import { rangeFromOffsets, zeroRange } from "./position.ts";
 import type { Diagnostic, Range } from "./types.ts";
 import { isExternalUriReference } from "./uri.ts";
 import type { WorkspaceGraph } from "./graph.ts";
+import {
+  isNamedEntryContainer,
+  NAMED_ENTRY_CONTAINER_KEYS,
+  NAMED_ENTRY_CONTAINER_KEYS_31,
+} from "./named-containers.ts";
+import { detectVersion } from "./version.ts";
 
 export interface RefParts {
   /** File portion of the ref, "" for a same-document ref. */
@@ -53,29 +59,14 @@ export function isLiteralDataKey(key: string, value: Node): boolean {
  * legitimately carry a real `$ref`), not literal instance data. `examples` qualifies only in its
  * *map* form (name -> Example Object); its *sequence* form is the JSON Schema literal keyword.
  */
+/** @deprecated Use `NAMED_ENTRY_CONTAINER_KEYS` and `NAMED_ENTRY_CONTAINER_KEYS_31`. */
 export const CONTAINER_KEYS = new Set<string>([
-  "responses",
-  "properties",
-  "patternProperties",
-  "headers",
-  "links",
-  "callbacks",
-  "variables",
-  "mapping",
-  "schemas",
-  "parameters",
-  "requestBodies",
-  "securitySchemes",
-  "encoding",
-  "scopes",
-  "$defs",
-  "definitions",
+  ...NAMED_ENTRY_CONTAINER_KEYS,
+  ...NAMED_ENTRY_CONTAINER_KEYS_31,
 ]);
 
-export function isContainerKey(key: string, value: Node): boolean {
-  if (key === "examples") return isMap(value);
-  return CONTAINER_KEYS.has(key);
-}
+/** @deprecated Use `isNamedEntryContainer`. */
+export const isContainerKey = isNamedEntryContainer;
 
 /**
  * Distinguishes a `discriminator.mapping` value that is a URI reference (e.g. "./dog.yaml#/Dog",
@@ -154,6 +145,7 @@ export function findSubtreeRefs(doc: OasisDocument, root: Node): Scalar[] {
  * nodes to their anchored targets as it descends and skipping literal-data subtrees.
  */
 function walkSubtreeRefs(doc: OasisDocument, root: Node, onRef: (value: Scalar) => void): void {
+  const version = detectVersion(doc);
   // Two seen-sets (one per literal-context) so a shared anchor visited once under a literal-data
   // subtree doesn't suppress a later, genuine visit of the same node reached non-literally (or
   // vice versa) — each context is still bounded on its own against alias cycles/diamonds.
@@ -208,7 +200,7 @@ function walkSubtreeRefs(doc: OasisDocument, root: Node, onRef: (value: Scalar) 
         // be mistaken for a real reference. A named object resets `inContainer`, so a genuine nested
         // container (e.g. `Schema.properties`) is still recognised on the next descent.
         const childContainer =
-          !inContainer && !literal && keyStr !== undefined && isContainerKey(keyStr, pair.value);
+          !inContainer && !literal && keyStr !== undefined && isNamedEntryContainer(keyStr, pair.value, version);
         // Only a `mapping` key reached as the *direct* child of a Discriminator Object counts —
         // an ordinary Schema Object property that happens to be named "mapping" (e.g.
         // `properties: { mapping: { type: string } }`) is plain data, not a discriminator mapping.
