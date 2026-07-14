@@ -12,21 +12,26 @@ interface SchemeInfo {
   oauth2Scopes: Set<string> | undefined;
 }
 
-/** Collect every scheme declared under any document's `components/securitySchemes`. */
+/**
+ * Collect the schemes declared under the *entry document's* `components/securitySchemes`. A
+ * security requirement's keys are implicit component-name references, and per OpenAPI scope rules
+ * they resolve against the entry document of the API description — a same-named scheme declared in
+ * an unrelated referenced file is a different component and must not make an undefined requirement
+ * appear valid. An entry that is itself a `$ref` (same-document or cross-file) is still resolved
+ * through the workspace graph when reading its type/scopes.
+ */
 function collectDefinedSchemes(ctx: RuleContext): Map<string, SchemeInfo> {
   const defined = new Map<string, SchemeInfo>();
-  for (const doc of ctx.documents) {
-    const root = doc.yamlDoc.contents;
-    if (!root || !isMap(root)) continue;
-    const componentsNode = childAt(root, "components");
-    if (!componentsNode || !isMap(componentsNode)) continue;
-    const schemesNode = childAt(componentsNode, "securitySchemes");
-    if (!schemesNode || !isMap(schemesNode)) continue;
-    for (const pair of schemesNode.items) {
-      const name = keyToString(pair.key);
-      if (defined.has(name)) continue;
-      defined.set(name, isNode(pair.value) ? readSchemeInfo(ctx, doc, pair.value) : { type: undefined, oauth2Scopes: undefined });
-    }
+  const root = ctx.entryDoc.yamlDoc.contents;
+  if (!root || !isMap(root)) return defined;
+  const componentsNode = childAt(root, "components");
+  if (!componentsNode || !isMap(componentsNode)) return defined;
+  const schemesNode = childAt(componentsNode, "securitySchemes");
+  if (!schemesNode || !isMap(schemesNode)) return defined;
+  for (const pair of schemesNode.items) {
+    const name = keyToString(pair.key);
+    if (defined.has(name)) continue;
+    defined.set(name, isNode(pair.value) ? readSchemeInfo(ctx, ctx.entryDoc, pair.value) : { type: undefined, oauth2Scopes: undefined });
   }
   return defined;
 }
@@ -93,12 +98,15 @@ function checkSecurityNode(
             `${label} requests scope "${scope}", which is not declared by any flow of security scheme "${name}".`,
           );
         }
-      } else if (info.type !== "openIdConnect" && info.type !== undefined && scopeItems.length > 0) {
-        // Only oauth2 and openIdConnect requirements may list scopes; openIdConnect scope names
-        // live in the discovery document and cannot be validated statically, so any are accepted.
+      } else if (ctx.version === "3.0" && info.type !== "openIdConnect" && info.type !== undefined && scopeItems.length > 0) {
+        // OpenAPI 3.0: only oauth2 and openIdConnect requirements may list values (scopes);
+        // openIdConnect scope names live in the discovery document and cannot be validated
+        // statically, so any are accepted. OpenAPI 3.1 (Security Requirement Object, v3.1.2)
+        // explicitly allows role names in the array for other scheme types (apiKey/http/
+        // mutualTLS), so non-empty arrays are valid there and nothing is reported.
         ctx.report(
           { doc, node: pair.value },
-          `${label} lists scopes for security scheme "${name}" of type "${info.type}"; only "oauth2" and "openIdConnect" schemes accept scopes.`,
+          `${label} lists scopes for security scheme "${name}" of type "${info.type}"; only "oauth2" and "openIdConnect" schemes accept scopes in OpenAPI 3.0.`,
         );
       }
     }

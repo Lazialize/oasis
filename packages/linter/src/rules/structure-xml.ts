@@ -65,7 +65,7 @@ export const structureXml: Rule = {
           const xmlNode = childAt(schema, "xml");
           if (xmlNode) checkXml(ctx, site.doc, xmlNode);
         },
-        {},
+        ctx.version,
         seen,
       );
     }

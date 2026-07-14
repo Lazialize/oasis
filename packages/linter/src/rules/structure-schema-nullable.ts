@@ -44,7 +44,7 @@ export const structureSchemaNullable: Rule = {
 
     const seen = new Set<Node>();
     for (const site of iterateSchemas(ctx.graph, ctx.entryDoc, ctx.documents, ctx.version)) {
-      walkSchemaTree(site.node, (schema) => checkSchema(ctx, site.doc, schema), {}, seen);
+      walkSchemaTree(site.node, (schema) => checkSchema(ctx, site.doc, schema), ctx.version, seen);
     }
   },
 };

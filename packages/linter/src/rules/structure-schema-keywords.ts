@@ -319,7 +319,7 @@ export const structureSchemaKeywords: Rule = {
       walkSchemaTree(
         site.node,
         (schema) => checkSchema(ctx, site.doc, schema),
-        { version: ctx.version, prefixItems: true, patternProperties: true, not: true, ifThenElse: true, defs: true },
+        ctx.version,
         seen,
       );
     }

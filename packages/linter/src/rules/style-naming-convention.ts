@@ -124,8 +124,9 @@ function checkPropertyNames(ctx: RuleContext): void {
     const style = optionsForDoc(ctx, site.doc).propertyName;
     if (!style) continue;
 
-    // `patternProperties` (3.1) is deliberately not traversed: its keys are regexes, not property
-    // names.
+    // Only each visited schema's own `properties` keys are checked; `patternProperties` keys are
+    // regexes (not property names) so they're never inspected, though the schemas *under*
+    // `patternProperties` are still traversed like any other applicator.
     walkSchemaTree(
       site.node,
       (schema) => {
@@ -141,7 +142,7 @@ function checkPropertyNames(ctx: RuleContext): void {
           }
         }
       },
-      {},
+      ctx.version,
       seen,
     );
   }
