@@ -1,0 +1,21 @@
+# A shared components document. Entry a.yaml uses `Foo`; entry b.yaml uses `Bar`. Neither entry's
+# graph sees the other's usage on its own, so an isolated per-entry lint flags the sibling's
+# component as unused. With sibling graphs supplied as externalDocuments, `components/no-unused`
+# sees both usages and flags neither.
+openapi: 3.0.3
+info:
+  title: Shared Components
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Foo:
+      type: object
+      properties:
+        id:
+          type: string
+    Bar:
+      type: object
+      properties:
+        name:
+          type: string

@@ -1,0 +1,9 @@
+# A shared Path Item referenced by both a.yaml and b.yaml (mounted at the same path). Its GET
+# operation is missing an operationId, so `operation/operation-id` reports one diagnostic located
+# in THIS file. Linting both entries would surface that same diagnostic twice; the CLI dedupes it.
+get:
+  tags: [pets]
+  description: List all pets.
+  responses:
+    '200':
+      description: OK

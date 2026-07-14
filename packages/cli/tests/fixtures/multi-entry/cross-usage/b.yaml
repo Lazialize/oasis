@@ -1,0 +1,17 @@
+openapi: 3.0.3
+info:
+  title: Service B
+  version: "1.0.0"
+paths:
+  /bar:
+    get:
+      operationId: getBar
+      tags: [bar]
+      description: Get a bar.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "./components.yaml#/components/schemas/Bar"
