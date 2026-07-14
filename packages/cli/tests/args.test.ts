@@ -63,6 +63,36 @@ describe("parseLintArgs", () => {
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.value.configPath).toBe("--weird-path.jsonc");
   });
+
+  test("rejects `--config=` with empty value (#79)", () => {
+    const result = parseLintArgs(["--config="]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("--config requires a path argument");
+  });
+
+  test("rejects `--format=` with empty value (#79)", () => {
+    const result = parseLintArgs(["--format="]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("--format requires a value argument");
+  });
+
+  test("regression: `--config=path` still accepts non-empty value", () => {
+    const result = parseLintArgs(["--config=path"]);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.configPath).toBe("path");
+  });
+
+  test("regression: `--format=json` still accepts valid format", () => {
+    const result = parseLintArgs(["--format=json"]);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.format).toBe("json");
+  });
+
+  test("regression: `--format=pretty` still accepts valid format", () => {
+    const result = parseLintArgs(["--format=pretty"]);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.format).toBe("pretty");
+  });
 });
 
 describe("parseBundleArgs", () => {
@@ -103,5 +133,35 @@ describe("parseBundleArgs", () => {
     const result = parseBundleArgs(["entry.yaml", "--out=--weird-out.yaml"]);
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.value.outPath).toBe("--weird-out.yaml");
+  });
+
+  test("rejects `--out=` with empty value (#79)", () => {
+    const result = parseBundleArgs(["entry.yaml", "--out="]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("--out requires a path argument");
+  });
+
+  test("rejects `-o=` with empty value (#79)", () => {
+    const result = parseBundleArgs(["entry.yaml", "-o="]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("-o requires a path argument");
+  });
+
+  test("regression: `--out=x` still accepts non-empty value", () => {
+    const result = parseBundleArgs(["entry.yaml", "--out=x"]);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.outPath).toBe("x");
+  });
+
+  test("regression: `-o=x` still accepts non-empty value", () => {
+    const result = parseBundleArgs(["entry.yaml", "-o=x"]);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.outPath).toBe("x");
+  });
+
+  test("regression: `--out=-dashfile` accepts dash-prefixed value via = form", () => {
+    const result = parseBundleArgs(["entry.yaml", "--out=-dashfile"]);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.outPath).toBe("-dashfile");
   });
 });

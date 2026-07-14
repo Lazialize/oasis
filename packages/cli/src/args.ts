@@ -37,7 +37,11 @@ function consumeOptionValue(
   for (const flag of flagNames) {
     const eqPrefix = `${flag}=`;
     if (arg.startsWith(eqPrefix)) {
-      return { ok: true, value: { value: arg.slice(eqPrefix.length), nextIndex: i } };
+      const value = arg.slice(eqPrefix.length);
+      if (!value) {
+        return { ok: false, error: errorMessage };
+      }
+      return { ok: true, value: { value, nextIndex: i } };
     }
   }
   const value = args[i + 1];
