@@ -725,6 +725,35 @@ components:
     expect(newText).toContain("              schema:\n                type: string\n");
   });
 
+  test("a scalar-aliased $ref keeps its enclosing JSON Schema resource base", async () => {
+    const ENTRY_PATH = "/repo/openapi.yaml";
+    const CHILD_PATH = "/repo/scoped/child.yaml";
+    const TEXT = `openapi: 3.1.0
+info: { title: Test, version: "1" }
+x-child-ref: &childRef child.yaml
+paths: {}
+components:
+  schemas:
+    Root:
+      $id: scoped/root.json
+      $defs:
+        Use:
+          $ref: *childRef
+`;
+    const ctx = createServerContext(new InMemoryFileSystem({
+      [ENTRY_PATH]: TEXT,
+      [CHILD_PATH]: "type: string\n",
+    }));
+    const position = positionOf(TEXT, "$ref: *childRef");
+    const results = await getCodeActions(ctx, { path: ENTRY_PATH, position, diagnostics: [] });
+    const action = results.find((result) => result.title === "Inline reference");
+
+    expect(action).toBeDefined();
+    const newText = applyEdits(TEXT, action!.edits);
+    expect(newText).not.toContain("$ref: *childRef");
+    expect(newText).toContain("        Use:\n          type: string\n");
+  });
+
   test("same-document ref: replaces the $ref with the target's re-indented content", async () => {
     const ENTRY_PATH = "/repo/openapi.yaml";
     const TEXT = `openapi: 3.1.0

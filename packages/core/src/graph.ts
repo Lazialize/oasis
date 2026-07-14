@@ -1,155 +1,184 @@
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { isNode } from "yaml";
 import type { Node } from "yaml";
-import { resolveAnchor } from "./anchor.ts";
-import { nodeAtPointer } from "./document.ts";
+import { buildAnchorIndex, resolveAnchor } from "./anchor.ts";
+import type { AnchorIndex, SchemaResourceEntry } from "./anchor.ts";
+import { nodeAtPointerFrom, resourceBaseBeforePointerTarget } from "./document.ts";
 import type { FileSystem } from "./filesystem.ts";
-import { resolveFileReference } from "./filesystem.ts";
 import { type OasisDocument, parseDocument } from "./parse.ts";
-import { zeroRange } from "./position.ts";
+import { rangeFromOffsets, zeroRange } from "./position.ts";
 import { findRefs, parseRefString } from "./ref.ts";
 import type { FoundRef, OpenApiObjectKind } from "./ref.ts";
 import type { Diagnostic, Range } from "./types.ts";
-import { isExternalUriReference } from "./uri.ts";
+import { resolveUriReference, stripUriFragment, uriScheme } from "./uri.ts";
+import { detectVersion } from "./version.ts";
 
+export interface GraphResource extends SchemaResourceEntry {
+  doc: OasisDocument;
+  index: AnchorIndex;
+  /** Effective base inside the resource; a retrieval alias may point at a root carrying `$id`. */
+  baseUri: string;
+}
 export interface WorkspaceGraph {
   entryPath: string;
-  /** All loaded documents, keyed by absolute path. */
   documents: Map<string, OasisDocument>;
-  /** Graph-level diagnostics: load failures and $ref cycles. Per-document diagnostics live on
-   * each OasisDocument (syntax errors, duplicate keys) and are not duplicated here. */
   diagnostics: Diagnostic[];
   fileSystem: FileSystem;
-  /** Semantically reachable references, grouped by their owning document. */
   references: Map<string, FoundRef[]>;
+  /** Canonical JSON Schema resource URI -> physical source document/node. */
+  resources: Map<string, GraphResource>;
 }
 
-/**
- * Load an entry document and transitively follow every semantic reference that points at another file,
- * building a workspace graph. Never throws: missing files and reference cycles are recorded as
- * diagnostics on the returned graph.
- */
 export async function loadWorkspaceGraph(fs: FileSystem, entryPath: string): Promise<WorkspaceGraph> {
   const documents = new Map<string, OasisDocument>();
   const diagnostics: Diagnostic[] = [];
   const references = new Map<string, FoundRef[]>();
+  const resources = new Map<string, GraphResource>();
+  const indexed = new Map<string, AnchorIndex>();
   const visiting = new Set<string>();
-  // Negative cache: a path that already failed to load is not re-read (or re-diagnosed) for
-  // every additional `$ref` site pointing at it — one attempt, one diagnostic per file.
   const failed = new Set<string>();
 
   async function loadFile(path: string, viaRefRange?: Range): Promise<OasisDocument | undefined> {
-    const loaded = documents.get(path);
+    const canonicalPath = fs.canonicalize(path);
+    const loaded = documents.get(canonicalPath);
     if (loaded) return loaded;
-    if (failed.has(path)) return undefined;
-
+    if (failed.has(canonicalPath)) return undefined;
     let text: string;
-    try {
-      text = await fs.readFile(path);
-    } catch (err) {
-      failed.add(path);
+    try { text = await fs.readFile(canonicalPath); }
+    catch (err) {
+      failed.add(canonicalPath);
       diagnostics.push({
-        message: `Failed to load "${path}": ${err instanceof Error ? err.message : String(err)}`,
-        severity: "error",
-        code: "no-unresolved-ref",
-        source: "core",
-        range: viaRefRange ?? zeroRange(path),
+        message: `Failed to load "${canonicalPath}": ${err instanceof Error ? err.message : String(err)}`,
+        severity: "error", code: "no-unresolved-ref", source: "core", range: viaRefRange ?? zeroRange(canonicalPath),
       });
       return undefined;
     }
-
-    const doc = parseDocument(text, path);
-    documents.set(path, doc);
+    const doc = parseDocument(text, canonicalPath);
+    documents.set(canonicalPath, doc);
     return doc;
   }
 
-  const scanned = new WeakMap<Node, Set<string>>();
-
-  function markScanned(node: Node, kind?: OpenApiObjectKind): boolean {
-    const key = kind ?? "document";
-    let kinds = scanned.get(node);
-    if (!kinds) {
-      kinds = new Set<string>();
-      scanned.set(node, kinds);
+  function indexDocument(doc: OasisDocument, schemaDocument: boolean): AnchorIndex {
+    const key = `${doc.filePath}\u0000${schemaDocument}`;
+    const cached = indexed.get(key);
+    if (cached) return cached;
+    const index = buildAnchorIndex(doc, { baseUri: pathToFileURL(doc.filePath).href, schemaDocument });
+    const retrievalUri = pathToFileURL(doc.filePath).href;
+    const root = doc.yamlDoc.contents;
+    // Every loaded document has a retrieval resource even when it is an external OpenAPI object
+    // rather than a standalone Schema Document. Schema indexing remains gated independently.
+    if (!index.resources.has(retrievalUri) && isNode(root)) {
+      const range = root.range
+        ? rangeFromOffsets(doc.filePath, doc.lineCounter, root.range[0], root.range[1])
+        : zeroRange(doc.filePath);
+      index.resources.set(retrievalUri, { uri: retrievalUri, node: root, range, parentBaseUri: retrievalUri });
     }
-    if (kinds.has(key)) return false;
-    kinds.add(key);
+    indexed.set(key, index);
+    for (const entry of index.resources.values()) {
+      const effectiveBase = entry.uri === retrievalUri
+        ? [...index.resources.values()].find((candidate) => candidate.node === entry.node && candidate.uri !== retrievalUri)?.uri ?? entry.uri
+        : entry.uri;
+      // A document may first be reached as a generic OpenAPI object and later as a Schema Object.
+      // Prefer the schema-aware index so its anchors/resources become available on the later walk.
+      if (schemaDocument || !resources.has(entry.uri)) {
+        resources.set(entry.uri, { ...entry, doc, index, baseUri: effectiveBase });
+      }
+    }
+    return index;
+  }
+
+  const scanned = new WeakMap<Node, Set<string>>();
+  function markScanned(node: Node, kind: OpenApiObjectKind | undefined, baseUri: string): boolean {
+    const key = `${kind ?? "document"}\u0000${baseUri}`;
+    let contexts = scanned.get(node);
+    if (!contexts) { contexts = new Set(); scanned.set(node, contexts); }
+    if (contexts.has(key)) return false;
+    contexts.add(key);
     return true;
   }
-
   function recordRef(path: string, ref: FoundRef): void {
     const refs = references.get(path) ?? [];
-    if (!refs.some((existing) =>
-      existing.value === ref.value &&
-      existing.range.startOffset === ref.range.startOffset &&
-      existing.kind === ref.kind &&
-      existing.targetKind === ref.targetKind
-    )) refs.push(ref);
+    if (!refs.some((other) => other.value === ref.value && other.range.startOffset === ref.range.startOffset &&
+      other.kind === ref.kind && other.targetKind === ref.targetKind && other.baseUri === ref.baseUri)) refs.push(ref);
     references.set(path, refs);
   }
+  function targetScope(resource: GraphResource, pointer: string): { node: Node; baseUri: string } | undefined {
+    if (pointer === "") return { node: resource.node, baseUri: resource.parentBaseUri };
+    if (pointer.startsWith("/")) {
+      const node = nodeAtPointerFrom(resource.doc, resource.node, pointer)?.node;
+      return node
+        ? {
+          node,
+          baseUri: resourceBaseBeforePointerTarget(resource.doc, resource.node, pointer, resource.baseUri),
+        }
+        : undefined;
+    }
+    const anchor = resolveAnchor(resource.doc, pointer, resource.baseUri, resource.index);
+    if (!anchor) return undefined;
+    const anchoredResource = resource.index.resources.get(anchor.resourceUri);
+    const baseUri = anchoredResource?.node === anchor.node
+      ? anchoredResource.parentBaseUri
+      : anchor.resourceUri;
+    return { node: anchor.node, baseUri };
+  }
 
-  async function scanScope(doc: OasisDocument, node: Node, kind?: OpenApiObjectKind): Promise<void> {
-    if (!markScanned(node, kind)) return;
+  async function scanScope(doc: OasisDocument, node: Node, kind: OpenApiObjectKind | undefined, baseUri: string): Promise<void> {
+    if (!markScanned(node, kind, baseUri)) return;
+    indexDocument(doc, kind === "schema" && detectVersion(doc) === undefined);
     const ownsVisit = !visiting.has(doc.filePath);
     if (ownsVisit) visiting.add(doc.filePath);
-
-    for (const ref of findRefs(doc, node, kind)) {
+    for (const ref of findRefs(doc, node, kind, baseUri)) {
       recordRef(doc.filePath, ref);
-      const { filePart, pointer } = parseRefString(ref.value);
-      // An absolute non-filesystem URI (`https:`, `urn:`, ...) is an external target the FileSystem
-      // abstraction can't load — deliberately skipped here rather than turned into a bogus file
-      // lookup. `resolveRef` reports it as an unsupported external reference when it's resolved.
-      if (isExternalUriReference(filePart)) continue;
-
-      const targetPath = filePart === "" ? doc.filePath : resolveFileReference(fs, doc.filePath, filePart);
-
-      if (targetPath !== doc.filePath && visiting.has(targetPath)) {
+      const { pointer } = parseRefString(ref.value);
+      const resourceUri = stripUriFragment(resolveUriReference(ref.baseUri, ref.value));
+      let resource = resources.get(resourceUri);
+      if (!resource) {
+        if (uriScheme(resourceUri) !== "file") continue;
+        let targetPath: string;
+        try { targetPath = fs.canonicalize(fileURLToPath(resourceUri)); }
+        catch { continue; }
+        if (targetPath !== doc.filePath && visiting.has(targetPath)) {
+          diagnostics.push({
+            message: `Circular reference detected: "${doc.filePath}" -> "${targetPath}"`, severity: "warning",
+            code: "no-ref-cycle", source: "core", range: ref.range,
+          });
+          continue;
+        }
+        const targetDoc = await loadFile(targetPath, ref.range);
+        if (!targetDoc) continue;
+        indexDocument(targetDoc, ref.targetKind === "schema");
+        resource = resources.get(resourceUri);
+      }
+      if (!resource) continue;
+      if (resource.doc.filePath !== doc.filePath && visiting.has(resource.doc.filePath)) {
         diagnostics.push({
-          message: `Circular reference detected: "${doc.filePath}" -> "${targetPath}"`,
-          severity: "warning",
-          code: "no-ref-cycle",
-          source: "core",
-          range: ref.range,
+          message: `Circular reference detected: "${doc.filePath}" -> "${resource.doc.filePath}"`, severity: "warning",
+          code: "no-ref-cycle", source: "core", range: ref.range,
         });
         continue;
       }
-
-      const targetDoc = await loadFile(targetPath, ref.range);
-      if (!targetDoc) continue;
-      let targetNode: Node | undefined;
-      if (pointer === "") {
-        targetNode = isNode(targetDoc.yamlDoc.contents) ? targetDoc.yamlDoc.contents : undefined;
-      } else if (pointer.startsWith("/")) {
-        targetNode = nodeAtPointer(targetDoc, pointer)?.node;
-      } else {
-        targetNode = resolveAnchor(targetDoc, pointer)?.node;
+      const target = targetScope(resource, pointer);
+      if (target) {
+        await scanScope(resource.doc, target.node, ref.targetKind, target.baseUri);
       }
-      if (targetNode) await scanScope(targetDoc, targetNode, ref.targetKind);
     }
-
     if (ownsVisit) visiting.delete(doc.filePath);
   }
 
-  // Canonicalize the entry before traversal so it shares one identity with any path a `$ref`
-  // resolves it to (`fs.resolve` always yields canonical paths). Otherwise a relative entry is
-  // stored under its verbatim key while a back-reference reaches it under its absolute path — the
-  // entry gets parsed twice and cycle detection misfires against the duplicate identity.
   const canonicalEntry = fs.canonicalize(entryPath);
   const entryDoc = await loadFile(canonicalEntry);
-  if (entryDoc && isNode(entryDoc.yamlDoc.contents)) await scanScope(entryDoc, entryDoc.yamlDoc.contents);
-
-  return { entryPath: canonicalEntry, documents, diagnostics, fileSystem: fs, references };
+  if (entryDoc && isNode(entryDoc.yamlDoc.contents)) {
+    indexDocument(entryDoc, false);
+    await scanScope(entryDoc, entryDoc.yamlDoc.contents, undefined, pathToFileURL(entryDoc.filePath).href);
+  }
+  return { entryPath: canonicalEntry, documents, diagnostics, fileSystem: fs, references, resources };
 }
 
-/** References discovered through the graph's semantic, target-scoped traversal. */
 export function graphReferences(graph: WorkspaceGraph, doc: OasisDocument): readonly FoundRef[] {
   return graph.references.get(doc.filePath) ?? [];
 }
-
-/** All diagnostics in the graph: per-document parse diagnostics plus graph-level ones. */
 export function allDiagnostics(graph: WorkspaceGraph): Diagnostic[] {
-  const result: Diagnostic[] = [...graph.diagnostics];
-  for (const doc of graph.documents.values()) {
-    result.push(...doc.diagnostics);
-  }
+  const result = [...graph.diagnostics];
+  for (const doc of graph.documents.values()) result.push(...doc.diagnostics);
   return result;
 }

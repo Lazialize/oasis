@@ -171,7 +171,7 @@ function resolveNameBasedTarget(graph: WorkspaceGraph, doc: OasisDocument, nb: N
 export function resolveComponentTarget(graph: WorkspaceGraph, doc: OasisDocument, position: Position): ComponentTarget | undefined {
   const refAt = findRefAtPosition(doc, position);
   if (refAt) {
-    const resolved = resolveRef(graph, doc, refAt.refString);
+    const resolved = resolveRef(graph, doc, refAt.refString, refAt.range);
     if (!resolved.ok) return undefined;
     const comp = enclosingComponent(resolved.pointer);
     if (!comp) return undefined;

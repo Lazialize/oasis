@@ -122,7 +122,7 @@ export const noUnusedComponents: Rule = {
     const used = new Set<string>();
     for (const doc of ctx.documents) {
       for (const ref of graphReferences(ctx.graph, doc)) {
-        const result = resolveRef(ctx.graph, doc, ref.value, ref.range);
+        const result = resolveRef(ctx.graph, doc, ref);
         if (result.ok) markUsed(used, result.doc.filePath, result.pointer);
       }
     }
@@ -130,7 +130,7 @@ export const noUnusedComponents: Rule = {
     // that cross-entry compatibility path. Documents owned by this graph always use semantic refs.
     for (const doc of ctx.externalDocuments ?? []) {
       for (const ref of findRefs(doc)) {
-        const result = resolveRef(ctx.graph, doc, ref.value, ref.range);
+        const result = resolveRef(ctx.graph, doc, ref);
         if (result.ok) markUsed(used, result.doc.filePath, result.pointer);
       }
     }

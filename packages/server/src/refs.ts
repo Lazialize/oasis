@@ -40,7 +40,7 @@ export function resolveRefAtPosition(graph: WorkspaceGraph, doc: OasisDocument, 
   const found = findRefAtPosition(doc, position);
   if (!found) return undefined;
 
-  const result = resolveRef(graph, doc, found.refString);
+  const result = resolveRef(graph, doc, found.refString, found.range);
   if (!result.ok) return undefined;
 
   return result;
