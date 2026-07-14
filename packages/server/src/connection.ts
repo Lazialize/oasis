@@ -1,5 +1,7 @@
+import { sep } from "node:path";
 import {
   createConnection,
+  FileChangeType,
   TextDocuments,
   TextDocumentSyncKind,
   CompletionItemKind as LspCompletionItemKind,
@@ -306,6 +308,53 @@ export function startServer(): Connection {
     }
   }
 
+  /**
+   * External (on-disk) change to a watched non-config file — git checkout, codegen, another
+   * process — reported by the client's workspace-scoped YAML/JSON watcher (issue #51). The server
+   * filters by membership itself: only entries whose graph involves `path` are revalidated, and a
+   * file that's currently open is skipped entirely (its content comes from the overlay buffer;
+   * disk must never replace unsaved edits — the close handler reconciles with disk later).
+   */
+  async function handleWatchedFileChange(path: string, changeType: FileChangeType): Promise<void> {
+    if (documents.get(pathToUri(path))) return;
+
+    invalidateGraph(ctx, path);
+
+    // Entries affected per the last-known graph membership (survives the invalidation above):
+    // project entries and open standalone entries whose graph contained the file, plus the file
+    // itself when it is a project entry.
+    const projectEntries = [...ctx.projects.values()].flatMap((project) => project.entryPaths);
+    const affected = new Set(findEntriesLastContaining(ctx, path, projectEntries));
+    if (projectEntries.includes(path)) affected.add(path);
+    for (const entryPath of findEntriesLastContaining(ctx, path, ctx.openStandaloneEntries)) affected.add(entryPath);
+
+    if (changeType === FileChangeType.Created) {
+      // A new file can change glob-expanded `entries` membership, so re-resolve projects whose
+      // directory tree contains it; and it can satisfy a previously-unresolved `$ref` in *any*
+      // graph (an unresolved target never made it into `lastGraphFiles`), so revalidate every
+      // project entry rather than trying to guess which graphs wanted this file.
+      for (const project of [...ctx.projects.values()]) {
+        if (path.startsWith(project.configDir + sep)) await reloadProjectAtConfigPath(project.configPath);
+      }
+      for (const project of ctx.projects.values()) {
+        for (const entryPath of project.entryPaths) affected.add(entryPath);
+      }
+    } else if (changeType === FileChangeType.Deleted && projectEntries.includes(path)) {
+      // A deleted entry file shrinks project membership (declared entries get a warning, glob
+      // matches drop out); reload so stale entries don't keep getting linted.
+      for (const project of [...ctx.projects.values()]) {
+        if (project.entryPaths.includes(path)) await reloadProjectAtConfigPath(project.configPath);
+      }
+    }
+
+    // Reloads above may have changed which entries still exist; only revalidate live ones (a
+    // dropped entry's diagnostics were already cleared by `reloadProjectAtConfigPath`).
+    const liveEntries = new Set([...ctx.projects.values()].flatMap((project) => project.entryPaths));
+    for (const entryPath of affected) {
+      if (liveEntries.has(entryPath) || ctx.openStandaloneEntries.has(entryPath)) scheduleValidate(entryPath);
+    }
+  }
+
   // Last-resort net: a bug that somehow still slips past the per-site `runSafely` wrapping below
   // (e.g. in a handler added later without it) gets logged rather than crashing the process.
   process.on("unhandledRejection", (reason) => {
@@ -344,6 +393,8 @@ export function startServer(): Connection {
       const path = uriToPath(change.uri);
       if (isConfigFilePath(path)) {
         runSafely(connection, "reloadProjectAtConfigPath", () => reloadProjectAtConfigPath(path));
+      } else {
+        runSafely(connection, "handleWatchedFileChange", () => handleWatchedFileChange(path, change.type));
       }
     }
   });

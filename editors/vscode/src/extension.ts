@@ -207,12 +207,39 @@ function registerConfigWatcher(context: vscode.ExtensionContext): void {
   );
 }
 
+/**
+ * Forward external (on-disk) changes to YAML/JSON files so the server can refresh diagnostics for
+ * *closed* project files too — a git checkout, codegen run, or another process rewriting an entry
+ * or `$ref`'d fragment otherwise goes unnoticed, since document sync only covers open buffers. The
+ * watcher is deliberately workspace-scoped and unfiltered: the server does its own membership
+ * filtering (only files belonging to a loaded entry graph trigger revalidation, and open documents
+ * are skipped so a disk change never replaces unsaved buffer content) — see
+ * `handleWatchedFileChange` in packages/server/src/connection.ts.
+ */
+function registerProjectFileWatcher(context: vscode.ExtensionContext): void {
+  const watcher = vscode.workspace.createFileSystemWatcher("**/*.{yaml,yml,json}");
+  context.subscriptions.push(watcher);
+
+  const notify = (uri: vscode.Uri, type: FileChangeType): void => {
+    void client?.sendNotification(DidChangeWatchedFilesNotification.type, {
+      changes: [{ uri: uri.toString(), type }],
+    });
+  };
+
+  context.subscriptions.push(
+    watcher.onDidChange((uri) => notify(uri, FileChangeType.Changed)),
+    watcher.onDidCreate((uri) => notify(uri, FileChangeType.Created)),
+    watcher.onDidDelete((uri) => notify(uri, FileChangeType.Deleted)),
+  );
+}
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   outputChannel = vscode.window.createOutputChannel("Oasis Language Server");
   context.subscriptions.push(outputChannel);
 
   projectModeActive = await detectProjectMode();
   registerConfigWatcher(context);
+  registerProjectFileWatcher(context);
 
   context.subscriptions.push(
     vscode.commands.registerCommand("oasis.restartServer", async () => {

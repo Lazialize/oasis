@@ -488,4 +488,114 @@ paths:
     client.notify("textDocument/didClose", { textDocument: { uri: pathToFileURL(configPath).toString() } });
     await client.waitFor(hasUnresolvedRef, 15000);
   }, 20000);
+
+  test("an external disk change to a closed project fragment refreshes diagnostics (#51)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "oasis-lsp-watch-change-"));
+    mkdirSync(join(dir, "paths"), { recursive: true });
+    const fragmentPath = join(dir, "paths", "pets.yaml");
+    const fragmentUri = pathToFileURL(fragmentPath).toString();
+    writeFileSync(join(dir, "oasis.config.jsonc"), `{ "entries": ["openapi.yaml"] }`);
+    writeFileSync(
+      join(dir, "openapi.yaml"),
+      `openapi: 3.1.0
+info:
+  title: Entry
+  version: "1.0.0"
+paths:
+  /pets:
+    $ref: './paths/pets.yaml'
+`,
+    );
+    const fragmentTextGood = `get:
+  operationId: listPets
+  tags: [pets]
+  description: List pets.
+  responses:
+    '200':
+      description: OK
+`;
+    writeFileSync(fragmentPath, fragmentTextGood);
+
+    client = new LspClient();
+    await client.request("initialize", { processId: null, rootUri: pathToFileURL(dir).toString(), capabilities: {} });
+    client.notify("initialized", {});
+
+    const initial = await client.waitFor(
+      (msg) => msg.method === "textDocument/publishDiagnostics" && msg.params?.uri === fragmentUri,
+      15000,
+    );
+    expect(initial.params.diagnostics).toEqual([]);
+
+    // Simulate git checkout / codegen: the file changes on disk while no buffer is open for it.
+    // Before the fix nothing watched project files, so this never refreshed the diagnostics.
+    writeFileSync(fragmentPath, fragmentTextGood.replace("  operationId: listPets\n", ""));
+    client.notify("workspace/didChangeWatchedFiles", { changes: [{ uri: fragmentUri, type: 2 /* Changed */ }] });
+
+    const refreshed = await client.waitFor(
+      (msg) =>
+        msg.method === "textDocument/publishDiagnostics" &&
+        msg.params?.uri === fragmentUri &&
+        msg.params.diagnostics.some((d: { code?: string }) => d.code === "operation/operation-id"),
+      15000,
+    );
+    expect(refreshed.params.diagnostics.length).toBeGreaterThan(0);
+  }, 20000);
+
+  test("creating a previously-missing $ref target on disk resolves the entry's diagnostics (#51)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "oasis-lsp-watch-create-"));
+    mkdirSync(join(dir, "paths"), { recursive: true });
+    const entryUri = pathToFileURL(join(dir, "openapi.yaml")).toString();
+    const fragmentPath = join(dir, "paths", "pets.yaml");
+    writeFileSync(join(dir, "oasis.config.jsonc"), `{ "entries": ["openapi.yaml"] }`);
+    writeFileSync(
+      join(dir, "openapi.yaml"),
+      `openapi: 3.1.0
+info:
+  title: Entry
+  version: "1.0.0"
+paths:
+  /pets:
+    $ref: './paths/pets.yaml'
+`,
+    );
+    // paths/pets.yaml does NOT exist yet: the entry has an unresolved $ref.
+
+    client = new LspClient();
+    await client.request("initialize", { processId: null, rootUri: pathToFileURL(dir).toString(), capabilities: {} });
+    client.notify("initialized", {});
+
+    await client.waitFor(
+      (msg) =>
+        msg.method === "textDocument/publishDiagnostics" &&
+        msg.params?.uri === entryUri &&
+        msg.params.diagnostics.some((d: { code?: string }) => d.code === "refs/no-unresolved"),
+      15000,
+    );
+
+    // Creating the missing file (e.g. codegen output) must revalidate the entry graph even though
+    // the new file never appeared in any previously-loaded graph's membership.
+    writeFileSync(
+      fragmentPath,
+      `get:
+  operationId: listPets
+  tags: [pets]
+  description: List pets.
+  responses:
+    '200':
+      description: OK
+`,
+    );
+    client.notify("workspace/didChangeWatchedFiles", {
+      changes: [{ uri: pathToFileURL(fragmentPath).toString(), type: 1 /* Created */ }],
+    });
+
+    const resolved = await client.waitFor(
+      (msg) =>
+        msg.method === "textDocument/publishDiagnostics" &&
+        msg.params?.uri === entryUri &&
+        !msg.params.diagnostics.some((d: { code?: string }) => d.code === "refs/no-unresolved"),
+      15000,
+    );
+    expect(resolved.params.diagnostics).toEqual([]);
+  }, 20000);
 });
