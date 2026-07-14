@@ -10,7 +10,7 @@ Centralize version-aware OpenAPI object shape validation and complete the LSP co
   describes every OpenAPI Object — required fields, per-field value types, 3.0 vs 3.1 field
   availability, mutually exclusive field groups, `x-*` extension allowance, and referenceable
   (`$ref`) locations. A new `structure/object-shape` rule validates the metadata objects no other
-  rule covered (Info, Contact, License, Tag, Server, External Documentation), preserving each
+  rule covered (Info, Contact, License, Tag, External Documentation), preserving each
   diagnostic's source range and owning document. Existing `structure/*` rules and their diagnostics
   are unchanged; the table is exported from `@oasis/linter` as the shared foundation.
 - **Server (#60):** completion contexts are driven from that shared table, so suggestions offer only
