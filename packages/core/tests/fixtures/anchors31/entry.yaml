@@ -1,0 +1,35 @@
+openapi: 3.1.0
+info:
+  title: Anchors
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Root:
+      $id: 'https://example.com/root'
+      type: object
+      properties:
+        plain:
+          $ref: '#PlainName'
+        dynamic:
+          $ref: '#DynItem'
+        nested:
+          $ref: '#NestedAnchor'
+        encoded:
+          $ref: '#%45ncoded'
+        external:
+          $ref: 'https://example.com/other.json#/$defs/Thing'
+      $defs:
+        A:
+          $anchor: PlainName
+          type: string
+        B:
+          $dynamicAnchor: DynItem
+          type: integer
+        C:
+          $id: 'nested/scope'
+          $anchor: NestedAnchor
+          type: boolean
+        D:
+          $anchor: Encoded
+          type: number

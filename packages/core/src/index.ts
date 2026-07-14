@@ -25,6 +25,12 @@ export {
   resolveRef,
 } from "./ref.ts";
 
+export type { UriReferenceKind } from "./uri.ts";
+export { classifyUriReference, FILESYSTEM_URI_SCHEMES, isExternalUriReference, uriScheme } from "./uri.ts";
+
+export type { AnchorEntry, AnchorIndex } from "./anchor.ts";
+export { buildAnchorIndex, resolveAnchor } from "./anchor.ts";
+
 export type { WorkspaceGraph } from "./graph.ts";
 export { allDiagnostics, loadWorkspaceGraph } from "./graph.ts";
 

@@ -9,6 +9,12 @@ export interface FileSystem {
   readFile(path: string): string | Promise<string>;
   /** Resolve `ref` relative to the directory containing `fromPath` into an absolute path. */
   resolve(fromPath: string, ref: string): string;
+  /**
+   * Reduce `path` to the single canonical identity this file system uses to key a document, so a
+   * path reached two different ways (e.g. a relative entry vs. the absolute path a `$ref` resolves
+   * to) is recognised as the same file. Must be idempotent and agree with `resolve`'s output.
+   */
+  canonicalize(path: string): string;
 }
 
 /** Resolve `ref` relative to the directory containing `fromPath` into an absolute path. */
@@ -24,6 +30,10 @@ export class NodeFileSystem implements FileSystem {
 
   resolve(fromPath: string, ref: string): string {
     return resolvePath(fromPath, ref);
+  }
+
+  canonicalize(path: string): string {
+    return pathResolve(path);
   }
 }
 
@@ -57,5 +67,9 @@ export class InMemoryFileSystem implements FileSystem {
 
   resolve(fromPath: string, ref: string): string {
     return resolvePath(fromPath, ref);
+  }
+
+  canonicalize(path: string): string {
+    return pathResolve(path);
   }
 }

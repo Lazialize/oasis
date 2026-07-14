@@ -3,6 +3,7 @@ import { type OasisDocument, parseDocument } from "./parse.ts";
 import { zeroRange } from "./position.ts";
 import { findRefs, parseRefString } from "./ref.ts";
 import type { Diagnostic, Range } from "./types.ts";
+import { isExternalUriReference } from "./uri.ts";
 
 export interface WorkspaceGraph {
   entryPath: string;
@@ -53,6 +54,10 @@ export async function loadWorkspaceGraph(fs: FileSystem, entryPath: string): Pro
     for (const ref of findRefs(doc)) {
       const { filePart } = parseRefString(ref.value);
       if (filePart === "") continue; // same-document ref; no file to load
+      // An absolute non-filesystem URI (`https:`, `urn:`, ...) is an external target the FileSystem
+      // abstraction can't load — deliberately skipped here rather than turned into a bogus file
+      // lookup. `resolveRef` reports it as an unsupported external reference when it's resolved.
+      if (isExternalUriReference(filePart)) continue;
 
       const targetPath = fs.resolve(path, filePart);
       if (targetPath === path) continue;
@@ -74,9 +79,14 @@ export async function loadWorkspaceGraph(fs: FileSystem, entryPath: string): Pro
     visiting.delete(path);
   }
 
-  await loadFile(entryPath);
+  // Canonicalize the entry before traversal so it shares one identity with any path a `$ref`
+  // resolves it to (`fs.resolve` always yields canonical paths). Otherwise a relative entry is
+  // stored under its verbatim key while a back-reference reaches it under its absolute path — the
+  // entry gets parsed twice and cycle detection misfires against the duplicate identity.
+  const canonicalEntry = fs.canonicalize(entryPath);
+  await loadFile(canonicalEntry);
 
-  return { entryPath, documents, diagnostics, fileSystem: fs };
+  return { entryPath: canonicalEntry, documents, diagnostics, fileSystem: fs };
 }
 
 /** All diagnostics in the graph: per-document parse diagnostics plus graph-level ones. */

@@ -1,11 +1,13 @@
 import { isMap, isNode, isScalar, isSeq } from "yaml";
 import type { Node } from "yaml";
+import { resolveAnchor } from "./anchor.ts";
 import { nodeAtPointer } from "./document.ts";
 import { resolveAlias } from "./walk.ts";
 import { safeDecodeURIComponent } from "./pointer.ts";
 import type { OasisDocument } from "./parse.ts";
 import { rangeFromOffsets, zeroRange } from "./position.ts";
 import type { Diagnostic, Range } from "./types.ts";
+import { isExternalUriReference } from "./uri.ts";
 import type { WorkspaceGraph } from "./graph.ts";
 
 export interface RefParts {
@@ -226,9 +228,25 @@ export function resolveRef(
   refRange?: Range,
 ): ResolveRefResult {
   const { filePart, pointer } = parseRefString(refString);
+  const diagnosticRange = refRange ?? zeroRange(fromDoc.filePath);
+
+  // An absolute non-filesystem URI (`https:`, `urn:`, ...) is an external target, not a document in
+  // the workspace graph. Report it explicitly instead of routing it through filesystem resolution.
+  if (filePart !== "" && isExternalUriReference(filePart)) {
+    return {
+      ok: false,
+      diagnostic: {
+        message: `Unsupported external reference: "${refString}" targets an external URI scheme not resolved by the workspace`,
+        severity: "error",
+        code: "no-unresolved-ref",
+        source: "core",
+        range: diagnosticRange,
+      },
+    };
+  }
+
   const targetPath = filePart === "" ? fromDoc.filePath : graph.fileSystem.resolve(fromDoc.filePath, filePart);
   const targetDoc = graph.documents.get(targetPath);
-  const diagnosticRange = refRange ?? zeroRange(fromDoc.filePath);
 
   if (!targetDoc) {
     return {
@@ -241,6 +259,26 @@ export function resolveRef(
         range: diagnosticRange,
       },
     };
+  }
+
+  // A fragment that is empty or begins with "/" is a JSON Pointer (RFC 6901). Anything else is a
+  // JSON Schema 2020-12 plain-name anchor (`#anchor`), resolved through the target document's anchor
+  // index — only 3.1 Schema Object contexts define anchors; a 3.0 document's index is empty.
+  if (pointer !== "" && !pointer.startsWith("/")) {
+    const anchor = resolveAnchor(targetDoc, pointer);
+    if (!anchor) {
+      return {
+        ok: false,
+        diagnostic: {
+          message: `Unresolved reference: anchor "#${pointer}" not found in "${targetPath}"`,
+          severity: "error",
+          code: "no-unresolved-ref",
+          source: "core",
+          range: diagnosticRange,
+        },
+      };
+    }
+    return { ok: true, doc: targetDoc, node: anchor.node, pointer, range: anchor.range };
   }
 
   const result = nodeAtPointer(targetDoc, pointer);
