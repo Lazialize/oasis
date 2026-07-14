@@ -61,6 +61,10 @@ class GatedFileSystem implements FileSystem {
   resolve(fromPath: string, ref: string): string {
     return this.inner.resolve(fromPath, ref);
   }
+
+  canonicalize(path: string): string {
+    return this.inner.canonicalize(path);
+  }
 }
 
 function setup() {
