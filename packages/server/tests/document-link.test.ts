@@ -112,6 +112,46 @@ describe("getDocumentLinks", () => {
     expect(text.slice(link.range.startOffset, link.range.endOffset)).toBe(rawRefFilePart);
   });
 
+  test("non-file absolute URI schemes without a '//' authority (urn:) are skipped", async () => {
+    const path = "/repo/entry.yaml";
+    const text = [
+      "openapi: 3.1.0",
+      "info:",
+      "  title: Test API",
+      '  version: "1.0.0"',
+      "components:",
+      "  schemas:",
+      "    Pet:",
+      "      $ref: 'urn:example:schema'",
+      "",
+    ].join("\n");
+
+    const ctx = createServerContext(new InMemoryFileSystem({ [path]: text }));
+    const links = await getDocumentLinks(ctx, { path });
+
+    expect(links).toEqual([]);
+  });
+
+  test("file: URIs are still linked as local filesystem references", async () => {
+    const path = "/repo/entry.yaml";
+    const text = [
+      "openapi: 3.1.0",
+      "info:",
+      "  title: Test API",
+      '  version: "1.0.0"',
+      "paths:",
+      "  /pets:",
+      "    $ref: 'file:shared.yaml#/get'",
+      "",
+    ].join("\n");
+
+    const ctx = createServerContext(new InMemoryFileSystem({ [path]: text }));
+    const links = await getDocumentLinks(ctx, { path });
+
+    expect(links).toHaveLength(1);
+    expect(text.slice(links[0]!.range.startOffset, links[0]!.range.endOffset)).toBe("file:shared.yaml");
+  });
+
   test("an unresolvable relative path still produces a link (target existence is not checked)", async () => {
     const path = "/repo/entry.yaml";
     const text = [

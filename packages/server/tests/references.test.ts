@@ -96,6 +96,110 @@ describe("getReferences", () => {
   });
 });
 
+describe("getReferences with nested component-pointer references (#55)", () => {
+  const ENTRY = "/nested/openapi.yaml";
+  const TEXT = `openapi: 3.1.0
+info:
+  title: Test
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Pet:
+      type: object
+      properties:
+        id:
+          type: string
+    PetId:
+      $ref: '#/components/schemas/Pet/properties/id'
+    PetRef:
+      $ref: '#/components/schemas/Pet'
+`;
+
+  test("a $ref into a nested pointer under the component counts as a reference to it", async () => {
+    const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY]: TEXT }));
+    const position = positionOf(TEXT, "Pet:");
+
+    const results = await getReferences(ctx, { path: ENTRY, position, includeDeclaration: false });
+
+    expect(results).toHaveLength(2);
+    const lines = new Set(results.map((r) => r.range.start.line));
+    expect(lines.has(positionOf(TEXT, "#/components/schemas/Pet/properties/id").line)).toBe(true);
+    expect(lines.has(positionOf(TEXT, "'#/components/schemas/Pet'").line)).toBe(true);
+  });
+});
+
+describe("getReferences with name-based references (#54)", () => {
+  const PATH = "/named/openapi.yaml";
+  const TEXT = `openapi: 3.1.0
+info:
+  title: Test
+  version: "1.0.0"
+security:
+  - ApiKey: []
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      security:
+        - ApiKey: []
+      responses:
+        '200':
+          description: OK
+components:
+  securitySchemes:
+    ApiKey:
+      type: apiKey
+      name: X-API-Key
+      in: header
+  schemas:
+    Animal:
+      type: object
+      discriminator:
+        propertyName: kind
+        mapping:
+          dog: Dog
+      oneOf:
+        - $ref: '#/components/schemas/Dog'
+    Dog:
+      type: object
+`;
+
+  function namedCtx() {
+    return createServerContext(new InMemoryFileSystem({ [PATH]: TEXT }));
+  }
+
+  test("security scheme references include root and operation Security Requirement keys", async () => {
+    const position = positionOf(TEXT, "ApiKey:", 2); // the definition key under securitySchemes
+
+    const results = await getReferences(namedCtx(), { path: PATH, position, includeDeclaration: false });
+
+    expect(results).toHaveLength(2);
+    const lines = new Set(results.map((r) => r.range.start.line));
+    expect(lines.has(positionOf(TEXT, "- ApiKey: []").line)).toBe(true);
+    expect(lines.has(positionOf(TEXT, "- ApiKey: []", 1).line)).toBe(true);
+  });
+
+  test("find references works FROM a Security Requirement key position", async () => {
+    const position = positionOf(TEXT, "ApiKey: []"); // root-level requirement key
+
+    const results = await getReferences(namedCtx(), { path: PATH, position, includeDeclaration: true });
+
+    expect(results).toHaveLength(3); // two requirement keys + the declaration
+  });
+
+  test("schema references include a bare discriminator mapping name", async () => {
+    const position = positionOf(TEXT, "Dog:");
+
+    const results = await getReferences(namedCtx(), { path: PATH, position, includeDeclaration: false });
+
+    expect(results).toHaveLength(2);
+    const lines = new Set(results.map((r) => r.range.start.line));
+    expect(lines.has(positionOf(TEXT, "dog: Dog").line)).toBe(true);
+    expect(lines.has(positionOf(TEXT, "$ref: '#/components/schemas/Dog'").line)).toBe(true);
+  });
+});
+
 describe("getReferences across multiple project entries", () => {
   async function multiEntryContext() {
     const ctx = createServerContext(new InMemoryFileSystem(multiEntryFiles()));

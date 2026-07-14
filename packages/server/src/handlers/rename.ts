@@ -1,6 +1,7 @@
-import { findRefs, formatPointer, nodeAtPointer, resolveRef } from "@oasis/core";
+import { formatPointer, nodeAtPointer } from "@oasis/core";
 import type { Position, Range } from "@oasis/core";
-import { componentKeyRange, refSegmentRange, resolveComponentTarget } from "../component-target.ts";
+import { componentKeyRange, componentNameSegmentRange, nameBasedRefAtPosition, resolveComponentTarget } from "../component-target.ts";
+import { collectComponentReferences, encodeComponentName } from "../component-references.ts";
 import { findRefAtPosition } from "../refs.ts";
 import { mapKeys } from "../yaml-helpers.ts";
 import { referringDocumentsFor, resolveDocContext } from "../workspace.ts";
@@ -16,16 +17,23 @@ export interface PrepareRenameResult {
   placeholder: string;
 }
 
-/** Characters that would make a component name invalid as a JSON Pointer / `$ref` segment. */
-const INVALID_NAME_RE = /[/#~]/;
+/**
+ * The OpenAPI component-key grammar Oasis accepts for a rename: at least one character, all from
+ * `[A-Za-z0-9._-]`. This deliberately rejects anything that would need escaping or quoting in a
+ * `$ref`/JSON Pointer (`/`, `#`, `~`), or that would corrupt the definition's YAML when written as a
+ * mapping key (spaces, colons, quotes, non-ASCII, ...). Names inside this grammar can always be
+ * inserted into a `$ref` string unescaped and into a mapping key/value with at most simple quoting.
+ */
+const VALID_NAME_RE = /^[A-Za-z0-9._-]+$/;
 
 function isValidComponentName(name: string): boolean {
-  return name.length > 0 && !INVALID_NAME_RE.test(name);
+  return VALID_NAME_RE.test(name);
 }
 
 /**
- * Whether `params.position` sits on a renameable component (its definition key, its subtree, or a
- * `$ref` pointing at it), and if so, the exact range to highlight and the current name as
+ * Whether `params.position` sits on a renameable component (its definition key, its subtree, a
+ * `$ref` pointing at it, or a name-based reference — a Security Requirement key or a bare
+ * discriminator mapping name), and if so, the exact range to highlight and the current name as
  * placeholder. Returns undefined for any other position, so the editor blocks F2 there.
  */
 export async function prepareRename(ctx: ServerContext, params: RenamePositionParams): Promise<PrepareRenameResult | undefined> {
@@ -38,10 +46,14 @@ export async function prepareRename(ctx: ServerContext, params: RenamePositionPa
 
   const refAt = findRefAtPosition(doc, params.position);
   if (refAt) {
-    const range = refSegmentRange(doc, refAt.range, target.name);
+    const range = componentNameSegmentRange(doc, refAt.range, target.section, target.name);
     if (!range) return undefined;
     return { range, placeholder: target.name };
   }
+
+  // Cursor on a name-based reference: highlight the referencing token itself, not the definition.
+  const nameBased = nameBasedRefAtPosition(doc, params.position);
+  if (nameBased) return { range: nameBased.range, placeholder: target.name };
 
   const range = componentKeyRange(target.doc, target);
   if (!range) return undefined;
@@ -59,8 +71,10 @@ export interface RenameEdit {
 }
 
 /**
- * Rename a component: the definition key edit, plus every referencing `$ref`'s final pointer
- * segment across the graph. Rejects (returns undefined) invalid new names and name collisions
+ * Rename a component: the definition key edit, plus every reference across the graph — `$ref`
+ * component-name segments (including nested pointers under the component), Security Requirement
+ * keys, and discriminator mapping names (bare or URI-style, each preserving its original form).
+ * Rejects (returns undefined) names outside the accepted component-key grammar and name collisions
  * within the same component section of the definition's document.
  */
 export async function renameComponent(ctx: ServerContext, params: RenameParams): Promise<RenameEdit[] | undefined> {
@@ -80,21 +94,24 @@ export async function renameComponent(ctx: ServerContext, params: RenameParams):
   const keyRange = componentKeyRange(target.doc, target);
   if (!keyRange) return undefined;
 
-  const edits: RenameEdit[] = [{ filePath: target.doc.filePath, range: keyRange, newText: params.newName }];
+  // The definition key is written as a mapping key, so it's encoded for its document's syntax
+  // (JSON string, or single-quoted YAML when the name would otherwise be reinterpreted).
+  const edits: RenameEdit[] = [
+    { filePath: target.doc.filePath, range: keyRange, newText: encodeComponentName(params.newName, target.doc.filePath) },
+  ];
 
   // Scan every graph that loads the definition's file, not just the owning entry's: the same
-  // component can be `$ref`'d from a sibling entry's graph (e.g. two config `entries` that both
-  // reference a shared file). `referringDocumentsFor` dedupes documents by path, so a file shared
-  // by two graphs — and any ref it holds — is edited exactly once.
-  for (const { doc: fileDoc, graph: refGraph } of await referringDocumentsFor(ctx, target.doc.filePath)) {
-    for (const ref of findRefs(fileDoc)) {
-      const resolved = resolveRef(refGraph, fileDoc, ref.value);
-      if (!resolved.ok) continue;
-      if (resolved.doc.filePath !== target.doc.filePath || resolved.pointer !== target.pointer) continue;
-      const segRange = refSegmentRange(fileDoc, ref.range, target.name);
-      if (!segRange) continue;
-      edits.push({ filePath: fileDoc.filePath, range: segRange, newText: params.newName });
-    }
+  // component can be referenced from a sibling entry's graph (e.g. two config `entries` that both
+  // reference a shared file). `referringDocumentsFor` dedupes documents by path, so a file shared by
+  // two graphs — and any reference it holds — is edited exactly once. `collectComponentReferences`
+  // is the single reference index shared with find-references: it covers `$ref`s (including nested
+  // pointers and URI-style discriminator mappings) plus name-based references (Security Requirement
+  // keys, bare discriminator names).
+  for (const ref of collectComponentReferences(target, await referringDocumentsFor(ctx, target.doc.filePath))) {
+    // A `$ref` pointer segment sits inside an existing string literal, so the bare name is inserted;
+    // a bare mapping key/value is re-encoded for its document's syntax.
+    const newText = ref.context === "pointer-segment" ? params.newName : encodeComponentName(params.newName, ref.filePath);
+    edits.push({ filePath: ref.filePath, range: ref.nameRange, newText });
   }
 
   return edits;

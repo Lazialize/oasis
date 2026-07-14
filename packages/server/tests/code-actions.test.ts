@@ -213,6 +213,70 @@ components:
   });
 });
 
+describe("Add parameter definition into an inline empty sequence (parameters: [])", () => {
+  const ENTRY_PATH = "/repo/openapi.yaml";
+
+  test("path item with parameters: [] and an operation: replaces [] with a valid block sequence", async () => {
+    const TEXT = `openapi: 3.1.0
+info:
+  title: Test API
+  version: "1.0.0"
+paths:
+  /pets/{petId}:
+    parameters: []
+    get:
+      operationId: getPet
+      description: Get a pet.
+      responses:
+        '200':
+          description: OK
+`;
+    const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: TEXT }));
+    const diagnostics = (await diagnosticsFor(ctx, ENTRY_PATH)).get(ENTRY_PATH) ?? [];
+    expect(diagnostics.some((d) => d.code === "paths/params-defined" && d.message.includes('"{petId}"'))).toBe(true);
+
+    const position = positionOf(TEXT, "/pets/{petId}:");
+    const results = await getCodeActions(ctx, { path: ENTRY_PATH, position, diagnostics });
+    const action = results.find((r) => r.title === "Add parameter definition");
+    expect(action).toBeDefined();
+
+    const newText = applyEdits(TEXT, action!.edits);
+    expect(newText).toContain(
+      "  /pets/{petId}:\n    parameters:\n      - name: petId\n        in: path\n        required: true\n        schema:\n          type: string\n    get:",
+    );
+
+    const diags2 = (await diagnosticsFor(createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: newText })), ENTRY_PATH)).get(ENTRY_PATH) ?? [];
+    expect(diags2.some((d) => d.code === "syntax-error")).toBe(false);
+    expect(diags2.some((d) => d.code === "paths/params-defined" && d.message.includes('"{petId}"'))).toBe(false);
+  });
+
+  test("path item with parameters: [] and no operation: replaces [] with a valid block sequence, preserving a trailing comment", async () => {
+    const TEXT = `openapi: 3.1.0
+info:
+  title: Test API
+  version: "1.0.0"
+paths:
+  /pets/{petId}:
+    parameters: [] # none yet
+`;
+    const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: TEXT }));
+    const diagnostics = (await diagnosticsFor(ctx, ENTRY_PATH)).get(ENTRY_PATH) ?? [];
+    expect(diagnostics.some((d) => d.code === "paths/params-defined" && d.message.includes('"{petId}"'))).toBe(true);
+
+    const position = positionOf(TEXT, "/pets/{petId}:");
+    const results = await getCodeActions(ctx, { path: ENTRY_PATH, position, diagnostics });
+    const action = results.find((r) => r.title === "Add parameter definition");
+    expect(action).toBeDefined();
+
+    const newText = applyEdits(TEXT, action!.edits);
+    expect(newText).toContain("    parameters:\n      - name: petId\n        in: path\n        required: true");
+
+    const diags2 = (await diagnosticsFor(createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: newText })), ENTRY_PATH)).get(ENTRY_PATH) ?? [];
+    expect(diags2.some((d) => d.code === "syntax-error")).toBe(false);
+    expect(diags2.some((d) => d.code === "paths/params-defined" && d.message.includes('"{petId}"'))).toBe(false);
+  });
+});
+
 describe("Remove unused component", () => {
   const ENTRY_PATH = "/repo/openapi.yaml";
   const TEXT = `openapi: 3.1.0
@@ -512,6 +576,121 @@ paths:
     expect(diags2.some((d) => d.code === "refs/no-unresolved")).toBe(false);
     expect(diags2.some((d) => d.code === "syntax-error")).toBe(false);
   });
+
+  test("cross-file extract rebases the schema's file-relative refs for the entry document (#56)", async () => {
+    const ROOT = "/projx";
+    const CONFIG_PATH = `${ROOT}/oasis.config.jsonc`;
+    const ENTRY_PATH = `${ROOT}/openapi.yaml`;
+    const FRAGMENT_PATH = `${ROOT}/paths/pets.yaml`;
+    const SHARED_PATH = `${ROOT}/paths/shared.yaml`;
+
+    const ENTRY_TEXT = `openapi: 3.1.0
+info:
+  title: Test API
+  version: "1.0.0"
+paths:
+  /pets:
+    $ref: './paths/pets.yaml'
+`;
+    const FRAGMENT_TEXT = `get:
+  operationId: listPets
+  description: List pets.
+  responses:
+    '200':
+      description: OK
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              item:
+                $ref: './shared.yaml#/Item'
+`;
+    const SHARED_TEXT = `Item:
+  type: string
+`;
+
+    const ctx = createServerContext(
+      new InMemoryFileSystem({
+        [CONFIG_PATH]: `{ "entries": ["openapi.yaml"] }`,
+        [ENTRY_PATH]: ENTRY_TEXT,
+        [FRAGMENT_PATH]: FRAGMENT_TEXT,
+        [SHARED_PATH]: SHARED_TEXT,
+      }),
+    );
+    await scanWorkspaceRootsForProjects(ctx, [ROOT]);
+
+    const position = positionOf(FRAGMENT_TEXT, "type: object\n            properties:");
+    const results = await getCodeActions(ctx, { path: FRAGMENT_PATH, position, diagnostics: [] });
+    const action = results.find((r) => r.title === "Extract inline schema to components");
+    expect(action).toBeDefined();
+
+    const fragmentEdit = action!.edits.find((e) => e.filePath === FRAGMENT_PATH)!;
+    const entryEdit = action!.edits.find((e) => e.filePath === ENTRY_PATH)!;
+    const newFragmentText = applyEdits(FRAGMENT_TEXT, [fragmentEdit]);
+    const newEntryText = applyEdits(ENTRY_TEXT, [entryEdit]);
+
+    // './shared.yaml' was relative to paths/; from the entry document it must be './paths/shared.yaml'.
+    expect(newEntryText).toContain("$ref: './paths/shared.yaml#/Item'");
+    expect(newEntryText).not.toContain("'./shared.yaml#/Item'");
+
+    const ctx2 = createServerContext(
+      new InMemoryFileSystem({
+        [CONFIG_PATH]: `{ "entries": ["openapi.yaml"] }`,
+        [ENTRY_PATH]: newEntryText,
+        [FRAGMENT_PATH]: newFragmentText,
+        [SHARED_PATH]: SHARED_TEXT,
+      }),
+    );
+    await scanWorkspaceRootsForProjects(ctx2, [ROOT]);
+    const entryDiags = (await diagnosticsFor(ctx2, ENTRY_PATH)).get(ENTRY_PATH) ?? [];
+    expect(entryDiags.some((d) => d.code === "refs/no-unresolved")).toBe(false);
+    expect(entryDiags.some((d) => d.code === "syntax-error")).toBe(false);
+  });
+
+  test("cross-file extract of a schema containing a YAML alias is suppressed (#56)", async () => {
+    const ROOT = "/projy";
+    const CONFIG_PATH = `${ROOT}/oasis.config.jsonc`;
+    const ENTRY_PATH = `${ROOT}/openapi.yaml`;
+    const FRAGMENT_PATH = `${ROOT}/paths/pets.yaml`;
+
+    const ENTRY_TEXT = `openapi: 3.1.0
+info:
+  title: Test API
+  version: "1.0.0"
+paths:
+  /pets:
+    $ref: './paths/pets.yaml'
+`;
+    const FRAGMENT_TEXT = `defaults: &defaults
+  type: string
+get:
+  operationId: listPets
+  description: List pets.
+  responses:
+    '200':
+      description: OK
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              id: *defaults
+`;
+
+    const ctx = createServerContext(
+      new InMemoryFileSystem({
+        [CONFIG_PATH]: `{ "entries": ["openapi.yaml"] }`,
+        [ENTRY_PATH]: ENTRY_TEXT,
+        [FRAGMENT_PATH]: FRAGMENT_TEXT,
+      }),
+    );
+    await scanWorkspaceRootsForProjects(ctx, [ROOT]);
+
+    const position = positionOf(FRAGMENT_TEXT, "type: object\n            properties:");
+    const results = await getCodeActions(ctx, { path: FRAGMENT_PATH, position, diagnostics: [] });
+    expect(results.find((r) => r.title === "Extract inline schema to components")).toBeUndefined();
+  });
 });
 
 describe("Inline reference", () => {
@@ -740,7 +919,7 @@ components:
     expect(results.find((r) => r.title === "Inline reference")).toBeUndefined();
   });
 
-  test("not offered: target's subtree contains a relative cross-file ref that would break if copied", async () => {
+  test("target's subtree contains a relative cross-file ref: it is re-relativized for the destination (#56)", async () => {
     const ROOT = "/proj";
     const CONFIG_PATH = `${ROOT}/oasis.config.jsonc`;
     const ENTRY_PATH = `${ROOT}/openapi.yaml`;
@@ -789,6 +968,270 @@ components:
 
     const position = positionOf(FRAGMENT_TEXT, "$ref: '../openapi.yaml#/components/schemas/Wrapper'");
     const results = await getCodeActions(ctx, { path: FRAGMENT_PATH, position, diagnostics: [] });
+    const action = results.find((r) => r.title === "Inline reference");
+    expect(action).toBeDefined();
+
+    const newFragmentText = applyEdits(FRAGMENT_TEXT, action!.edits);
+    // The copied subtree's './shared.yaml#/Item' (relative to openapi.yaml) is rebased for the
+    // fragment's directory (paths/), so it still resolves to the same file.
+    expect(newFragmentText).toContain("$ref: '../shared.yaml#/Item'");
+    expect(newFragmentText).not.toContain("'./shared.yaml#/Item'");
+
+    const ctx2 = createServerContext(
+      new InMemoryFileSystem({
+        [CONFIG_PATH]: `{ "entries": ["openapi.yaml"] }`,
+        [ENTRY_PATH]: ENTRY_TEXT,
+        [SHARED_PATH]: SHARED_TEXT,
+        [FRAGMENT_PATH]: newFragmentText,
+      }),
+    );
+    await scanWorkspaceRootsForProjects(ctx2, [ROOT]);
+    const diags2 = (await diagnosticsFor(ctx2, ENTRY_PATH)).get(FRAGMENT_PATH) ?? [];
+    expect(diags2.some((d) => d.code === "refs/no-unresolved")).toBe(false);
+    expect(diags2.some((d) => d.code === "syntax-error")).toBe(false);
+  });
+
+  test("cross-file inline rewrites the target's same-document refs to point back at the source file (#56)", async () => {
+    const ROOT = "/proj2";
+    const CONFIG_PATH = `${ROOT}/oasis.config.jsonc`;
+    const ENTRY_PATH = `${ROOT}/openapi.yaml`;
+    const FRAGMENT_PATH = `${ROOT}/paths/pets.yaml`;
+
+    const ENTRY_TEXT = `openapi: 3.1.0
+info:
+  title: Test API
+  version: "1.0.0"
+paths:
+  /pets:
+    $ref: './paths/pets.yaml'
+components:
+  schemas:
+    Outer:
+      type: object
+      properties:
+        inner:
+          $ref: '#/components/schemas/Inner'
+    Inner:
+      type: string
+`;
+    const FRAGMENT_TEXT = `get:
+  operationId: listPets
+  description: List pets.
+  responses:
+    '200':
+      description: OK
+      content:
+        application/json:
+          schema:
+            $ref: '../openapi.yaml#/components/schemas/Outer'
+`;
+
+    const ctx = createServerContext(
+      new InMemoryFileSystem({
+        [CONFIG_PATH]: `{ "entries": ["openapi.yaml"] }`,
+        [ENTRY_PATH]: ENTRY_TEXT,
+        [FRAGMENT_PATH]: FRAGMENT_TEXT,
+      }),
+    );
+    await scanWorkspaceRootsForProjects(ctx, [ROOT]);
+
+    const position = positionOf(FRAGMENT_TEXT, "$ref: '../openapi.yaml#/components/schemas/Outer'");
+    const results = await getCodeActions(ctx, { path: FRAGMENT_PATH, position, diagnostics: [] });
+    const action = results.find((r) => r.title === "Inline reference");
+    expect(action).toBeDefined();
+
+    const newFragmentText = applyEdits(FRAGMENT_TEXT, action!.edits);
+    // The Outer subtree's local '#/components/schemas/Inner' would resolve against the fragment
+    // (where there is no components section); it must be rebased to the source document.
+    expect(newFragmentText).toContain("$ref: '../openapi.yaml#/components/schemas/Inner'");
+    expect(newFragmentText).not.toContain("$ref: '#/components/schemas/Inner'");
+
+    const ctx2 = createServerContext(
+      new InMemoryFileSystem({
+        [CONFIG_PATH]: `{ "entries": ["openapi.yaml"] }`,
+        [ENTRY_PATH]: ENTRY_TEXT,
+        [FRAGMENT_PATH]: newFragmentText,
+      }),
+    );
+    await scanWorkspaceRootsForProjects(ctx2, [ROOT]);
+    const diags2 = (await diagnosticsFor(ctx2, ENTRY_PATH)).get(FRAGMENT_PATH) ?? [];
+    expect(diags2.some((d) => d.code === "refs/no-unresolved")).toBe(false);
+    expect(diags2.some((d) => d.code === "syntax-error")).toBe(false);
+  });
+
+  test("not offered: cross-file inline of a subtree with a YAML alias (document-scoped, unsafe to copy)", async () => {
+    const ROOT = "/proj3";
+    const CONFIG_PATH = `${ROOT}/oasis.config.jsonc`;
+    const ENTRY_PATH = `${ROOT}/openapi.yaml`;
+    const FRAGMENT_PATH = `${ROOT}/paths/pets.yaml`;
+
+    const ENTRY_TEXT = `openapi: 3.1.0
+info:
+  title: Test API
+  version: "1.0.0"
+paths:
+  /pets:
+    $ref: './paths/pets.yaml'
+components:
+  schemas:
+    Base: &base
+      type: object
+    Outer:
+      type: object
+      properties:
+        inner: *base
+`;
+    const FRAGMENT_TEXT = `get:
+  operationId: listPets
+  description: List pets.
+  responses:
+    '200':
+      description: OK
+      content:
+        application/json:
+          schema:
+            $ref: '../openapi.yaml#/components/schemas/Outer'
+`;
+
+    const ctx = createServerContext(
+      new InMemoryFileSystem({
+        [CONFIG_PATH]: `{ "entries": ["openapi.yaml"] }`,
+        [ENTRY_PATH]: ENTRY_TEXT,
+        [FRAGMENT_PATH]: FRAGMENT_TEXT,
+      }),
+    );
+    await scanWorkspaceRootsForProjects(ctx, [ROOT]);
+
+    const position = positionOf(FRAGMENT_TEXT, "$ref: '../openapi.yaml#/components/schemas/Outer'");
+    const results = await getCodeActions(ctx, { path: FRAGMENT_PATH, position, diagnostics: [] });
     expect(results.find((r) => r.title === "Inline reference")).toBeUndefined();
+  });
+
+  test("not offered: cross-file inline of a subtree with a nested \$id scope (3.1)", async () => {
+    const ROOT = "/proj4";
+    const CONFIG_PATH = `${ROOT}/oasis.config.jsonc`;
+    const ENTRY_PATH = `${ROOT}/openapi.yaml`;
+    const FRAGMENT_PATH = `${ROOT}/paths/pets.yaml`;
+
+    const ENTRY_TEXT = `openapi: 3.1.0
+info:
+  title: Test API
+  version: "1.0.0"
+paths:
+  /pets:
+    $ref: './paths/pets.yaml'
+components:
+  schemas:
+    Outer:
+      \$id: 'https://example.com/schemas/outer'
+      type: object
+`;
+    const FRAGMENT_TEXT = `get:
+  operationId: listPets
+  description: List pets.
+  responses:
+    '200':
+      description: OK
+      content:
+        application/json:
+          schema:
+            $ref: '../openapi.yaml#/components/schemas/Outer'
+`;
+
+    const ctx = createServerContext(
+      new InMemoryFileSystem({
+        [CONFIG_PATH]: `{ "entries": ["openapi.yaml"] }`,
+        [ENTRY_PATH]: ENTRY_TEXT,
+        [FRAGMENT_PATH]: FRAGMENT_TEXT,
+      }),
+    );
+    await scanWorkspaceRootsForProjects(ctx, [ROOT]);
+
+    const position = positionOf(FRAGMENT_TEXT, "$ref: '../openapi.yaml#/components/schemas/Outer'");
+    const results = await getCodeActions(ctx, { path: FRAGMENT_PATH, position, diagnostics: [] });
+    expect(results.find((r) => r.title === "Inline reference")).toBeUndefined();
+  });
+
+  test("cross-file inline leaves absolute non-filesystem URI refs (urn:, https:) unchanged (#56)", async () => {
+    const ROOT = "/proj5";
+    const CONFIG_PATH = `${ROOT}/oasis.config.jsonc`;
+    const ENTRY_PATH = `${ROOT}/openapi.yaml`;
+    const FRAGMENT_PATH = `${ROOT}/paths/pets.yaml`;
+
+    const ENTRY_TEXT = `openapi: 3.1.0
+info:
+  title: Test API
+  version: "1.0.0"
+paths:
+  /pets:
+    $ref: './paths/pets.yaml'
+components:
+  schemas:
+    Outer:
+      type: object
+      properties:
+        ext:
+          $ref: 'urn:example:schema'
+`;
+    const FRAGMENT_TEXT = `get:
+  operationId: listPets
+  description: List pets.
+  responses:
+    '200':
+      description: OK
+      content:
+        application/json:
+          schema:
+            $ref: '../openapi.yaml#/components/schemas/Outer'
+`;
+
+    const ctx = createServerContext(
+      new InMemoryFileSystem({
+        [CONFIG_PATH]: `{ "entries": ["openapi.yaml"] }`,
+        [ENTRY_PATH]: ENTRY_TEXT,
+        [FRAGMENT_PATH]: FRAGMENT_TEXT,
+      }),
+    );
+    await scanWorkspaceRootsForProjects(ctx, [ROOT]);
+
+    const position = positionOf(FRAGMENT_TEXT, "$ref: '../openapi.yaml#/components/schemas/Outer'");
+    const results = await getCodeActions(ctx, { path: FRAGMENT_PATH, position, diagnostics: [] });
+    const action = results.find((r) => r.title === "Inline reference");
+    expect(action).toBeDefined();
+
+    const newFragmentText = applyEdits(FRAGMENT_TEXT, action!.edits);
+    expect(newFragmentText).toContain("$ref: 'urn:example:schema'");
+  });
+});
+
+describe("JSON documents get no relocation code actions (#56)", () => {
+  test("inline and extract are not offered for a JSON entry document", async () => {
+    const ENTRY_PATH = "/repo/openapi.json";
+    const TEXT = JSON.stringify(
+      {
+        openapi: "3.1.0",
+        info: { title: "Test", version: "1.0.0" },
+        paths: {
+          "/pets": {
+            get: {
+              operationId: "listPets",
+              responses: {
+                "200": {
+                  description: "OK",
+                  content: { "application/json": { schema: { $ref: "#/components/schemas/Pet" } } },
+                },
+              },
+            },
+          },
+        },
+        components: { schemas: { Pet: { type: "object" } } },
+      },
+      null,
+      2,
+    );
+    const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: TEXT }));
+    const position = positionOf(TEXT, '"$ref": "#/components/schemas/Pet"');
+    const results = await getCodeActions(ctx, { path: ENTRY_PATH, position, diagnostics: [] });
+    expect(results).toEqual([]);
   });
 });
