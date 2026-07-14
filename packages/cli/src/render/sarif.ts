@@ -59,10 +59,15 @@ function toSarifLevel(severity: LintDiagnosticSeverity): "error" | "warning" | "
  * platform path syntax (e.g. Windows drive letters/backslashes) are correctly percent-encoded.
  * GitHub code scanning requires artifact locations relative to the repository root, but
  * diagnostics can point outside `cwd` (e.g. a `$ref`'d file elsewhere).
+ *
+ * The repo-relative case is percent-encoded segment-by-segment (retaining the `/` separators) so
+ * it is a valid RFC 3986 URI reference: spaces, `#` (otherwise parsed as a URI fragment marker),
+ * `%`, and non-ASCII characters in a filename are all encoded (#78).
  */
 function toArtifactUri(filePath: string, cwd: string): string {
   const rel = toRelativeFilePath(filePath, cwd);
-  return rel === filePath ? pathToFileURL(filePath).href : rel;
+  if (rel === filePath) return pathToFileURL(filePath).href;
+  return rel.split("/").map(encodeURIComponent).join("/");
 }
 
 /** Internal ranges are 0-based (line and character); SARIF regions are 1-based. */
