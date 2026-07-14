@@ -1,7 +1,7 @@
 import { detectVersion } from "@oasis/core";
 import type { Position } from "@oasis/core";
+import { OBJECT_SHAPES } from "@oasis/linter";
 import { classifyPointer } from "../keywords.ts";
-import type { ObjectKind } from "../keywords.ts";
 import { resolveRefAtPosition } from "../refs.ts";
 import { getChildNode, getChildScalar, mapKeys } from "../yaml-helpers.ts";
 import { resolveDocContext } from "../workspace.ts";
@@ -16,21 +16,6 @@ export interface HoverResult {
   contents: string;
 }
 
-const KIND_LABEL: Record<ObjectKind, string> = {
-  root: "OpenAPI document",
-  info: "Info",
-  pathItem: "Path item",
-  operation: "Operation",
-  parameter: "Parameter",
-  requestBody: "Request body",
-  responses: "Responses",
-  response: "Response",
-  mediaType: "Media type",
-  schema: "Schema",
-  components: "Components",
-  securityScheme: "Security scheme",
-};
-
 const MAX_PROPERTIES_SHOWN = 10;
 
 /** Cursor on a `$ref` -> a short summary of the resolved target. */
@@ -42,7 +27,7 @@ export async function getHover(ctx: ServerContext, params: HoverParams): Promise
   if (!result) return undefined;
 
   const kind = classifyPointer(result.pointer) ?? "schema";
-  const lines: string[] = [`**${KIND_LABEL[kind]}** \`${result.pointer || "/"}\``];
+  const lines: string[] = [`**${OBJECT_SHAPES[kind].name}** \`${result.pointer || "/"}\``];
 
   const description = getChildScalar(result.node, "description");
   if (description) lines.push("", description);

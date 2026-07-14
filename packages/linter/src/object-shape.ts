@@ -76,6 +76,7 @@ export type ObjectKind =
   | "encoding"
   | "example"
   | "link"
+  | "callback"
   | "schema"
   | "components"
   | "securityScheme"
@@ -407,6 +408,16 @@ export const OBJECT_SHAPES: Readonly<Record<ObjectKind, ObjectShape>> = {
       requestBody: {},
       description: { types: S },
       server: { types: O },
+      $ref: { types: S },
+    },
+  },
+  callback: {
+    name: "Callback Object",
+    extensions: true,
+    referenceable: true,
+    // Keys are runtime expressions mapping to Path Item Objects; no fixed field set.
+    allowUnknownFields: true,
+    fields: {
       $ref: { types: S },
     },
   },
