@@ -29,7 +29,7 @@ import { prepareRename, renameComponent } from "./handlers/rename.ts";
 import { getWorkspaceSymbols } from "./handlers/workspace-symbol.ts";
 import type { SymbolNodeKind, SymbolResult } from "./handlers/document-symbol.ts";
 import type { WorkspaceSymbolKind } from "./handlers/workspace-symbol.ts";
-import { getDiagnosticsByFile, toLspRange } from "./diagnostics.ts";
+import { toLspRange } from "./diagnostics.ts";
 import { routeDocument } from "./document-routing.ts";
 import { OverlayFileSystem } from "./overlay-fs.ts";
 import {
@@ -39,6 +39,7 @@ import {
   resolveConfigForEntry,
   scanWorkspaceRootsForProjects,
 } from "./project.ts";
+import { createValidationRunner } from "./validation.ts";
 import { createServerContext, invalidateGraph } from "./workspace.ts";
 
 const DEBOUNCE_MS = 250;
@@ -129,24 +130,19 @@ export function startServer(): Connection {
   let initConfigFiles: unknown;
 
   const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  const lastPublishedFiles = new Map<string, Set<string>>();
+  // Per-entry diagnostics bookkeeping (issue #48): diagnostics are stored per `entry -> file` and
+  // every publish is the merged, deduplicated union across entries, so a file shared by several
+  // entry graphs never has one entry's findings clobber another's.
+  const runner = createValidationRunner(ctx, {
+    publish: (filePath, diagnostics) => connection.sendDiagnostics({ uri: pathToUri(filePath), diagnostics }),
+  });
   // The config path a standalone (non-project-member) entry last had a config warning published
   // against, so a later validate() that resolves to no warning (or a different config path) can
   // clear the stale one rather than leaving it to linger (see `resolveConfigForEntry`).
   const standaloneConfigWarningPaths = new Map<string, string>();
 
   async function validate(entryPath: string): Promise<void> {
-    const byFile = await getDiagnosticsByFile(ctx, entryPath);
-    const prev = lastPublishedFiles.get(entryPath) ?? new Set<string>();
-    for (const file of prev) {
-      if (!byFile.has(file)) {
-        connection.sendDiagnostics({ uri: pathToUri(file), diagnostics: [] });
-      }
-    }
-    for (const [file, diagnostics] of byFile) {
-      connection.sendDiagnostics({ uri: pathToUri(file), diagnostics });
-    }
-    lastPublishedFiles.set(entryPath, new Set(byFile.keys()));
+    await runner.validate(entryPath);
 
     // Standalone entries have no project registration to hang a config warning off of
     // (`reloadProjectAtConfigPath` only runs for project config paths), so surface/clear the
@@ -167,14 +163,11 @@ export function startServer(): Connection {
   }
 
   /** Clear previously-published diagnostics for an entry whose project was unloaded (config
-   * deleted, or the entry dropped from `entries`), so stale diagnostics don't linger. */
+   * deleted, or the entry dropped from `entries`), so stale diagnostics don't linger. Only this
+   * entry's *contribution* is removed: a file shared with a sibling entry keeps the sibling's
+   * diagnostics (see `createValidationRunner`). */
   function clearPublishedFor(entryPath: string): void {
-    const prev = lastPublishedFiles.get(entryPath);
-    if (!prev) return;
-    for (const file of prev) {
-      connection.sendDiagnostics({ uri: pathToUri(file), diagnostics: [] });
-    }
-    lastPublishedFiles.delete(entryPath);
+    runner.clearEntry(entryPath);
   }
 
   function scheduleValidate(entryPath: string): void {
@@ -297,10 +290,11 @@ export function startServer(): Connection {
         }
         clearPublishedFor(path);
         // `clearPublishedFor` only sends a publish for `path` when a previous `validate` recorded
-        // one (e.g. this document was a standalone entry before this edit); publish an empty set
-        // unconditionally too, so the client always hears about this document's own (lack of)
-        // diagnostics on this transition, even the first time it's ever seen (never validated).
-        connection.sendDiagnostics({ uri: pathToUri(path), diagnostics: [] });
+        // one (e.g. this document was a standalone entry before this edit); publish unconditionally
+        // too, so the client always hears about this document's own diagnostics on this transition,
+        // even the first time it's ever seen (never validated). Publishing the *merged* set (not a
+        // blanket empty) keeps any contribution another entry's graph still has for this file.
+        runner.republishFile(path);
         // It may still be a $ref'd fragment of one or more open standalone entries (see
         // `routeDocument`'s "ignored" case): re-validate those so their published diagnostics don't
         // go stale until the entry document itself is next edited. This also republishes the
