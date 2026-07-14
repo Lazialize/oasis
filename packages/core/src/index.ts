@@ -3,6 +3,8 @@ export type { Diagnostic, DiagnosticSeverity, Position, Range } from "./types.ts
 export type { OasisDocument } from "./parse.ts";
 export { parseDocument } from "./parse.ts";
 
+export { PreciseNumber, preserveNumericLiteral } from "./number.ts";
+
 export type { PointerLookupResult, PositionLookupResult } from "./document.ts";
 export { nodeAtPointer, nodeAtPosition } from "./document.ts";
 
