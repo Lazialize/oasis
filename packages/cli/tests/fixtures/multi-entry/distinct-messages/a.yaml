@@ -1,0 +1,7 @@
+openapi: 3.0.3
+info:
+  title: Service A
+  version: "1.0.0"
+paths:
+  /things/{id}:
+    $ref: "./item.yaml"

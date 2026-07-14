@@ -29,6 +29,8 @@ export {
 
 export { rules } from "./rules/index.ts";
 
+export { dedupeDiagnostics, siblingExternalDocuments } from "./project.ts";
+
 export type { HttpMethod, OperationInfo, PathItemInfo, PathItemOrigin, SchemaSite } from "./openapi-walk.ts";
 export { HTTP_METHODS, iterateOperations, iteratePathItems, iterateSchemas, PATH_ITEM_NON_METHOD_KEYS } from "./openapi-walk.ts";
 

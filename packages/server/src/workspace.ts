@@ -1,5 +1,6 @@
 import { loadWorkspaceGraph } from "@oasis/core";
 import type { FileSystem, OasisDocument, WorkspaceGraph } from "@oasis/core";
+import { siblingExternalDocuments } from "@oasis/linter";
 import type { LintConfigFile } from "@oasis/linter";
 
 /**
@@ -293,15 +294,5 @@ export async function referringDocumentsFor(
  * single entry graph keeps its existing whole-world semantics.
  */
 export async function collectExternalDocuments(ctx: ServerContext, graph: WorkspaceGraph): Promise<OasisDocument[]> {
-  const seen = new Set<string>(graph.documents.keys());
-  const externals: OasisDocument[] = [];
-  for (const other of await loadAllGraphs(ctx)) {
-    if (other === graph) continue;
-    for (const doc of other.documents.values()) {
-      if (seen.has(doc.filePath)) continue;
-      seen.add(doc.filePath);
-      externals.push(doc);
-    }
-  }
-  return externals;
+  return siblingExternalDocuments(graph, await loadAllGraphs(ctx));
 }

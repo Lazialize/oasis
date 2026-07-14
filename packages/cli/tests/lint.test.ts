@@ -214,3 +214,65 @@ describe("oasis lint (no args, config entries)", () => {
     expect(configDiag.range.start.line).toBeGreaterThan(0);
   });
 });
+
+describe("oasis lint (multi-entry project awareness, #76)", () => {
+  const root = `${fixturesRoot}/multi-entry`;
+
+  test("dedupes a shared file's diagnostics instead of doubling them", async () => {
+    // a.yaml and b.yaml both $ref the same Path Item (mounted at the same path), whose GET is
+    // missing an operationId. That single finding lives in shared-path.yaml and would appear twice
+    // if the per-entry results were merely concatenated.
+    const result = await runCli(["lint", `${root}/dedup/a.yaml`, `${root}/dedup/b.yaml`, "--format", "json"]);
+    expect(result.exitCode).toBe(1);
+    const report = JSON.parse(result.stdout);
+    const opIdDiags = report.diagnostics.filter((d: { rule: string }) => d.rule === "operation/operation-id");
+    expect(opIdDiags).toHaveLength(1);
+    expect(opIdDiags[0].file).toContain("shared-path.yaml");
+    expect(opIdDiags[0].message).toContain("GET /pets");
+    expect(report.summary).toMatchObject({ errors: 1 });
+  });
+
+  test("cross-entry usage keeps a shared component used only by a sibling entry from being flagged unused", async () => {
+    // components.yaml defines Foo and Bar; a.yaml uses only Foo, b.yaml uses only Bar. Linting each
+    // entry in isolation would flag the other's component as unused; sibling externalDocuments make
+    // both usages visible, so `components/no-unused` fires for neither.
+    const result = await runCli(["lint", `${root}/cross-usage/a.yaml`, `${root}/cross-usage/b.yaml`, "--format", "json"]);
+    const report = JSON.parse(result.stdout);
+    const unusedDiags = report.diagnostics.filter((d: { rule: string }) => d.rule === "components/no-unused");
+    expect(unusedDiags).toHaveLength(0);
+    expect(result.exitCode).toBe(0);
+  });
+
+  test("a component unused by BOTH entries is still reported once (sanity: awareness doesn't suppress real findings)", async () => {
+    // Linting only a.yaml: Bar is used by no document in scope (b.yaml isn't an entry here), so it
+    // must still be flagged — confirms the cross-entry logic doesn't blanket-exempt shared files.
+    const result = await runCli(["lint", `${root}/cross-usage/a.yaml`, "--format", "json"]);
+    const report = JSON.parse(result.stdout);
+    const unusedDiags = report.diagnostics.filter((d: { rule: string }) => d.rule === "components/no-unused");
+    expect(unusedDiags).toHaveLength(1);
+    expect(unusedDiags[0].message).toContain("Bar");
+  });
+
+  test("contextually-distinct diagnostics from a shared file are NOT merged", async () => {
+    // The shared Path Item is mounted at /things/{id} by a.yaml and /objects/{id} by b.yaml, with
+    // no matching path parameter. `paths/params-defined` reports at the SAME range in item.yaml for
+    // both, but the messages embed the differing mount path — so they must both survive dedup.
+    const result = await runCli([
+      "lint",
+      `${root}/distinct-messages/a.yaml`,
+      `${root}/distinct-messages/b.yaml`,
+      "--format",
+      "json",
+    ]);
+    expect(result.exitCode).toBe(1);
+    const report = JSON.parse(result.stdout);
+    const paramDiags = report.diagnostics.filter((d: { rule: string }) => d.rule === "paths/params-defined");
+    expect(paramDiags).toHaveLength(2);
+    const messages = paramDiags.map((d: { message: string }) => d.message).sort();
+    expect(messages[0]).toContain("/objects/{id}");
+    expect(messages[1]).toContain("/things/{id}");
+    // Same range, different messages: the two share an identical location in the shared file.
+    expect(paramDiags[0].range).toEqual(paramDiags[1].range);
+    expect(paramDiags[0].file).toContain("item.yaml");
+  });
+});

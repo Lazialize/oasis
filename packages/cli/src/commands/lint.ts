@@ -1,6 +1,6 @@
 import { dirname, resolve as pathResolve } from "node:path";
 import { loadWorkspaceGraph, NodeFileSystem } from "@oasis/core";
-import { lint, loadConfig, resolveConfig, resolveEntries } from "@oasis/linter";
+import { dedupeDiagnostics, lint, loadConfig, resolveConfig, resolveEntries, siblingExternalDocuments } from "@oasis/linter";
 import type { LintDiagnostic } from "@oasis/linter";
 import { hasHelpFlag, parseLintArgs } from "../args.ts";
 import { renderJson } from "../render/json.ts";
@@ -101,12 +101,23 @@ export async function runLintCommand(args: string[], io: RunLintOptions): Promis
   }
 
   const fs = new NodeFileSystem();
-  const diagnostics: LintDiagnostic[] = [...warningDiagnostics];
 
-  for (const entry of entries) {
-    const graph = await loadWorkspaceGraph(fs, entry);
-    diagnostics.push(...lint(graph, resolved, { configPath: loaded.path }));
+  // Load every entry graph first, then lint each with the union of its sibling entries' documents
+  // as `externalDocuments`. This makes a multi-entry lint project-aware: whole-workspace rules
+  // (e.g. `components/no-unused`) see cross-entry usage, so a shared component referenced only by a
+  // sibling entry isn't flagged unused. A shared file linted through several entries yields the same
+  // diagnostics from each, so the concatenation is deduped by rule/severity/range/message —
+  // mirroring the LSP's per-file merge (see `packages/server/src/validation.ts`). With a single
+  // entry there are no siblings and nothing to dedupe, so output is identical to before.
+  const graphs = await Promise.all(entries.map((entry) => loadWorkspaceGraph(fs, entry)));
+
+  const entryDiagnostics: LintDiagnostic[] = [];
+  for (const graph of graphs) {
+    const externalDocuments = siblingExternalDocuments(graph, graphs);
+    entryDiagnostics.push(...lint(graph, resolved, { configPath: loaded.path, externalDocuments }));
   }
+
+  const diagnostics: LintDiagnostic[] = [...warningDiagnostics, ...dedupeDiagnostics(entryDiagnostics)];
 
   const rendered =
     format === "json" ? renderJson(diagnostics) : format === "sarif" ? renderSarif(diagnostics) : renderPretty(diagnostics);
