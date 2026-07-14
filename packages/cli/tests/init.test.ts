@@ -2,8 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { detectEntryDocuments } from "../src/commands/init.ts";
 
 const cliEntry = `${import.meta.dir}/../src/index.ts`;
+const BOM = "\uFEFF";
 
 interface RunResult {
   exitCode: number;
@@ -112,5 +114,85 @@ describe("oasis init", () => {
 
     const lint = await runCli(["lint"], { cwd: dir });
     expect(lint.exitCode).toBe(0);
+  });
+
+  // Issue #80: `oasis init` used to implement its own, less complete root-detection regex/parse
+  // instead of reusing the shared `looksLikeOpenApi` guard, and so missed several valid root
+  // forms the parser and LSP already support. `detectEntryDocuments` is exercised directly here
+  // (fast, no subprocess) for each supported form; one full `oasis init` run is exercised too as
+  // an end-to-end regression check for the originally reported uppercase-extension bug.
+  describe("detects every supported OpenAPI root form (issue #80)", () => {
+    test("uppercase .JSON extension", async () => {
+      const dir = tempDir();
+      writeFileSync(join(dir, "SPEC.JSON"), JSON.stringify({ openapi: "3.1.0", info: { title: "T" }, paths: {} }, null, 2));
+      expect(await detectEntryDocuments(dir)).toEqual(["SPEC.JSON"]);
+    });
+
+    test("UTF-8 BOM before a JSON root object", async () => {
+      const dir = tempDir();
+      writeFileSync(join(dir, "openapi-bom.json"), BOM + JSON.stringify({ openapi: "3.1.0", info: { title: "T" }, paths: {} }));
+      expect(await detectEntryDocuments(dir)).toEqual(["openapi-bom.json"]);
+    });
+
+    test("UTF-8 BOM before a YAML root mapping", async () => {
+      const dir = tempDir();
+      writeFileSync(join(dir, "bom.yaml"), BOM + OPENAPI_YAML);
+      expect(await detectEntryDocuments(dir)).toEqual(["bom.yaml"]);
+    });
+
+    test("YAML flow mapping", async () => {
+      const dir = tempDir();
+      writeFileSync(join(dir, "flow.yaml"), `{openapi: 3.1.0, info: {title: T}, paths: {}}\n`);
+      expect(await detectEntryDocuments(dir)).toEqual(["flow.yaml"]);
+    });
+
+    test("YAML document marker followed by a flow mapping", async () => {
+      const dir = tempDir();
+      writeFileSync(join(dir, "marked-flow.yaml"), `--- {openapi: 3.1.0, info: {title: T}, paths: {}}\n`);
+      expect(await detectEntryDocuments(dir)).toEqual(["marked-flow.yaml"]);
+    });
+
+    test("YAML block mapping (baseline)", async () => {
+      const dir = tempDir();
+      writeFileSync(join(dir, "block.yaml"), OPENAPI_YAML);
+      expect(await detectEntryDocuments(dir)).toEqual(["block.yaml"]);
+    });
+
+    test("quoted root-level key", async () => {
+      const dir = tempDir();
+      writeFileSync(join(dir, "quoted-double.yaml"), `"openapi": 3.1.0\ninfo:\n  title: T\npaths: {}\n`);
+      writeFileSync(join(dir, "quoted-single.yaml"), `'openapi': 3.1.0\ninfo:\n  title: T\npaths: {}\n`);
+      expect(await detectEntryDocuments(dir)).toEqual(["quoted-double.yaml", "quoted-single.yaml"]);
+    });
+
+    test("nested `openapi` key (not at document root) is NOT detected", async () => {
+      const dir = tempDir();
+      writeFileSync(
+        join(dir, "nested-components.yaml"),
+        `info:\n  title: T\ncomponents:\n  openapi: 3.1.0\npaths: {}\n`,
+      );
+      writeFileSync(
+        join(dir, "nested-paths.json"),
+        JSON.stringify({ info: { title: "T" }, paths: { "/x": { openapi: "not-a-root-key" } } }),
+      );
+      expect(await detectEntryDocuments(dir)).toEqual([]);
+    });
+
+    test("non-OpenAPI JSON/YAML files are NOT detected", async () => {
+      const dir = tempDir();
+      writeFileSync(join(dir, "plain.yaml"), "foo: bar\n");
+      writeFileSync(join(dir, "plain.json"), JSON.stringify({ foo: "bar" }));
+      expect(await detectEntryDocuments(dir)).toEqual([]);
+    });
+
+    test("end-to-end: `oasis init` picks up an uppercase .JSON entry", async () => {
+      const dir = tempDir();
+      writeFileSync(join(dir, "SPEC.JSON"), JSON.stringify({ openapi: "3.1.0", info: { title: "T" }, paths: {} }));
+
+      const result = await runCli(["init"], { cwd: dir });
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("Detected 1 OpenAPI document");
+      expect(readConfig(dir)).toContain('"entries": ["SPEC.JSON"],');
+    });
   });
 });

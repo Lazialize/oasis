@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join, relative as pathRelative, resolve as pathResolve } from "node:path";
 import { CONFIG_FILE_NAME } from "@oasis/linter";
+import { looksLikeOpenApi } from "@oasis/server";
 
 export interface RunInitOptions {
   stdout: (text: string) => void;
@@ -10,24 +11,15 @@ export interface RunInitOptions {
 
 const ENTRY_SCAN_MAX_DEPTH = 2;
 
-/** Whether the file's root object declares an `openapi` key (cheap check, no full parse). */
-function looksLikeOpenApiDocument(text: string, fileName: string): boolean {
-  if (fileName.endsWith(".json")) {
-    try {
-      const parsed: unknown = JSON.parse(text);
-      return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) && "openapi" in parsed;
-    } catch {
-      return false;
-    }
-  }
-  // YAML: a root-level mapping key starts at column 0.
-  return /^(['"]?)openapi\1\s*:/m.test(text);
-}
-
 /**
  * Scan `dir` (up to `ENTRY_SCAN_MAX_DEPTH` levels deep, skipping node_modules and hidden
  * directories) for YAML/JSON files whose root has an `openapi:` key. Returns paths relative
  * to `dir`, sorted.
+ *
+ * Detection reuses `looksLikeOpenApi` from `@oasis/server` (the same root-aware, nesting-aware
+ * guard the LSP uses to decide whether an opened document is an OpenAPI entry) rather than a
+ * separate ad-hoc regex/JSON.parse check, so all three consumers (CLI init, LSP, VS Code
+ * extension) agree on what counts as an OpenAPI root document (issue #80).
  */
 export async function detectEntryDocuments(dir: string): Promise<string[]> {
   const found: string[] = [];
@@ -50,7 +42,7 @@ export async function detectEntryDocuments(dir: string): Promise<string[]> {
       if (!entry.isFile() || !/\.(ya?ml|json)$/i.test(entry.name)) continue;
       try {
         const text = await readFile(full, "utf-8");
-        if (looksLikeOpenApiDocument(text, entry.name)) found.push(pathRelative(dir, full));
+        if (looksLikeOpenApi(text)) found.push(pathRelative(dir, full));
       } catch {
         // Unreadable file: skip.
       }
