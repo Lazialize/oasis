@@ -30,6 +30,15 @@ export { rules } from "./rules/index.ts";
 export type { HttpMethod, OperationInfo, PathItemInfo, PathItemOrigin, SchemaSite } from "./openapi-walk.ts";
 export { HTTP_METHODS, iterateOperations, iteratePathItems, iterateSchemas, PATH_ITEM_NON_METHOD_KEYS } from "./openapi-walk.ts";
 
+export type { FieldSpec, FieldType, ObjectKind, ObjectShape, ShapeViolation } from "./object-shape.ts";
+export {
+  allowedFieldNames,
+  fieldAvailableIn,
+  isExtensionKey,
+  OBJECT_SHAPES,
+  validateObjectShape,
+} from "./object-shape.ts";
+
 export type { ResolvedLocation } from "./util.ts";
 export { childAt, isRefObject, keyToString, nodeAt, resolveMaybeRef } from "./util.ts";
 

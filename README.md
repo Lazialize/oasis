@@ -248,6 +248,7 @@ checks and why, version notes, options, and good/bad examples). Compact summary:
 | [`structure/discriminator`](docs/rules/structure/discriminator.md) | error | Discriminator Objects: required fields, `mapping` targets, composition |
 | [`structure/callbacks`](docs/rules/structure/callbacks.md) | error | Callback Objects: expression keys, mapped operations declare `responses` |
 | [`structure/links`](docs/rules/structure/links.md) | error | Link Objects: `operationRef`/`operationId` exclusivity and resolution |
+| [`structure/object-shape`](docs/rules/structure/object-shape.md) | error | Info/Contact/License/Tag/External Docs Objects: version-aware fields, types, required keys |
 | [`syntax/no-duplicate-keys`](docs/rules/syntax/no-duplicate-keys.md) | error | Duplicate mapping keys in YAML/JSON |
 | [`refs/no-unresolved`](docs/rules/refs/no-unresolved.md) | error | Every `$ref` resolves |
 | [`refs/no-cycle`](docs/rules/refs/no-cycle.md) | warn | Cross-file reference cycles |
