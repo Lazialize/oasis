@@ -13,6 +13,7 @@ import {
   parseRefString,
   positionAtOffset,
   rangeFromOffsets,
+  resolveFileReference,
   resolveRef,
 } from "@oasis/core";
 import type { OasisDocument, Position, Range, WorkspaceGraph } from "@oasis/core";
@@ -668,7 +669,8 @@ function planSubtreeRefRewrites(graph: WorkspaceGraph, sourceDoc: OasisDocument,
     }
     const { filePart, pointer } = parseRefString(value);
     if (pointer !== "" && !pointer.startsWith("/")) return false; // plain-name anchor: scope-dependent
-    const targetPath = filePart === "" ? sourceDoc.filePath : graph.fileSystem.resolve(sourceDoc.filePath, filePart);
+    const targetPath =
+      filePart === "" ? sourceDoc.filePath : resolveFileReference(graph.fileSystem, sourceDoc.filePath, filePart);
     const fragment = pointer === "" && filePart !== "" ? "" : `#${pointer}`;
     const newRef = targetPath === destPath ? `#${pointer}` : `${relativeRefPath(destPath, targetPath)}${fragment}`;
     if (newRef === value) return true;

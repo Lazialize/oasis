@@ -1,5 +1,8 @@
 import { readFile as fsReadFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve as pathResolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { safeDecodeURIComponent } from "./pointer.ts";
+import { uriScheme } from "./uri.ts";
 
 /**
  * Abstraction over file access so core can be fed either real files (CLI, linter, bundler)
@@ -7,7 +10,7 @@ import { dirname, isAbsolute, resolve as pathResolve } from "node:path";
  */
 export interface FileSystem {
   readFile(path: string): string | Promise<string>;
-  /** Resolve `ref` relative to the directory containing `fromPath` into an absolute path. */
+  /** Resolve a native path relative to the directory containing `fromPath` into an absolute path. */
   resolve(fromPath: string, ref: string): string;
   /**
    * Reduce `path` to the single canonical identity this file system uses to key a document, so a
@@ -17,7 +20,24 @@ export interface FileSystem {
   canonicalize(path: string): string;
 }
 
-/** Resolve `ref` relative to the directory containing `fromPath` into an absolute path. */
+/**
+ * Resolve a raw URI-reference file part through a FileSystem. Classification deliberately happens
+ * before percent-decoding: `foo%3Abar.yaml` is a relative filename, not an unsupported `foo:` URI.
+ * Invalid file URLs remain unchanged so loading reports an ordinary unresolved-reference
+ * diagnostic instead of throwing from core.
+ */
+export function resolveFileReference(fs: FileSystem, fromPath: string, rawFilePart: string): string {
+  const scheme = uriScheme(rawFilePart);
+  if (scheme === undefined) return fs.resolve(fromPath, safeDecodeURIComponent(rawFilePart));
+  if (scheme !== "file") return fs.resolve(fromPath, rawFilePart);
+  try {
+    return fs.resolve(fromPath, fileURLToPath(rawFilePart));
+  } catch {
+    return fs.resolve(fromPath, rawFilePart);
+  }
+}
+
+/** Resolve a native path relative to the directory containing `fromPath`. */
 function resolvePath(fromPath: string, ref: string): string {
   if (isAbsolute(ref)) return pathResolve(ref);
   return pathResolve(dirname(fromPath), ref);

@@ -1,4 +1,4 @@
-import { findRefs, isExternalUriReference, parseRefString, rangeFromOffsets } from "@oasis/core";
+import { findRefs, isExternalUriReference, parseRefString, rangeFromOffsets, resolveFileReference } from "@oasis/core";
 import type { OasisDocument, Range } from "@oasis/core";
 import { resolveDocContext } from "../workspace.ts";
 import type { ServerContext } from "../workspace.ts";
@@ -40,7 +40,7 @@ export async function getDocumentLinks(ctx: ServerContext, params: DocumentLinkP
     const range = filePartRange(doc, ref.range, filePart);
     if (!range) continue;
 
-    results.push({ range, targetPath: graph.fileSystem.resolve(doc.filePath, filePart) });
+    results.push({ range, targetPath: resolveFileReference(graph.fileSystem, doc.filePath, filePart) });
   }
   return results;
 }

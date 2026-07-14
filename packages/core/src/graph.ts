@@ -1,4 +1,5 @@
 import type { FileSystem } from "./filesystem.ts";
+import { resolveFileReference } from "./filesystem.ts";
 import { type OasisDocument, parseDocument } from "./parse.ts";
 import { zeroRange } from "./position.ts";
 import { findRefs, parseRefString } from "./ref.ts";
@@ -59,7 +60,7 @@ export async function loadWorkspaceGraph(fs: FileSystem, entryPath: string): Pro
       // lookup. `resolveRef` reports it as an unsupported external reference when it's resolved.
       if (isExternalUriReference(filePart)) continue;
 
-      const targetPath = fs.resolve(path, filePart);
+      const targetPath = resolveFileReference(fs, path, filePart);
       if (targetPath === path) continue;
 
       if (visiting.has(targetPath)) {
