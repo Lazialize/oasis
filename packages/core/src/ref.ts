@@ -96,6 +96,8 @@ export interface FoundRef {
   targetKind?: OpenApiObjectKind;
   /** Canonical JSON Schema base active at this exact walk occurrence. */
   baseUri: string;
+  /** AST node that owns this reference, used internally to preserve resolved-target identity. */
+  sourceNode?: Node;
 }
 
 /**
@@ -311,6 +313,7 @@ export function findRefs(
             results.push({
               value: value.value,
               node: value,
+              sourceNode: resolved,
               kind: "ref",
               targetKind: objectKind,
               baseUri: stripUriFragment(nodeBaseUri),
@@ -330,6 +333,7 @@ export function findRefs(
             results.push({
               value: value.value,
               node: value,
+              sourceNode: resolved,
               kind: "dynamic-ref",
               targetKind: "schema",
               baseUri: stripUriFragment(nodeBaseUri),
@@ -350,6 +354,7 @@ export function findRefs(
               results.push({
                 value: value.value,
                 node: value,
+                sourceNode: value,
                 kind: "discriminator-mapping",
                 baseUri: stripUriFragment(nodeBaseUri),
                 range: range
