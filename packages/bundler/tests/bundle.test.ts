@@ -232,6 +232,62 @@ describe("bundle", () => {
     expect(result.output).not.toContain("components:");
   });
 
+  test("Example.value and Link Any-valued fields preserve nested $ref-shaped data", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": [
+        "openapi: 3.1.0",
+        "info: { title: t, version: '1' }",
+        "paths: {}",
+        "components:",
+        "  examples:",
+        "    Payload:",
+        "      value:",
+        "        $ref: './literal-only.yaml#/ExampleValue'",
+        "    Genuine:",
+        "      $ref: './targets.yaml#/Example'",
+        "      value:",
+        "        $ref: './literal-only.yaml#/ExampleSibling'",
+        "  links:",
+        "    Next:",
+        "      operationId: receive",
+        "      parameters:",
+        "        payload:",
+        "          $ref: './literal-only.yaml#/ParameterValue'",
+        "      requestBody:",
+        "        $ref: './literal-only.yaml#/RequestBodyValue'",
+        "    Genuine:",
+        "      $ref: './targets.yaml#/Link'",
+        "      requestBody:",
+        "        $ref: './literal-only.yaml#/LinkSibling'",
+      ].join("\n"),
+      "/virtual/targets.yaml": [
+        "Example:",
+        "  value:",
+        "    $ref: './literal-only.yaml#/ExternalExampleValue'",
+        "Link:",
+        "  operationId: receive",
+        "  requestBody:",
+        "    $ref: './literal-only.yaml#/ExternalRequestBodyValue'",
+      ].join("\n"),
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const result = bundle(graph);
+
+    expect(graph.documents.size).toBe(2);
+    expect(allDiagnostics(graph)).toEqual([]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.output).toContain("./literal-only.yaml#/ExampleValue");
+    expect(result.output).toContain("./literal-only.yaml#/ParameterValue");
+    expect(result.output).toContain("./literal-only.yaml#/RequestBodyValue");
+    expect(result.output).toContain("./literal-only.yaml#/ExternalExampleValue");
+    expect(result.output).toContain("./literal-only.yaml#/ExternalRequestBodyValue");
+    expect(result.output).toContain("./literal-only.yaml#/ExampleSibling");
+    expect(result.output).toContain("./literal-only.yaml#/LinkSibling");
+    expect(result.output).not.toContain("./targets.yaml");
+    expect(result.output).toContain("#/components/examples/Example");
+    expect(result.output).toContain("#/components/links/Link");
+  });
+
   test("container entries named like literal keywords (responses.default, examples map, a property named `default`) are real refs and are lifted", async () => {
     const fs = new InMemoryFileSystem({
       "/virtual/entry.yaml": [

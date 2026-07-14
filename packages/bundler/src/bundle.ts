@@ -59,10 +59,19 @@ function assignKeys(target: Record<string, unknown>, source: Record<string, unkn
   for (const key of Object.keys(source)) setKey(target, key, source[key]);
 }
 
-function findRefPair(node: Node): Pair | undefined {
+function resolvedScalar(doc: OasisDocument, node: unknown): Scalar | undefined {
+  if (!isNode(node)) return undefined;
+  const resolved = isAlias(node) ? node.resolve(doc.yamlDoc) : node;
+  return isScalar(resolved) ? resolved : undefined;
+}
+
+function findRefPair(doc: OasisDocument, node: Node): Pair | undefined {
   if (!isMap(node)) return undefined;
   return node.items.find(
-    (p): p is Pair => keyToString(p.key) === "$ref" && isScalar(p.value) && typeof p.value.value === "string",
+    (p): p is Pair => {
+      const value = resolvedScalar(doc, p.value);
+      return keyToString(p.key) === "$ref" && value !== undefined && typeof value.value === "string";
+    },
   );
 }
 
@@ -94,6 +103,57 @@ interface BundleContext {
   visitedEntryIdentities: Set<string>;
   /** Anchor-target nodes currently being expanded, to break cyclic YAML `*alias` references. */
   aliasStack: Set<Node>;
+}
+
+/** Resolve one Alias occurrence for a shape-sensitive conversion while sharing cycle diagnostics. */
+function withAliasTarget<T>(
+  ctx: BundleContext,
+  doc: OasisDocument,
+  node: Node,
+  fallback: T,
+  convert: (target: Node) => T,
+): T {
+  if (!isAlias(node)) return convert(node);
+  const target = node.resolve(doc.yamlDoc);
+  if (!target) {
+    ctx.diagnostics.push({
+      message: `Unresolved YAML alias "*${node.source}": no matching anchor`,
+      severity: "warning",
+      code: "unresolved-alias",
+      source: "bundler",
+      range: rangeOfNode(doc, node),
+    });
+    return fallback;
+  }
+  if (ctx.aliasStack.has(target)) {
+    ctx.diagnostics.push({
+      message: `Cyclic YAML alias "*${node.source}" cannot be inlined; omitted to break the cycle`,
+      severity: "warning",
+      code: "cyclic-alias",
+      source: "bundler",
+      range: rangeOfNode(doc, node),
+    });
+    return fallback;
+  }
+  ctx.aliasStack.add(target);
+  try {
+    return convert(target);
+  } finally {
+    ctx.aliasStack.delete(target);
+  }
+}
+
+type OpenApiObjectKind = "example" | "link";
+
+function objectKindForSection(section: string | undefined): OpenApiObjectKind | undefined {
+  if (section === "examples") return "example";
+  if (section === "links") return "link";
+  return undefined;
+}
+
+function isAnyValuedField(kind: OpenApiObjectKind | undefined, key: string): boolean {
+  return (kind === "example" && key === "value") ||
+    (kind === "link" && (key === "parameters" || key === "requestBody"));
 }
 
 function identityKeyOf(result: ResolvedRef): string {
@@ -137,30 +197,41 @@ function deriveName(ctx: BundleContext, pointer: string, doc: OasisDocument, sec
 
 /** Merge a map of already-defined component names (from the entry's own `components`) into `usedNames`. */
 function reserveEntryComponentNames(ctx: BundleContext, componentsNode: Node): void {
-  if (!isMap(componentsNode)) return;
-  for (const sectionPair of componentsNode.items) {
-    const sectionName = keyToString(sectionPair.key);
-    if (!isNode(sectionPair.value) || !isMap(sectionPair.value)) continue;
-    const set = ensureUsedNames(ctx, sectionName);
-    for (const entryPair of sectionPair.value.items) {
-      set.add(keyToString(entryPair.key));
+  withAliasTarget(ctx, ctx.entryDoc, componentsNode, undefined, (resolvedComponents) => {
+    if (!isMap(resolvedComponents)) return;
+    for (const sectionPair of resolvedComponents.items) {
+      const sectionName = keyToString(sectionPair.key);
+      if (!isNode(sectionPair.value)) continue;
+      withAliasTarget(ctx, ctx.entryDoc, sectionPair.value, undefined, (resolvedSection) => {
+        if (!isMap(resolvedSection)) return;
+        const set = ensureUsedNames(ctx, sectionName);
+        for (const entryPair of resolvedSection.items) set.add(keyToString(entryPair.key));
+      });
     }
-  }
+  });
 }
 
-function mapChildren(ctx: BundleContext, doc: OasisDocument, mapNode: Node, hint: string): Record<string, unknown> {
-  if (!isMap(mapNode)) return convertValue(ctx, doc, mapNode, hint) as Record<string, unknown>;
-  const out: Record<string, unknown> = {};
-  for (const pair of mapNode.items) {
-    if (!isNode(pair.value)) continue;
-    setKey(out, keyToString(pair.key), convertValue(ctx, doc, pair.value, hint));
-  }
-  return out;
+function mapChildren(
+  ctx: BundleContext,
+  doc: OasisDocument,
+  mapNode: Node,
+  hint: string,
+  entryKind?: OpenApiObjectKind,
+): Record<string, unknown> {
+  return withAliasTarget(ctx, doc, mapNode, {}, (resolvedMap) => {
+    if (!isMap(resolvedMap)) return convertValue(ctx, doc, resolvedMap, hint, false, entryKind) as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const pair of resolvedMap.items) {
+      if (!isNode(pair.value)) continue;
+      setKey(out, keyToString(pair.key), convertValue(ctx, doc, pair.value, hint, false, entryKind));
+    }
+    return out;
+  });
 }
 
 /** Resolve `refPair`'s `$ref`, returning the resolution (or undefined + a recorded warning diagnostic). */
 function resolveRefPair(ctx: BundleContext, doc: OasisDocument, refPair: Pair): ReturnType<typeof resolveRef> {
-  const scalar = refPair.value as Scalar;
+  const scalar = resolvedScalar(doc, refPair.value)!;
   const refValue = scalar.value as string;
   const range = rangeOfScalar(doc, scalar);
   const result = resolveRef(ctx.graph, doc, refValue, range);
@@ -172,7 +243,7 @@ function resolveRefPair(ctx: BundleContext, doc: OasisDocument, refPair: Pair): 
 
 /** Convert a `$ref`-bearing map: lift external targets into components/*, or pass through internal refs unchanged. */
 function convertRef(ctx: BundleContext, doc: OasisDocument, mapNode: Node, refPair: Pair, hint: string | undefined): unknown {
-  const scalar = refPair.value as Scalar;
+  const scalar = resolvedScalar(doc, refPair.value)!;
   const refValue = scalar.value as string;
   const result = resolveRefPair(ctx, doc, refPair);
 
@@ -197,7 +268,7 @@ function convertRef(ctx: BundleContext, doc: OasisDocument, mapNode: Node, refPa
     assigned = { section, name };
     // Register before recursing so ref cycles among lifted components terminate.
     ctx.identityMap.set(identityKey, assigned);
-    const content = convertValue(ctx, result.doc, result.node, section);
+    const content = convertValue(ctx, result.doc, result.node, section, false, objectKindForSection(section));
     setKey(ensureSectionObject(ctx, section), name, content);
   }
 
@@ -248,8 +319,10 @@ function mergeSiblingsInto(ctx: BundleContext, doc: OasisDocument, mapNode: Node
 
   const base: Record<string, unknown> =
     typeof content === "object" && content !== null && !Array.isArray(content) ? { ...(content as Record<string, unknown>) } : {};
+  const objectKind = objectKindForSection(hint);
   for (const pair of siblingPairs) {
-    setKey(base, keyToString(pair.key), convertValue(ctx, doc, pair.value as Node, hint));
+    const key = keyToString(pair.key);
+    setKey(base, key, convertValue(ctx, doc, pair.value as Node, hint, isAnyValuedField(objectKind, key)));
   }
   return base;
 }
@@ -281,7 +354,7 @@ function convertRefDereference(ctx: BundleContext, doc: OasisDocument, mapNode: 
   }
 
   ctx.expansionStack.add(identityKey);
-  const content = convertValue(ctx, result.doc, result.node, hint);
+  const content = convertValue(ctx, result.doc, result.node, hint, false, objectKindForSection(hint));
   ctx.expansionStack.delete(identityKey);
 
   const cycleAssigned = ctx.cycleAssignments.get(identityKey);
@@ -295,10 +368,11 @@ function convertRefDereference(ctx: BundleContext, doc: OasisDocument, mapNode: 
 function withSiblings(ctx: BundleContext, doc: OasisDocument, mapNode: Node, newRef: string, hint: string | undefined): Record<string, unknown> {
   const out: Record<string, unknown> = { $ref: newRef };
   if (!isMap(mapNode)) return out;
+  const objectKind = objectKindForSection(hint);
   for (const pair of mapNode.items) {
     const key = keyToString(pair.key);
     if (key === "$ref" || !isNode(pair.value)) continue;
-    setKey(out, key, convertValue(ctx, doc, pair.value, hint));
+    setKey(out, key, convertValue(ctx, doc, pair.value, hint, isAnyValuedField(objectKind, key)));
   }
   return out;
 }
@@ -309,41 +383,42 @@ function withSiblings(ctx: BundleContext, doc: OasisDocument, mapNode: Node, new
  * consistent behavior for 3.1 too. Follows chained path-item refs with a depth guard for safety.
  */
 function convertPathItem(ctx: BundleContext, doc: OasisDocument, node: Node, depth = 0): unknown {
-  if (depth > 20) {
-    // Never route a Path Item `$ref` through `convertValue`/`convertRef`: with no section hint it
-    // would fall back to "schemas" (`deriveSection`) and lift a Path Item Object into
-    // `components/schemas`, producing a malformed document. Leave the ref unresolved in place and
-    // report it instead — core never throws for unresolved refs, and this mirrors that pattern.
-    const refPair = findRefPair(node);
-    if (refPair) {
-      const scalar = refPair.value as Scalar;
-      ctx.diagnostics.push({
-        message: `Path Item "$ref" chain exceeds maximum depth (20); leaving "${scalar.value as string}" unresolved to avoid an incorrect bundle`,
-        severity: "warning",
-        code: "ref-depth-exceeded",
-        source: "bundler",
-        range: rangeOfScalar(doc, scalar),
-      });
-      return withPathItemSiblings(ctx, doc, node, { $ref: scalar.value as string });
+  return withAliasTarget(ctx, doc, node, undefined, (resolvedNode) => {
+    if (depth > 20) {
+      // Never route a Path Item `$ref` through `convertValue`/`convertRef`: with no section hint it
+      // would fall back to "schemas" (`deriveSection`) and lift a Path Item Object into
+      // `components/schemas`, producing a malformed document. Leave the ref unresolved in place
+      // and report it instead — core never throws for unresolved refs, and this mirrors that pattern.
+      const refPair = findRefPair(doc, resolvedNode);
+      if (refPair) {
+        const scalar = resolvedScalar(doc, refPair.value)!;
+        ctx.diagnostics.push({
+          message: `Path Item "$ref" chain exceeds maximum depth (20); leaving "${scalar.value as string}" unresolved to avoid an incorrect bundle`,
+          severity: "warning",
+          code: "ref-depth-exceeded",
+          source: "bundler",
+          range: rangeOfScalar(doc, scalar),
+        });
+        return withPathItemSiblings(ctx, doc, resolvedNode, { $ref: scalar.value as string });
+      }
+      return convertValue(ctx, doc, resolvedNode, undefined);
     }
-    return convertValue(ctx, doc, node, undefined);
-  }
 
-  const refPair = findRefPair(node);
-  if (refPair) {
-    const scalar = refPair.value as Scalar;
-    const refValue = scalar.value as string;
-    const result = resolveRefPair(ctx, doc, refPair);
-    // 3.1 allows a Path Item `$ref` to carry siblings (`summary`/`description`); those override the
-    // target's own per 3.1 Reference Object semantics, same as `withSiblings`/`mergeSiblingsInto`
-    // do for non-path-item refs. Merge them in on both the resolved and unresolved branches instead
-    // of dropping them.
-    if (!result.ok) return withPathItemSiblings(ctx, doc, node, { $ref: refValue });
-    const target = convertPathItem(ctx, result.doc, result.node, depth + 1);
-    return withPathItemSiblings(ctx, doc, node, target);
-  }
+    const refPair = findRefPair(doc, resolvedNode);
+    if (refPair) {
+      const scalar = resolvedScalar(doc, refPair.value)!;
+      const refValue = scalar.value as string;
+      const result = resolveRefPair(ctx, doc, refPair);
+      // 3.1 allows a Path Item `$ref` to carry siblings (`summary`/`description`); those override the
+      // target's own per 3.1 Reference Object semantics, same as `withSiblings`/`mergeSiblingsInto`
+      // do for non-path-item refs. Merge them in on both resolved and unresolved branches.
+      if (!result.ok) return withPathItemSiblings(ctx, doc, resolvedNode, { $ref: refValue });
+      const target = convertPathItem(ctx, result.doc, result.node, depth + 1);
+      return withPathItemSiblings(ctx, doc, resolvedNode, target);
+    }
 
-  return convertValue(ctx, doc, node, undefined);
+    return convertValue(ctx, doc, resolvedNode, undefined);
+  });
 }
 
 /** Merge a Path Item `$ref`'s sibling keys (e.g. `summary`, `description`) onto the inlined target. */
@@ -367,13 +442,15 @@ function withPathItemSiblings(ctx: BundleContext, doc: OasisDocument, node: Node
  * `components`) while refs *inside* the inlined path item are lifted normally.
  */
 function convertPathItemMap(ctx: BundleContext, doc: OasisDocument, mapNode: Node): Record<string, unknown> {
-  if (!isMap(mapNode)) return convertValue(ctx, doc, mapNode, undefined) as Record<string, unknown>;
-  const out: Record<string, unknown> = {};
-  for (const pair of mapNode.items) {
-    if (!isNode(pair.value)) continue;
-    setKey(out, keyToString(pair.key), convertPathItem(ctx, doc, pair.value));
-  }
-  return out;
+  return withAliasTarget(ctx, doc, mapNode, {}, (resolvedMap) => {
+    if (!isMap(resolvedMap)) return convertValue(ctx, doc, resolvedMap, undefined) as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const pair of resolvedMap.items) {
+      if (!isNode(pair.value)) continue;
+      setKey(out, keyToString(pair.key), convertPathItem(ctx, doc, pair.value));
+    }
+    return out;
+  });
 }
 
 /**
@@ -385,16 +462,23 @@ function convertPathItemMap(ctx: BundleContext, doc: OasisDocument, mapNode: Nod
  * expression key is inlined in place rather than lifted as a bare Path Item.
  */
 function convertCallbacks(ctx: BundleContext, doc: OasisDocument, mapNode: Node): Record<string, unknown> {
-  if (!isMap(mapNode)) return convertValue(ctx, doc, mapNode, "callbacks") as Record<string, unknown>;
-  const out: Record<string, unknown> = {};
-  for (const pair of mapNode.items) {
-    const value = pair.value;
-    if (!isNode(value)) continue;
-    const refPair = findRefPair(value);
-    // `$ref` at callbacks/<name>: lift the whole Callback Object into components/callbacks.
-    setKey(out, keyToString(pair.key), refPair ? convertRef(ctx, doc, value, refPair, "callbacks") : convertPathItemMap(ctx, doc, value));
-  }
-  return out;
+  return withAliasTarget(ctx, doc, mapNode, {}, (resolvedMap) => {
+    if (!isMap(resolvedMap)) return convertValue(ctx, doc, resolvedMap, "callbacks") as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const pair of resolvedMap.items) {
+      const value = pair.value;
+      if (!isNode(value)) continue;
+      const converted = withAliasTarget(ctx, doc, value, {}, (resolvedValue) => {
+        const refPair = findRefPair(doc, resolvedValue);
+        // `$ref` at callbacks/<name>: lift the whole Callback Object into components/callbacks.
+        return refPair
+          ? convertRef(ctx, doc, resolvedValue, refPair, "callbacks")
+          : convertPathItemMap(ctx, doc, resolvedValue);
+      });
+      setKey(out, keyToString(pair.key), converted);
+    }
+    return out;
+  });
 }
 
 /**
@@ -427,7 +511,7 @@ function resolveMappingRefTarget(ctx: BundleContext, doc: OasisDocument, value: 
     assigned = { section, name };
     // Register before recursing so ref cycles among lifted components terminate (mirrors `convertRef`).
     ctx.identityMap.set(identityKey, assigned);
-    const content = convertValue(ctx, result.doc, result.node, section);
+    const content = convertValue(ctx, result.doc, result.node, section, false, objectKindForSection(section));
     setKey(ensureSectionObject(ctx, section), name, content);
   }
   return `#/components/${assigned.section}/${assigned.name}`;
@@ -440,18 +524,21 @@ function resolveMappingRefTarget(ctx: BundleContext, doc: OasisDocument, value: 
  * untouched, since they aren't a reference to load or rewrite.
  */
 function convertDiscriminatorMapping(ctx: BundleContext, doc: OasisDocument, mapNode: Node): Record<string, unknown> {
-  if (!isMap(mapNode)) return convertValue(ctx, doc, mapNode, "schemas") as Record<string, unknown>;
-  const out: Record<string, unknown> = {};
-  for (const pair of mapNode.items) {
-    const value = pair.value;
-    if (!isNode(value)) continue;
-    if (isScalar(value) && typeof value.value === "string" && looksLikeMappingRef(value.value)) {
-      setKey(out, keyToString(pair.key), resolveMappingRefTarget(ctx, doc, value, "schemas"));
-    } else {
-      setKey(out, keyToString(pair.key), convertValue(ctx, doc, value, "schemas"));
+  return withAliasTarget(ctx, doc, mapNode, {}, (resolvedMap) => {
+    if (!isMap(resolvedMap)) return convertValue(ctx, doc, resolvedMap, "schemas") as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const pair of resolvedMap.items) {
+      const value = pair.value;
+      if (!isNode(value)) continue;
+      const contextualValue = resolvedScalar(doc, value);
+      if (contextualValue && typeof contextualValue.value === "string" && looksLikeMappingRef(contextualValue.value)) {
+        setKey(out, keyToString(pair.key), resolveMappingRefTarget(ctx, doc, contextualValue, "schemas"));
+      } else {
+        setKey(out, keyToString(pair.key), convertValue(ctx, doc, value, "schemas"));
+      }
     }
-  }
-  return out;
+    return out;
+  });
 }
 
 /**
@@ -460,7 +547,14 @@ function convertDiscriminatorMapping(ctx: BundleContext, doc: OasisDocument, map
  * `isLiteralDataKey`), stays set for the rest of the subtree: a `$ref`-shaped map found there is
  * plain data, not a reference, and is copied through unchanged rather than lifted/rewritten.
  */
-function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undefined, hint: string | undefined, literal = false): unknown {
+function convertValue(
+  ctx: BundleContext,
+  doc: OasisDocument,
+  node: Node | undefined,
+  hint: string | undefined,
+  literal = false,
+  objectKind?: OpenApiObjectKind,
+): unknown {
   if (!node) return undefined;
 
   if (isAlias(node)) {
@@ -486,13 +580,13 @@ function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undef
       return undefined;
     }
     ctx.aliasStack.add(target);
-    const converted = convertValue(ctx, doc, target, hint, literal);
+    const converted = convertValue(ctx, doc, target, hint, literal, objectKind);
     ctx.aliasStack.delete(target);
     return converted;
   }
 
   if (isMap(node)) {
-    const refPair = literal ? undefined : findRefPair(node);
+    const refPair = literal ? undefined : findRefPair(doc, node);
     if (refPair) return convertRef(ctx, doc, node, refPair, hint);
 
     const out: Record<string, unknown> = {};
@@ -503,6 +597,10 @@ function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undef
         setKey(out, key, value);
         continue;
       }
+      // Shape-sensitive OpenAPI/JSON Schema classification must inspect the value exposed by an
+      // Alias, while conversion still receives the Alias so cycle diagnostics and source identity
+      // are preserved by the normal alias path.
+      const contextualValue = isAlias(value) ? value.resolve(doc.yamlDoc) ?? value : value;
       // A Specification Extension (`x-*`) key introduces an opaque payload: everything below it is
       // arbitrary user data, so keys inside that happen to match OpenAPI structural fields
       // (`$ref`, `mapping`, `schema`, `properties`, `examples`, ...) must be copied through
@@ -514,8 +612,12 @@ function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undef
         setKey(out, key, convertValue(ctx, doc, value, hint, true));
         continue;
       }
-      if (!literal && isLiteralDataKey(key, value)) {
+      if (!literal && isLiteralDataKey(key, contextualValue)) {
         setKey(out, key, convertValue(ctx, doc, value, hint, true));
+        continue;
+      }
+      if (!literal && isAnyValuedField(objectKind, key)) {
+        out[key] = convertValue(ctx, doc, value, hint, true);
         continue;
       }
       // Once inside literal data, the structural key-hints below (which route real OpenAPI
@@ -547,7 +649,13 @@ function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undef
         case "allOf":
         case "oneOf":
         case "anyOf":
-          setKey(out, key, isSeq(value) ? value.items.filter(isNode).map((item) => convertValue(ctx, doc, item, "schemas")) : convertValue(ctx, doc, value, "schemas"));
+          setKey(
+            out,
+            key,
+            isSeq(contextualValue)
+              ? contextualValue.items.filter(isNode).map((item) => convertValue(ctx, doc, item, "schemas"))
+              : convertValue(ctx, doc, value, "schemas"),
+          );
           break;
         case "requestBody":
           setKey(out, key, convertValue(ctx, doc, value, "requestBodies"));
@@ -556,7 +664,9 @@ function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undef
           setKey(out, key, mapChildren(ctx, doc, value, "requestBodies"));
           break;
         case "parameters":
-          if (isSeq(value)) setKey(out, key, value.items.filter(isNode).map((item) => convertValue(ctx, doc, item, "parameters")));
+          if (isSeq(contextualValue)) {
+            setKey(out, key, contextualValue.items.filter(isNode).map((item) => convertValue(ctx, doc, item, "parameters")));
+          }
           else setKey(out, key, mapChildren(ctx, doc, value, "parameters"));
           break;
         case "responses":
@@ -566,10 +676,10 @@ function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undef
           setKey(out, key, mapChildren(ctx, doc, value, "headers"));
           break;
         case "examples":
-          setKey(out, key, mapChildren(ctx, doc, value, "examples"));
+          setKey(out, key, mapChildren(ctx, doc, value, "examples", "example"));
           break;
         case "links":
-          setKey(out, key, mapChildren(ctx, doc, value, "links"));
+          setKey(out, key, mapChildren(ctx, doc, value, "links", "link"));
           break;
         case "callbacks":
           setKey(out, key, convertCallbacks(ctx, doc, value));
@@ -604,7 +714,7 @@ function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undef
           setKey(
             out,
             key,
-            isNamedEntryContainer(key, value, detectVersion(doc) ?? detectVersion(ctx.entryDoc))
+            isNamedEntryContainer(key, contextualValue, detectVersion(doc) ?? detectVersion(ctx.entryDoc))
               ? mapChildren(ctx, doc, value, hint ?? "schemas")
               : convertValue(ctx, doc, value, hint),
           );
@@ -614,7 +724,7 @@ function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undef
   }
 
   if (isSeq(node)) {
-    return node.items.filter(isNode).map((item) => convertValue(ctx, doc, item, hint, literal));
+    return node.items.filter(isNode).map((item) => convertValue(ctx, doc, item, hint, literal, objectKind));
   }
 
   if (isScalar(node)) {
@@ -805,8 +915,6 @@ function substitutePreciseNumbers(value: unknown, state: SubstitutionState): unk
  * never silently drops user content, so these are kept verbatim under their original names.
  */
 function addUnreferencedEntryComponents(ctx: BundleContext, componentsNode: Node): void {
-  if (!isMap(componentsNode)) return;
-
   // Decide membership in a fixed pass over the post-walk reachability state *before* emitting any
   // component. Serializing a preserved component dereferences its content, which can mark other
   // entry components visited; if that ran interleaved with the retain check (as it once did),
@@ -814,18 +922,24 @@ function addUnreferencedEntryComponents(ctx: BundleContext, componentsNode: Node
   // components to preserve first, then serializing, makes retention independent of declaration
   // order — semantically equivalent component maps always retain the same members.
   const toEmit: Array<{ section: string; name: string; value: Node }> = [];
-  for (const sectionPair of componentsNode.items) {
-    const section = keyToString(sectionPair.key);
-    if (!isNode(sectionPair.value) || !isMap(sectionPair.value)) continue;
-    for (const entryPair of sectionPair.value.items) {
-      if (!isNode(entryPair.value)) continue;
-      const name = keyToString(entryPair.key);
-      const pointer = formatPointer(["components", section, name]);
-      const identityKey = `${ctx.entryDoc.filePath} ${pointer}`;
-      if (ctx.visitedEntryIdentities.has(identityKey) || ctx.cycleAssignments.has(identityKey)) continue;
-      toEmit.push({ section, name, value: entryPair.value });
+  withAliasTarget(ctx, ctx.entryDoc, componentsNode, undefined, (resolvedComponents) => {
+    if (!isMap(resolvedComponents)) return;
+    for (const sectionPair of resolvedComponents.items) {
+      const section = keyToString(sectionPair.key);
+      if (!isNode(sectionPair.value)) continue;
+      withAliasTarget(ctx, ctx.entryDoc, sectionPair.value, undefined, (resolvedSection) => {
+        if (!isMap(resolvedSection)) return;
+        for (const entryPair of resolvedSection.items) {
+          if (!isNode(entryPair.value)) continue;
+          const name = keyToString(entryPair.key);
+          const pointer = formatPointer(["components", section, name]);
+          const identityKey = `${ctx.entryDoc.filePath} ${pointer}`;
+          if (ctx.visitedEntryIdentities.has(identityKey) || ctx.cycleAssignments.has(identityKey)) continue;
+          toEmit.push({ section, name, value: entryPair.value });
+        }
+      });
     }
-  }
+  });
 
   for (const { section, name, value } of toEmit) {
     const content = convertValue(ctx, ctx.entryDoc, value, section);

@@ -1,4 +1,4 @@
-import { findRefs, resolveRef } from "@oasis/core";
+import { graphReferences, resolveRef } from "@oasis/core";
 import type { Rule } from "../types.ts";
 
 /**
@@ -12,7 +12,7 @@ export const noUnresolvedRef: Rule = {
   defaultSeverity: "error",
   check(ctx) {
     for (const doc of ctx.documents) {
-      for (const ref of findRefs(doc)) {
+      for (const ref of graphReferences(ctx.graph, doc)) {
         const result = resolveRef(ctx.graph, doc, ref.value, ref.range);
         if (!result.ok) ctx.report(result.diagnostic.range, result.diagnostic.message);
       }

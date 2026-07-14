@@ -1,6 +1,6 @@
 import { isMap, isNode, isScalar, isSeq } from "yaml";
 import type { Node } from "yaml";
-import { COMPONENT_SECTIONS, findRefs, resolveRef } from "@oasis/core";
+import { COMPONENT_SECTIONS, findRefs, graphReferences, resolveAlias, resolveRef } from "@oasis/core";
 import type { OasisDocument } from "@oasis/core";
 import { iterateOperations } from "../openapi-walk.ts";
 import { childAt, classifyMappingValue, keyToString } from "../util.ts";
@@ -10,10 +10,14 @@ import type { Rule, RuleContext } from "../types.ts";
 export const COMPONENT_CATEGORIES = COMPONENT_SECTIONS.filter((section) => section !== "pathItems");
 
 /** Collect security scheme names referenced by name in a `security` requirement array node. */
-function collectSecurityNames(securityNode: Node | undefined, into: Set<string>): void {
-  if (!securityNode || !isSeq(securityNode)) return;
-  for (const requirement of securityNode.items) {
-    if (!isNode(requirement) || !isMap(requirement)) continue;
+function collectSecurityNames(doc: OasisDocument, securityNode: Node | undefined, into: Set<string>): void {
+  if (!securityNode) return;
+  const resolvedSecurity = resolveAlias(securityNode, doc.yamlDoc) ?? securityNode;
+  if (!isSeq(resolvedSecurity)) return;
+  for (const item of resolvedSecurity.items) {
+    if (!isNode(item)) continue;
+    const requirement = resolveAlias(item, doc.yamlDoc) ?? item;
+    if (!isMap(requirement)) continue;
     for (const pair of requirement.items) into.add(keyToString(pair.key));
   }
 }
@@ -22,9 +26,9 @@ function collectSecurityNames(securityNode: Node | undefined, into: Set<string>)
 function collectUsedSecuritySchemeNames(ctx: RuleContext): Set<string> {
   const names = new Set<string>();
   const root = ctx.entryDoc.yamlDoc.contents;
-  if (root && isMap(root)) collectSecurityNames(childAt(root, "security"), names);
+  if (root && isMap(root)) collectSecurityNames(ctx.entryDoc, childAt(root, "security"), names);
   for (const op of iterateOperations(ctx.graph, ctx.entryDoc, ctx.version)) {
-    collectSecurityNames(childAt(op.node, "security"), names);
+    collectSecurityNames(op.doc, childAt(op.node, "security"), names);
   }
   return names;
 }
@@ -33,29 +37,35 @@ function collectUsedSecuritySchemeNames(ctx: RuleContext): Set<string> {
 function collectDiscriminatorMappingValues(doc: OasisDocument): string[] {
   const values: string[] = [];
   const root = doc.yamlDoc.contents;
-  if (isNode(root)) walk(root);
+  if (isNode(root)) walk(root, new Set());
   return values;
 
-  function walk(node: Node): void {
-    if (isMap(node)) {
-      for (const pair of node.items) {
-        if (isScalar(pair.key) && pair.key.value === "discriminator" && isNode(pair.value) && isMap(pair.value)) {
-          const mappingNode = childAt(pair.value, "mapping");
+  function walk(node: Node, ancestors: Set<Node>): void {
+    const resolved = resolveAlias(node, doc.yamlDoc);
+    if (!resolved || ancestors.has(resolved)) return;
+    ancestors.add(resolved);
+    if (isMap(resolved)) {
+      for (const pair of resolved.items) {
+        const value = isNode(pair.value) ? resolveAlias(pair.value, doc.yamlDoc) : undefined;
+        if (isScalar(pair.key) && pair.key.value === "discriminator" && value && isMap(value)) {
+          const mappingNode = childAt(value, "mapping");
           if (isMap(mappingNode)) {
             for (const mappingPair of mappingNode.items) {
-              if (isNode(mappingPair.value) && isScalar(mappingPair.value) && typeof mappingPair.value.value === "string") {
-                values.push(mappingPair.value.value);
+              if (isNode(mappingPair.value)) {
+                const value = resolveAlias(mappingPair.value, doc.yamlDoc) ?? mappingPair.value;
+                if (isScalar(value) && typeof value.value === "string") values.push(value.value);
               }
             }
           }
         }
-        if (isNode(pair.value)) walk(pair.value);
+        if (isNode(pair.value)) walk(pair.value, ancestors);
       }
-    } else if (isSeq(node)) {
-      for (const item of node.items) {
-        if (isNode(item)) walk(item);
+    } else if (isSeq(resolved)) {
+      for (const item of resolved.items) {
+        if (isNode(item)) walk(item, ancestors);
       }
     }
+    ancestors.delete(resolved);
   }
 }
 
@@ -110,7 +120,15 @@ export const noUnusedComponents: Rule = {
   defaultSeverity: "warn",
   check(ctx) {
     const used = new Set<string>();
-    for (const doc of usageDocuments(ctx)) {
+    for (const doc of ctx.documents) {
+      for (const ref of graphReferences(ctx.graph, doc)) {
+        const result = resolveRef(ctx.graph, doc, ref.value, ref.range);
+        if (result.ok) markUsed(used, result.doc.filePath, result.pointer);
+      }
+    }
+    // Sibling-entry documents arrive without their owning graph, so retain syntactic discovery for
+    // that cross-entry compatibility path. Documents owned by this graph always use semantic refs.
+    for (const doc of ctx.externalDocuments ?? []) {
       for (const ref of findRefs(doc)) {
         const result = resolveRef(ctx.graph, doc, ref.value, ref.range);
         if (result.ok) markUsed(used, result.doc.filePath, result.pointer);

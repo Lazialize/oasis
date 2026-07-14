@@ -1,6 +1,6 @@
 import { isMap, isNode, isScalar, isSeq } from "yaml";
 import type { Node } from "yaml";
-import { resolveRef } from "@oasis/core";
+import { resolveAlias, resolveRef } from "@oasis/core";
 import type { OasisDocument } from "@oasis/core";
 import { iterateSchemas, walkSchemaTree } from "../openapi-walk.ts";
 import { childAt, classifyMappingValue, isRefObject, keyToString, resolveMaybeRef } from "../util.ts";
@@ -62,7 +62,8 @@ function checkMapping(ctx: RuleContext, doc: OasisDocument, mappingNode: Node, l
 
   for (const pair of mappingNode.items) {
     const key = keyToString(pair.key);
-    if (!isNode(pair.value) || !isScalar(pair.value) || typeof pair.value.value !== "string") {
+    const value = isNode(pair.value) ? resolveAlias(pair.value, doc.yamlDoc) ?? pair.value : undefined;
+    if (!isScalar(value) || typeof value.value !== "string") {
       ctx.report(
         { doc, node: isNode(pair.value) ? pair.value : mappingNode },
         `${label} "discriminator.mapping" entry "${key}" must have a string value.`,
@@ -70,14 +71,14 @@ function checkMapping(ctx: RuleContext, doc: OasisDocument, mappingNode: Node, l
       continue;
     }
 
-    const target = classifyMappingValue(pair.value.value);
+    const target = classifyMappingValue(value.value);
     if (target.kind === "external") continue; // absolute non-filesystem URI, not a workspace target
 
     const result = resolveRef(ctx.graph, doc, target.ref);
     if (!result.ok) {
       ctx.report(
-        { doc, node: pair.value },
-        `${label} "discriminator.mapping" entry "${key}" -> "${pair.value.value}" does not resolve to a schema in the workspace.`,
+        { doc, node: value },
+        `${label} "discriminator.mapping" entry "${key}" -> "${value.value}" does not resolve to a schema in the workspace.`,
       );
     }
   }

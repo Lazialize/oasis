@@ -1,4 +1,10 @@
-import { findRefs, isExternalUriReference, parseRefString, rangeFromOffsets, resolveFileReference } from "@oasis/core";
+import {
+  graphReferences,
+  isExternalUriReference,
+  parseRefString,
+  rangeFromOffsets,
+  resolveFileReference,
+} from "@oasis/core";
 import type { OasisDocument, Range } from "@oasis/core";
 import { resolveDocContext } from "../workspace.ts";
 import type { ServerContext } from "../workspace.ts";
@@ -33,7 +39,7 @@ export async function getDocumentLinks(ctx: ServerContext, params: DocumentLinkP
   const { graph, doc } = docCtx;
 
   const results: DocumentLinkResult[] = [];
-  for (const ref of findRefs(doc)) {
+  for (const ref of graphReferences(graph, doc)) {
     const { filePart } = parseRefString(ref.value);
     if (filePart === "" || isExternalUriReference(filePart)) continue;
 

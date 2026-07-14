@@ -85,16 +85,35 @@ export function looksLikeMappingRef(value: string): boolean {
 export interface FoundRef {
   value: string;
   range: Range;
+  /** The source scalar, retained for source-preserving subtree rewrites. */
+  node: Scalar;
+  /** Semantic kind inherited by a referenced target reached from this Reference Object. */
+  targetKind?: OpenApiObjectKind;
 }
 
 /**
  * Cache of `findRefs` results, keyed by document identity. A full AST walk over a large document
  * is not free, and several independent lint rules (plus graph loading itself) each call
  * `findRefs` on every document in the workspace; memoizing avoids re-walking the same document
- * repeatedly within (and across) a single lint run. Keyed by the `OasisDocument` object itself,
- * so a re-parsed document (e.g. after an LSP edit) naturally gets a fresh, uncached entry.
+ * repeatedly within (and across) a single lint run. Keyed by the scoped root AST node and its
+ * semantic object kind, so a re-parsed document naturally gets fresh entries and the same target
+ * can safely be traversed in more than one semantic context.
  */
-const findRefsCache = new WeakMap<OasisDocument, FoundRef[]>();
+const findRefsCache = new WeakMap<Node, Map<string, FoundRef[]>>();
+
+export type OpenApiObjectKind = "example" | "link";
+
+function namedEntryKind(key: string, value: Node): OpenApiObjectKind | undefined {
+  if (!isMap(value)) return undefined;
+  if (key === "examples") return "example";
+  if (key === "links") return "link";
+  return undefined;
+}
+
+function isAnyValuedField(kind: OpenApiObjectKind | undefined, key: string): boolean {
+  return (kind === "example" && key === "value") ||
+    (kind === "link" && (key === "parameters" || key === "requestBody"));
+}
 
 /**
  * Find every `$ref: "..."` occurrence within a document's AST. Resolves `Alias` nodes to their
@@ -102,54 +121,20 @@ const findRefsCache = new WeakMap<OasisDocument, FoundRef[]>();
  * skips descent-tracked "literal data" subtrees (see `isLiteralDataKey`) so a `$ref`-shaped value
  * used as plain example/default/enum/const data isn't mistaken for a real reference.
  */
-export function findRefs(doc: OasisDocument): FoundRef[] {
-  const cached = findRefsCache.get(doc);
+export function findRefs(doc: OasisDocument, scopeNode?: Node, scopeKind?: OpenApiObjectKind): FoundRef[] {
+  const root = scopeNode ?? doc.yamlDoc.contents;
+  if (!isNode(root)) return [];
+  const cacheKey = scopeKind ?? "document";
+  const rootCache = findRefsCache.get(root);
+  const cached = rootCache?.get(cacheKey);
   if (cached) return cached;
 
   const results: FoundRef[] = [];
-  const root = doc.yamlDoc.contents;
-  if (isNode(root)) {
-    walkSubtreeRefs(doc, root, (value) => {
-      const range = value.range;
-      results.push({
-        value: value.value as string,
-        range: range ? rangeFromOffsets(doc.filePath, doc.lineCounter, range[0], range[1]) : zeroRange(doc.filePath),
-      });
-    });
-  }
-  findRefsCache.set(doc, results);
-  return results;
-}
-
-/**
- * Find every genuine reference within the subtree rooted at `root`, returning the scalar value node
- * of each — both `{$ref: "..."}` values and `discriminator.mapping` URI values. Uses the exact same
- * literal-data, container, and discriminator semantics as `findRefs` (they share `walkSubtreeRefs`),
- * so a `$ref`-shaped scalar buried in `example`/`default`/`enum`/`const` literal data is *not*
- * returned, while a discriminator mapping URI *is*.
- *
- * `root` is assumed to sit in a normal Schema/Object context (non-literal, non-container,
- * non-mapping) — e.g. an inline schema or a `$ref` target being relocated. This is the counterpart
- * of `findRefs` for an arbitrary subtree rather than the whole document, and is not cached.
- */
-export function findSubtreeRefs(doc: OasisDocument, root: Node): Scalar[] {
-  const results: Scalar[] = [];
-  walkSubtreeRefs(doc, root, (value) => results.push(value));
-  return results;
-}
-
-/**
- * Shared semantic reference walk used by both `findRefs` and `findSubtreeRefs`. Invokes `onRef` with
- * the scalar value node of every genuine string reference discovered under `root`, resolving `Alias`
- * nodes to their anchored targets as it descends and skipping literal-data subtrees.
- */
-function walkSubtreeRefs(doc: OasisDocument, root: Node, onRef: (value: Scalar) => void): void {
   const version = detectVersion(doc);
-  // Two seen-sets (one per literal-context) so a shared anchor visited once under a literal-data
-  // subtree doesn't suppress a later, genuine visit of the same node reached non-literally (or
-  // vice versa) — each context is still bounded on its own against alias cycles/diamonds.
-  const seenRefContext = new Set<Node>();
-  const seenLiteralContext = new Set<Node>();
+  // A shared alias target may be reached with different semantic meanings. Keep a seen-set per
+  // complete traversal context so one use as literal Example data cannot suppress another use as
+  // a genuine Link or schema reference (and vice versa).
+  const seenByContext = new Map<string, Set<Node>>();
 
   // `inContainer` marks that `node`'s own keys are user/spec-named entries (see `isContainerKey`),
   // so the literal-data key check is suppressed for them — an entry named `default`/`example` under
@@ -159,10 +144,23 @@ function walkSubtreeRefs(doc: OasisDocument, root: Node, onRef: (value: Scalar) 
   // just any map that happens to be reached via a key named "mapping" — a Schema Object property
   // named "mapping" is plain data, not a discriminator mapping). It's only ever set true for the
   // direct `mapping` child of a node reached via `isDiscriminatorObject`.
-  function walk(node: Node, literal: boolean, inContainer: boolean, isMappingObject: boolean, isDiscriminatorObject = false): void {
+  function walk(
+    node: Node,
+    literal: boolean,
+    inContainer: boolean,
+    isMappingObject: boolean,
+    isDiscriminatorObject = false,
+    objectKind?: OpenApiObjectKind,
+    entryKind?: OpenApiObjectKind,
+  ): void {
     const resolved = resolveAlias(node, doc.yamlDoc);
     if (!resolved) return;
-    const seen = literal ? seenLiteralContext : seenRefContext;
+    const contextKey = [literal, inContainer, isMappingObject, isDiscriminatorObject, objectKind, entryKind].join(":");
+    let seen = seenByContext.get(contextKey);
+    if (!seen) {
+      seen = new Set<Node>();
+      seenByContext.set(contextKey, seen);
+    }
     if (seen.has(resolved)) return;
     seen.add(resolved);
 
@@ -170,9 +168,17 @@ function walkSubtreeRefs(doc: OasisDocument, root: Node, onRef: (value: Scalar) 
       if (!literal) {
         for (const pair of resolved.items) {
           const key = pair.key;
-          const value = pair.value;
+          const value = isNode(pair.value) ? resolveAlias(pair.value, doc.yamlDoc) ?? pair.value : pair.value;
           if (isScalar(key) && key.value === "$ref" && isScalar(value) && typeof value.value === "string") {
-            onRef(value);
+            const range = value.range;
+            results.push({
+              value: value.value,
+              node: value,
+              targetKind: objectKind,
+              range: range
+                ? rangeFromOffsets(doc.filePath, doc.lineCounter, range[0], range[1])
+                : zeroRange(doc.filePath),
+            });
           }
         }
         // `discriminator.mapping` entries are references expressed as plain strings (e.g.
@@ -180,17 +186,29 @@ function walkSubtreeRefs(doc: OasisDocument, root: Node, onRef: (value: Scalar) 
         // A bare component name (e.g. `dog: Dog`) is left alone (see `looksLikeMappingRef`).
         if (isMappingObject) {
           for (const pair of resolved.items) {
-            const value = pair.value;
+            const value = isNode(pair.value) ? resolveAlias(pair.value, doc.yamlDoc) ?? pair.value : pair.value;
             if (isScalar(value) && typeof value.value === "string" && looksLikeMappingRef(value.value)) {
-              onRef(value);
+              const range = value.range;
+              results.push({
+                value: value.value,
+                node: value,
+                range: range
+                  ? rangeFromOffsets(doc.filePath, doc.lineCounter, range[0], range[1])
+                  : zeroRange(doc.filePath),
+              });
             }
           }
         }
       }
       for (const pair of resolved.items) {
         if (!isNode(pair.value)) continue;
+        // Container/literal semantics belong to the value exposed at this occurrence. An Alias is
+        // only syntax, so classify its resolved target once and carry that same node into the walk.
+        const contextualValue = resolveAlias(pair.value, doc.yamlDoc) ?? pair.value;
         const keyStr = isScalar(pair.key) ? String(pair.key.value) : undefined;
-        const childLiteral = literal || (!inContainer && keyStr !== undefined && isLiteralDataKey(keyStr, pair.value));
+        const childLiteral = literal ||
+          (keyStr !== undefined && isAnyValuedField(objectKind, keyStr)) ||
+          (!inContainer && keyStr !== undefined && isLiteralDataKey(keyStr, contextualValue));
         // `!inContainer` (mirroring `childLiteral`): once we're inside a container, its entries are
         // user/spec-named (a component/property/status-code name), so an entry that happens to be
         // named like a container keyword (`parameters`, `headers`, `schemas`, ...) is a plain object
@@ -199,22 +217,45 @@ function walkSubtreeRefs(doc: OasisDocument, root: Node, onRef: (value: Scalar) 
         // be mistaken for a real reference. A named object resets `inContainer`, so a genuine nested
         // container (e.g. `Schema.properties`) is still recognised on the next descent.
         const childContainer =
-          !inContainer && !literal && keyStr !== undefined && isNamedEntryContainer(keyStr, pair.value, version);
+          !inContainer && !literal && keyStr !== undefined && isNamedEntryContainer(keyStr, contextualValue, version);
         // Only a `mapping` key reached as the *direct* child of a Discriminator Object counts —
         // an ordinary Schema Object property that happens to be named "mapping" (e.g.
         // `properties: { mapping: { type: string } }`) is plain data, not a discriminator mapping.
-        const childIsMappingObject = !literal && isDiscriminatorObject && keyStr === "mapping" && isMap(pair.value);
-        const childIsDiscriminatorObject = !literal && keyStr === "discriminator" && isMap(pair.value);
-        walk(pair.value, childLiteral, childContainer, childIsMappingObject, childIsDiscriminatorObject);
+        const childIsMappingObject = !literal && isDiscriminatorObject && keyStr === "mapping" && isMap(contextualValue);
+        const childIsDiscriminatorObject = !literal && keyStr === "discriminator" && isMap(contextualValue);
+        const childObjectKind = inContainer ? entryKind : undefined;
+        const childEntryKind = !inContainer && keyStr !== undefined ? namedEntryKind(keyStr, contextualValue) : undefined;
+        walk(
+          contextualValue,
+          childLiteral,
+          childContainer,
+          childIsMappingObject,
+          childIsDiscriminatorObject,
+          childObjectKind,
+          childEntryKind,
+        );
       }
     } else if (isSeq(resolved)) {
       for (const item of resolved.items) {
-        if (isNode(item)) walk(item, literal, false, false, false);
+        if (isNode(item)) walk(item, literal, false, false, false, objectKind);
       }
     }
   }
 
-  walk(root, false, false, false, false);
+  walk(root, false, false, false, false, scopeKind);
+  const cache = rootCache ?? new Map<string, FoundRef[]>();
+  cache.set(cacheKey, results);
+  if (!rootCache) findRefsCache.set(root, cache);
+  return results;
+}
+
+/**
+ * Find the source scalar for every genuine reference in `root`, using the same semantic traversal
+ * as graph discovery. Literal Any-valued fields stay opaque, while Reference Objects and
+ * discriminator mappings retain their exact source nodes for relocation edits.
+ */
+export function findSubtreeRefs(doc: OasisDocument, root: Node, scopeKind?: OpenApiObjectKind): Scalar[] {
+  return findRefs(doc, root, scopeKind).map((ref) => ref.node);
 }
 
 export interface ResolvedRef {

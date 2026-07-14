@@ -8,6 +8,7 @@ import {
   offsetAtPosition,
   parsePointer,
   rangeFromOffsets,
+  resolveAlias,
   resolveRef,
 } from "@oasis/core";
 import type { OasisDocument, Position, Range, WorkspaceGraph } from "@oasis/core";
@@ -74,7 +75,7 @@ export function collectNameBasedRefs(doc: OasisDocument): NameBasedRef[] {
   const results: NameBasedRef[] = [];
   const root = doc.yamlDoc.contents;
   const rootKind = inferRootKind(doc);
-  if (isNode(root)) walk(root, []);
+  if (isNode(root)) walk(root, [], new Set());
   return results;
 
   function scalarRange(node: unknown): Range | undefined {
@@ -82,23 +83,29 @@ export function collectNameBasedRefs(doc: OasisDocument): NameBasedRef[] {
     return rangeFromOffsets(doc.filePath, doc.lineCounter, node.range[0], node.range[1]);
   }
 
-  function walk(node: Node, path: string[]): void {
-    if (isMap(node)) {
+  function walk(node: Node, path: string[], ancestors: Set<Node>): void {
+    const resolved = resolveAlias(node, doc.yamlDoc);
+    if (!resolved || ancestors.has(resolved)) return;
+    ancestors.add(resolved);
+
+    if (isMap(resolved)) {
       // The kind of *this* map: the object whose fields (`security`, `discriminator`) we inspect.
       const kind = classifyPointer(formatPointer(path), rootKind);
       const semanticSecurity = kind === "root" || kind === "operation";
       const semanticSchema = kind === "schema";
 
-      for (const pair of node.items) {
+      for (const pair of resolved.items) {
         const keyStr = isScalar(pair.key) ? String(pair.key.value) : undefined;
-        const value = pair.value;
+        const value = isNode(pair.value) ? resolveAlias(pair.value, doc.yamlDoc) : undefined;
 
         // Security Requirement arrays: `security: [ { SchemeName: [scopes] }, ... ]`, but only where
         // `security` is a genuine field of the OpenAPI/Operation object, not literal example data.
         if (semanticSecurity && keyStr === "security" && isSeq(value)) {
           for (const item of value.items) {
-            if (!isNode(item) || !isMap(item)) continue;
-            for (const reqPair of item.items) {
+            if (!isNode(item)) continue;
+            const requirement = resolveAlias(item, doc.yamlDoc);
+            if (!requirement || !isMap(requirement)) continue;
+            for (const reqPair of requirement.items) {
               if (!isScalar(reqPair.key)) continue;
               const range = scalarRange(reqPair.key);
               if (range) results.push({ section: "securitySchemes", name: String(reqPair.key.value), range });
@@ -110,23 +117,28 @@ export function collectNameBasedRefs(doc: OasisDocument): NameBasedRef[] {
         // on an actual Schema Object — never a `discriminator`-shaped value inside literal data.
         if (semanticSchema && keyStr === "discriminator" && isMap(value)) {
           const mapping = value.items.find((p) => isScalar(p.key) && p.key.value === "mapping")?.value;
-          if (isNode(mapping) && isMap(mapping)) {
-            for (const mapPair of mapping.items) {
-              if (!isScalar(mapPair.value) || typeof mapPair.value.value !== "string") continue;
-              if (looksLikeMappingRef(mapPair.value.value)) continue; // a URI/pointer form, handled by findRefs
-              const range = scalarRange(mapPair.value);
-              if (range) results.push({ section: "schemas", name: mapPair.value.value, range });
+          const resolvedMapping = isNode(mapping) ? resolveAlias(mapping, doc.yamlDoc) : undefined;
+          if (resolvedMapping && isMap(resolvedMapping)) {
+            for (const mapPair of resolvedMapping.items) {
+              if (!isNode(mapPair.value)) continue;
+              const mapValue = resolveAlias(mapPair.value, doc.yamlDoc) ?? mapPair.value;
+              if (!isScalar(mapValue) || typeof mapValue.value !== "string") continue;
+              if (looksLikeMappingRef(mapValue.value)) continue; // a URI/pointer form, handled by findRefs
+              const range = scalarRange(mapValue);
+              if (range) results.push({ section: "schemas", name: mapValue.value, range });
             }
           }
         }
 
-        if (isNode(value) && keyStr !== undefined) walk(value, [...path, keyStr]);
+        if (isNode(pair.value) && keyStr !== undefined) walk(pair.value, [...path, keyStr], ancestors);
       }
-    } else if (isSeq(node)) {
-      node.items.forEach((item, index) => {
-        if (isNode(item)) walk(item, [...path, String(index)]);
+    } else if (isSeq(resolved)) {
+      resolved.items.forEach((item, index) => {
+        if (isNode(item)) walk(item, [...path, String(index)], ancestors);
       });
     }
+
+    ancestors.delete(resolved);
   }
 }
 

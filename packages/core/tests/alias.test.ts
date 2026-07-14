@@ -26,6 +26,23 @@ describe("YAML anchor/alias handling in core walkers", () => {
     expect(refs.filter((v) => v === "./pet.yaml#/Pet").length).toBe(1);
   });
 
+  test("a literal alias use does not suppress a later genuine semantic use", () => {
+    const doc = parseDocument([
+      "openapi: 3.1.0",
+      "components:",
+      "  examples:",
+      "    Payload:",
+      "      value: &shared",
+      "        $ref: './pet.yaml#/Pet'",
+      "  schemas:",
+      "    Use:",
+      "      properties:",
+      "        pet: *shared",
+    ].join("\n"), path);
+
+    expect(findRefs(doc).map((ref) => ref.value)).toEqual(["./pet.yaml#/Pet"]);
+  });
+
   test("nodeAtPointer traverses through an alias to the anchored target", () => {
     const text = [
       "components:",
