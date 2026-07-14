@@ -8,6 +8,8 @@ import {
   keyToString,
   looksLikeMappingRef,
   type OasisDocument,
+  PreciseNumber,
+  preserveNumericLiteral,
   type Range,
   type ResolvedRef,
   type WorkspaceGraph,
@@ -606,7 +608,16 @@ function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undef
     return node.items.filter(isNode).map((item) => convertValue(ctx, doc, item, hint, literal));
   }
 
-  if (isScalar(node)) return node.value;
+  if (isScalar(node)) {
+    // Preserve numeric literals whose exact value the composed JS `Number` has rounded away
+    // (integers past 2^53, high-precision/exponent decimals). `Scalar.source` retains the original
+    // text; serialization emits it verbatim. Non-numeric scalars (and numbers that round-trip
+    // exactly) pass through unchanged.
+    if (typeof node.value === "number" && typeof node.source === "string") {
+      return preserveNumericLiteral(node.value, node.source);
+    }
+    return node.value;
+  }
 
   return undefined;
 }
@@ -689,9 +700,94 @@ export function bundle(graph: WorkspaceGraph, options: BundleOptions = {}): Bund
     out.components = ctx.componentsOutput;
   }
 
-  const output = format === "json" ? `${JSON.stringify(out, null, 2)}\n` : yamlStringify(out);
+  const output = serializeOutput(out, format);
 
   return { output, diagnostics };
+}
+
+// Placeholder tokens that both YAML and JSON emit as an ordinary scalar (letters/digits only, so
+// YAML never quotes them and never reads them as numbers). Each serialization run draws a random
+// base so document strings can't collide with a token; each occurrence is unique via the running
+// index in the middle.
+const PRECISE_TOKEN_PREFIX = "OASISPRECISENUMBER";
+const PRECISE_TOKEN_SUFFIX = "PRESERVEDEND";
+
+function randomTokenBase(): string {
+  // base36, uppercased so the token stays purely alphanumeric; `|| "X"` guards the (theoretical)
+  // Math.random() === 0 empty-string case.
+  return `${PRECISE_TOKEN_PREFIX}${(Math.random().toString(36).slice(2).toUpperCase() || "X")}X`;
+}
+
+interface Substitution {
+  token: string;
+  source: string;
+}
+
+/**
+ * Serialize the bundled document, splicing exact numeric literals back in. `PreciseNumber` values
+ * can't survive `JSON.stringify`/yaml stringify (JSON would quote or reject them; yaml's number
+ * stringifier re-rounds via `String(value)`), so each is first replaced with a unique placeholder
+ * string and then the serialized placeholder is swapped for the raw literal. This keeps JSON output
+ * from ever throwing on internal BigInt-style values and preserves the literal byte-for-byte in
+ * both formats. If any document string happens to contain the run's random token base, a fresh
+ * base is drawn and the substitution retried, so tokens can never collide with document content.
+ */
+function serializeOutput(out: Record<string, unknown>, format: "yaml" | "json"): string {
+  let subs: Substitution[];
+  let prepared: Record<string, unknown>;
+  for (;;) {
+    const state: SubstitutionState = { base: randomTokenBase(), subs: [], collided: false };
+    const result = substitutePreciseNumbers(out, state) as Record<string, unknown>;
+    if (!state.collided) {
+      subs = state.subs;
+      prepared = result;
+      break;
+    }
+  }
+  let text = format === "json" ? `${JSON.stringify(prepared, null, 2)}\n` : yamlStringify(prepared);
+  for (const { token, source } of subs) {
+    // Each token is unique, so a single (first-match) replace targets exactly its own insertion.
+    // In JSON the placeholder is a quoted string; strip the quotes so the literal stays a number.
+    text = format === "json" ? text.replace(`"${token}"`, source) : text.replace(token, source);
+  }
+  return text;
+}
+
+interface SubstitutionState {
+  base: string;
+  subs: Substitution[];
+  /** Set when a document string contains `base`; the caller redraws the base and retries. */
+  collided: boolean;
+}
+
+/** Deep-copy `value`, replacing every `PreciseNumber` with a unique placeholder token (recorded in `state.subs`). */
+function substitutePreciseNumbers(value: unknown, state: SubstitutionState): unknown {
+  if (value instanceof PreciseNumber) {
+    const token = `${state.base}${state.subs.length}${PRECISE_TOKEN_SUFFIX}`;
+    state.subs.push({ token, source: value.source });
+    return token;
+  }
+  if (typeof value === "string") {
+    if (value.includes(state.base)) state.collided = true;
+    return value;
+  }
+  if (Array.isArray(value)) return value.map((item) => substitutePreciseNumbers(item, state));
+  if (value !== null && typeof value === "object") {
+    const copy: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      if (key.includes(state.base)) state.collided = true;
+      // `defineProperty` instead of `copy[key] = ...`: a plain assignment to a `__proto__` key
+      // silently sets the prototype instead of an own property, dropping user data (#99).
+      Object.defineProperty(copy, key, {
+        value: substitutePreciseNumbers(child, state),
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      });
+    }
+    return copy;
+  }
+  return value;
 }
 
 /**
