@@ -62,6 +62,27 @@ describe("getDocumentLinks", () => {
     expect(text.slice(link.range.startOffset, link.range.endOffset)).toBe("./paths/pets.yaml");
   });
 
+  test("percent-encoded relative filenames link to their decoded filesystem path", async () => {
+    const path = "/repo/entry.yaml";
+    const fragPath = "/repo/shared file.yaml";
+    const text = [
+      "openapi: 3.1.0",
+      "info: { title: Test, version: '1' }",
+      "paths:",
+      "  /pets:",
+      "    $ref: './shared%20file.yaml#/get'",
+    ].join("\n");
+    const ctx = createServerContext(new InMemoryFileSystem({
+      [path]: text,
+      [fragPath]: "get: { responses: { '200': { description: OK } } }\n",
+    }));
+
+    const links = await getDocumentLinks(ctx, { path });
+
+    expect(links).toHaveLength(1);
+    expect(links[0]?.targetPath).toBe(fragPath);
+  });
+
   test("URL $ref values are skipped", async () => {
     const path = "/repo/entry.yaml";
     const text = [

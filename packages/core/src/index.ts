@@ -12,7 +12,7 @@ export type { OpenApiVersion } from "./version.ts";
 export { detectVersion } from "./version.ts";
 
 export type { FileSystem } from "./filesystem.ts";
-export { InMemoryFileSystem, NodeFileSystem } from "./filesystem.ts";
+export { InMemoryFileSystem, NodeFileSystem, resolveFileReference } from "./filesystem.ts";
 
 export type { FoundRef, RefParts, ResolvedRef, ResolveRefResult, UnresolvedRef } from "./ref.ts";
 export {

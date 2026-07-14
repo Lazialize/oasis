@@ -3,7 +3,7 @@ import { isMap, isScalar } from "yaml";
 import type { YAMLMap } from "yaml";
 import { NodeFileSystem, InMemoryFileSystem } from "../src/filesystem.ts";
 import { allDiagnostics, loadWorkspaceGraph } from "../src/graph.ts";
-import { findRefs, resolveRef } from "../src/ref.ts";
+import { findRefs, parseRefString, resolveRef } from "../src/ref.ts";
 import { detectVersion } from "../src/version.ts";
 
 const fixturesRoot = `${import.meta.dir}/fixtures`;
@@ -88,6 +88,19 @@ describe("unresolved $ref", () => {
 });
 
 describe("percent-encoded $ref file part", () => {
+  test("parseRefString preserves the raw file part for URI classification", () => {
+    expect(parseRefString("foo%3Abar.yaml#/Foo")).toEqual({
+      filePart: "foo%3Abar.yaml",
+      pointer: "/Foo",
+    });
+  });
+
+  test("FileSystem.resolve keeps native percent characters literal", () => {
+    for (const fs of [new NodeFileSystem(), new InMemoryFileSystem()]) {
+      expect(fs.resolve("/virtual/oasis.config.jsonc", "foo%20.yaml")).toBe("/virtual/foo%20.yaml");
+    }
+  });
+
   test("a %20-encoded file part resolves to the real (space-containing) file name", async () => {
     const fs = new NodeFileSystem();
     const entry = `${fixturesRoot}/percent-encoded/entry.yaml`;
@@ -112,6 +125,61 @@ describe("percent-encoded $ref file part", () => {
       result = resolveRef(graph, entryDoc, "./bad%.yaml#/x");
     }).not.toThrow();
     expect(result!.ok).toBe(false);
+  });
+
+  test("relative encoded delimiters and Unicode are decoded only after URI classification", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": [
+        "openapi: 3.1.0",
+        "components:",
+        "  schemas:",
+        "    Colon: { $ref: 'foo%3Abar.yaml#/Foo' }",
+        "    Hash: { $ref: 'hash%23name.yaml#/Hash' }",
+        "    Percent: { $ref: 'percent%25name.yaml#/Percent' }",
+        "    Unicode: { $ref: 'caf%C3%A9.yaml#/Unicode' }",
+      ].join("\n"),
+      "/virtual/foo:bar.yaml": "Foo: { type: string }\n",
+      "/virtual/hash#name.yaml": "Hash: { type: string }\n",
+      "/virtual/percent%name.yaml": "Percent: { type: string }\n",
+      "/virtual/café.yaml": "Unicode: { type: string }\n",
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const entryDoc = graph.documents.get("/virtual/entry.yaml")!;
+
+    expect(graph.documents.size).toBe(5);
+    expect(allDiagnostics(graph)).toEqual([]);
+    for (const ref of [
+      "foo%3Abar.yaml#/Foo",
+      "hash%23name.yaml#/Hash",
+      "percent%25name.yaml#/Percent",
+      "caf%C3%A9.yaml#/Unicode",
+    ]) {
+      expect(resolveRef(graph, entryDoc, ref).ok).toBe(true);
+    }
+  });
+
+  test("file URLs use URL path semantics in both filesystem implementations", async () => {
+    const nodeFs = new NodeFileSystem();
+    const entry = `${fixturesRoot}/percent-encoded/entry.yaml`;
+    const fileUrl = new URL("./fixtures/percent-encoded/petstore%20v2.yaml", import.meta.url).href;
+    const graph = await loadWorkspaceGraph(nodeFs, entry);
+    const entryDoc = graph.documents.get(entry)!;
+    const nodeResult = resolveRef(graph, entryDoc, `${fileUrl}#/components/schemas/Pet`);
+
+    expect(nodeResult.ok).toBe(true);
+    if (!nodeResult.ok) throw new Error("expected resolved file URL");
+    expect(nodeResult.doc.filePath).toBe(`${fixturesRoot}/percent-encoded/petstore v2.yaml`);
+
+    const memoryFs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": "openapi: 3.1.0\ncomponents:\n  schemas:\n    Foo:\n      $ref: 'file:///virtual/ext%20file.yaml#/Foo'\n",
+      "/virtual/ext file.yaml": "Foo: { type: string }\n",
+    });
+    const memoryGraph = await loadWorkspaceGraph(memoryFs, "/virtual/entry.yaml");
+    const memoryDoc = memoryGraph.documents.get("/virtual/entry.yaml")!;
+
+    expect(memoryGraph.documents.has("/virtual/ext file.yaml")).toBe(true);
+    expect(resolveRef(memoryGraph, memoryDoc, "file:///virtual/ext%20file.yaml#/Foo").ok).toBe(true);
+    expect(resolveRef(memoryGraph, memoryDoc, "file://localhost/virtual/ext%20file.yaml#/Foo").ok).toBe(true);
   });
 });
 

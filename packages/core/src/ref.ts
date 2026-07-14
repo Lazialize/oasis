@@ -2,8 +2,8 @@ import { isMap, isNode, isScalar, isSeq } from "yaml";
 import type { Node } from "yaml";
 import { resolveAnchor } from "./anchor.ts";
 import { nodeAtPointer } from "./document.ts";
+import { resolveFileReference } from "./filesystem.ts";
 import { resolveAlias } from "./walk.ts";
-import { safeDecodeURIComponent } from "./pointer.ts";
 import type { OasisDocument } from "./parse.ts";
 import { rangeFromOffsets, zeroRange } from "./position.ts";
 import type { Diagnostic, Range } from "./types.ts";
@@ -18,17 +18,16 @@ export interface RefParts {
 }
 
 /**
- * Split a `$ref` string like "./other%20v2.yaml#/components/schemas/Foo" into its parts. `$ref` is
- * a URI-reference, so the file part may be percent-encoded (e.g. a space as `%20`); it's decoded
- * here so the file system sees the real file name. The fragment/pointer part is left as-is —
- * `parsePointer` decodes each of its segments individually, since decoding the fragment as a whole
- * would collide with `/` used as the pointer's own segment separator.
+ * Split a `$ref` string like "./other%20v2.yaml#/components/schemas/Foo" into its raw URI parts.
+ * Neither part is decoded here: URI classification must see the original file part (otherwise an
+ * encoded colon in a relative filename can become an apparent scheme), and `parsePointer` decodes
+ * fragment segments individually so an encoded `/` cannot become a pointer separator.
  */
 export function parseRefString(ref: string): RefParts {
   const hashIdx = ref.indexOf("#");
   const filePart = hashIdx === -1 ? ref : ref.slice(0, hashIdx);
   const pointer = hashIdx === -1 ? "" : ref.slice(hashIdx + 1);
-  return { filePart: safeDecodeURIComponent(filePart), pointer };
+  return { filePart, pointer };
 }
 
 /**
@@ -247,7 +246,8 @@ export function resolveRef(
     };
   }
 
-  const targetPath = filePart === "" ? fromDoc.filePath : graph.fileSystem.resolve(fromDoc.filePath, filePart);
+  const targetPath =
+    filePart === "" ? fromDoc.filePath : resolveFileReference(graph.fileSystem, fromDoc.filePath, filePart);
   const targetDoc = graph.documents.get(targetPath);
 
   if (!targetDoc) {

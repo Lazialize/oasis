@@ -99,6 +99,20 @@ describe("project mode", () => {
     expect(fragDiags.some((d) => d.message.includes('Missing required field "openapi"'))).toBe(false);
   });
 
+  test("config entry paths keep literal percent characters", async () => {
+    const percentEntryPath = `${ROOT}/api%20v1.yaml`;
+    const files = {
+      [CONFIG_PATH]: `{ "entries": ["api%20v1.yaml"] }`,
+      [percentEntryPath]: "openapi: 3.1.0\ninfo: { title: Percent, version: '1' }\npaths: {}\n",
+    };
+    const ctx = createServerContext(new InMemoryFileSystem(files));
+
+    await scanWorkspaceRootsForProjects(ctx, [ROOT]);
+
+    expect(ctx.projects.get(CONFIG_PATH)?.entryPaths).toEqual([percentEntryPath]);
+    expect(ctx.projects.get(CONFIG_PATH)?.warnings).toEqual([]);
+  });
+
   test("fragment file with no openapi key is a project member: definition resolves cross-file to the entry", async () => {
     const ctx = createServerContext(new InMemoryFileSystem(projectFiles()));
     await scanWorkspaceRootsForProjects(ctx, [ROOT]);
