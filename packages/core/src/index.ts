@@ -22,7 +22,7 @@ export {
 export type { FileSystem } from "./filesystem.ts";
 export { InMemoryFileSystem, NodeFileSystem, resolveFileReference } from "./filesystem.ts";
 
-export type { FoundRef, OpenApiObjectKind, RefParts, ResolvedRef, ResolveRefResult, UnresolvedRef } from "./ref.ts";
+export type { FoundRef, OpenApiObjectKind, ReferenceKind, RefParts, ResolvedRef, ResolveRefResult, UnresolvedRef } from "./ref.ts";
 export {
   CONTAINER_KEYS,
   findRefs,
