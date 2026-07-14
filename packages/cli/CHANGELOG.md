@@ -1,5 +1,45 @@
 # @oasis/cli
 
+## 0.9.0
+
+### Patch Changes
+
+- [#68](https://github.com/Lazialize/oasis/pull/68) [`23b466f`](https://github.com/Lazialize/oasis/commit/23b466f5ae7f8e0c98eaa663ae224de657d34577) Thanks [@Lazialize](https://github.com/Lazialize)! - fix: bundler and bundle CLI bug fixes
+
+  - Whole-document `$ref`s under 3.1 `components/pathItems` are now lifted into `components/pathItems` (not `components/schemas`), matching how a fragment ref to a path item already behaved ([#27](https://github.com/Lazialize/oasis/issues/27))
+  - Specification Extension (`x-*`) payloads are treated as opaque data when bundling: structural-looking keys inside them (`$ref`, `mapping`, `schema`, `properties`, `examples`, ...) are copied through verbatim instead of being rewritten as references ([#28](https://github.com/Lazialize/oasis/issues/28))
+  - `--dereference` reference-cycle slots now go through the same reserved-name/`uniqueName` allocation as normal lifted components, so a cycle slot can no longer overwrite an existing component whose name collides with the pointer tail; each cycle site emits a single deduplicated warning ([#29](https://github.com/Lazialize/oasis/issues/29))
+  - `oasis bundle` no longer aborts when only an external `$ref` target is missing: it now matches the bundler API, emitting the bundle with the unresolved reference left verbatim plus a warning (exit 0). Genuine syntax errors and entry-load failures still abort with exit 2 ([#30](https://github.com/Lazialize/oasis/issues/30))
+  - In `--dereference` mode, retention of unreferenced entry-document components is now independent of source declaration order: preservation is decided up front, so semantically equivalent component maps always retain the same members ([#63](https://github.com/Lazialize/oasis/issues/63))
+
+- [#71](https://github.com/Lazialize/oasis/pull/71) [`a2c079a`](https://github.com/Lazialize/oasis/commit/a2c079ab8d76102401724a7af554a44c83628838) Thanks [@Lazialize](https://github.com/Lazialize)! - fix: `oasis lint`/`oasis bundle` argument parsing now respects `--` and rejects flag-looking option values ([#31](https://github.com/Lazialize/oasis/issues/31))
+
+  - `--` now protects everything after it from being read as `-h`/`--help`, so a positional entry literally named `--help` is linted/bundled instead of printing help and exiting 0
+  - An option that requires a value (`--config`, `--format`, `-o`/`--out`) now fails with a usage error when the next token is another recognized flag, instead of silently consuming it as the value
+  - Added a `--flag=value` form as an explicit escape hatch for passing a dash-prefixed value
+
+- [#71](https://github.com/Lazialize/oasis/pull/71) [`99c2b12`](https://github.com/Lazialize/oasis/commit/99c2b12cabe0d82870b8e1cd04afd008688e0f57) Thanks [@Lazialize](https://github.com/Lazialize)! - fix: encode absolute SARIF artifact URIs with `pathToFileURL` ([#32](https://github.com/Lazialize/oasis/issues/32))
+
+  `--format sarif`'s fallback absolute `file://` artifact location (used when a diagnostic's file is
+  outside `cwd`) is now built with `node:url`'s `pathToFileURL` instead of string concatenation, so
+  spaces, `#`, `%`, non-ASCII characters, and platform path syntax are correctly percent-encoded.
+  Repo-relative, forward-slash URIs for files under `cwd` are unchanged.
+
+- [#71](https://github.com/Lazialize/oasis/pull/71) [`1d7a640`](https://github.com/Lazialize/oasis/commit/1d7a6407ebdee9ef25cb5710ef0ede21b752ffa1) Thanks [@Lazialize](https://github.com/Lazialize)! - fix: validate `oasis.config.jsonc` structure before resolving lint configuration ([#33](https://github.com/Lazialize/oasis/issues/33))
+
+  Config files were syntax-checked as JSONC but then cast directly to the config type, so a
+  structurally invalid shape (e.g. `"lint": {"overrides": {}}` where an array is expected) crashed
+  `resolveConfig` with a TypeError. The complete config shape (`entries`, `lint`, `lint.rules`,
+  `lint.overrides` and each override's `files`/`rules`) is now validated at the load boundary:
+  invalid fields are dropped and reported as source-ranged `oasis/config` diagnostics (CLI) or
+  config warnings (LSP) instead of crashing or being silently coerced.
+
+- Updated dependencies [[`23b466f`](https://github.com/Lazialize/oasis/commit/23b466f5ae7f8e0c98eaa663ae224de657d34577), [`1fd7cbe`](https://github.com/Lazialize/oasis/commit/1fd7cbe435d552d2f9258f438f99d0358c84fb46), [`73ed5c6`](https://github.com/Lazialize/oasis/commit/73ed5c64dc171a52c12eb6cf1550eafbdc82912f), [`d52a1ec`](https://github.com/Lazialize/oasis/commit/d52a1ecef2625796996df0ce06c1a68f032ebe48), [`f963901`](https://github.com/Lazialize/oasis/commit/f96390109865155ec0627b47314141e19ffa3221), [`83e68e5`](https://github.com/Lazialize/oasis/commit/83e68e5c98b9544857f2d658977b56e772757071), [`ffbd8d1`](https://github.com/Lazialize/oasis/commit/ffbd8d1a10694bdc0874b6863b2819c0af32cab0), [`ffbd8d1`](https://github.com/Lazialize/oasis/commit/ffbd8d1a10694bdc0874b6863b2819c0af32cab0), [`94b9305`](https://github.com/Lazialize/oasis/commit/94b9305059cc104ca404f2cd2f23381371c39795), [`c63b61d`](https://github.com/Lazialize/oasis/commit/c63b61de70ce852d8182c0a4ec3ecf6af0a0aad2), [`af3e6d7`](https://github.com/Lazialize/oasis/commit/af3e6d78df2b1b9495312e9d530f7bb2474247f0), [`2523da0`](https://github.com/Lazialize/oasis/commit/2523da0f92a7c12fe4e5c322f023b13adcee2531), [`0d0ae66`](https://github.com/Lazialize/oasis/commit/0d0ae66e01e4f65ccb03774bc176019ea43651ad), [`1d7a640`](https://github.com/Lazialize/oasis/commit/1d7a6407ebdee9ef25cb5710ef0ede21b752ffa1)]:
+  - @oasis/bundler@0.9.0
+  - @oasis/core@0.9.0
+  - @oasis/linter@0.9.0
+  - @oasis/server@0.9.0
+
 ## 0.8.4
 
 ### Patch Changes

@@ -1,5 +1,36 @@
 # @oasis/core
 
+## 0.9.0
+
+### Minor Changes
+
+- [#69](https://github.com/Lazialize/oasis/pull/69) [`0d0ae66`](https://github.com/Lazialize/oasis/commit/0d0ae66e01e4f65ccb03774bc176019ea43651ad) Thanks [@Lazialize](https://github.com/Lazialize)! - Add URI-aware reference handling for OpenAPI 3.1 Schema Objects (JSON Schema 2020-12). Core now
+  classifies `$ref` values with an RFC 3986-aware classifier (`classifyUriReference`, `uriScheme`,
+  `isExternalUriReference`): absolute non-filesystem URIs (`https:`, `urn:`, ...) are reported as
+  unsupported external references instead of being turned into bogus file lookups. For 3.1 documents,
+  core builds a per-document anchor index (`buildAnchorIndex`, `resolveAnchor`) of `$id` scopes,
+  `$anchor`, and `$dynamicAnchor`, and `resolveRef` resolves plain-name `#anchor` fragments
+  (including percent-encoded ones) to their schema, preserving source ranges. OpenAPI Reference
+  Objects and 3.0 documents keep their existing JSON-Pointer behavior.
+
+### Patch Changes
+
+- [#69](https://github.com/Lazialize/oasis/pull/69) [`1fd7cbe`](https://github.com/Lazialize/oasis/commit/1fd7cbe435d552d2f9258f438f99d0358c84fb46) Thanks [@Lazialize](https://github.com/Lazialize)! - Canonicalize the workspace-graph entry path before traversal. A relative entry document is no
+  longer loaded a second time under its absolute path when another file `$ref`s back to it, so the
+  entry is parsed once and cross-file cycle detection no longer misfires against a duplicate
+  identity. `WorkspaceGraph.entryPath` now always holds the canonical path, and `FileSystem` gains a
+  `canonicalize(path)` method.
+
+- [#72](https://github.com/Lazialize/oasis/pull/72) [`ffbd8d1`](https://github.com/Lazialize/oasis/commit/ffbd8d1a10694bdc0874b6863b2819c0af32cab0) Thanks [@Lazialize](https://github.com/Lazialize)! - Classify discriminator mapping values as URI references correctly ([#39](https://github.com/Lazialize/oasis/issues/39)). A mapping value is a bare
+  component name (expanded to `#/components/schemas/<name>`) only when it matches
+  `^[a-zA-Z0-9._-]+$` and contains neither `/` nor `:`; anything else — a relative path
+  (`./dog.yaml`, `../schemas/dog.yaml`), an absolute scheme without `//` (`urn:`), a fragment, or a
+  percent-encoded reference — is a URI reference resolved with normal `$ref` semantics.
+  `looksLikeMappingRef` in core (shared by reference discovery and the bundler) and the
+  `structure/discriminator` / `components/no-unused` rules now agree on this classification, so
+  valid relative references are no longer reported unresolved and `urn:`-style values are treated as
+  external targets instead of bogus component names.
+
 ## 0.8.4
 
 ### Patch Changes

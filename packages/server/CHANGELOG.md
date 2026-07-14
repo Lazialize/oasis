@@ -1,5 +1,64 @@
 # @oasis/server
 
+## 0.9.0
+
+### Patch Changes
+
+- [#73](https://github.com/Lazialize/oasis/pull/73) [`f963901`](https://github.com/Lazialize/oasis/commit/f96390109865155ec0627b47314141e19ffa3221) Thanks [@Lazialize](https://github.com/Lazialize)! - LSP server handler fixes and improvements:
+
+  - Rename validates new component names against the component-key grammar (`^[A-Za-z0-9._-]+$`) and
+    returns a rename error instead of writing a partial, YAML-corrupting edit; replacement text is
+    encoded for its syntactic context (JSON keys double-quoted, YAML keys quoted when they would be
+    reinterpreted).
+  - Find References and Rename now count `$ref`s that resolve to nested pointers under a component
+    (e.g. `#/components/schemas/Foo/properties/id`); rename replaces only the component-name segment
+    and preserves the suffix.
+  - Rename, Find References, and prepareRename share one semantic reference index that includes
+    name-based OpenAPI references: Security Requirement Object keys (root and operation scope) and
+    discriminator `mapping` values (bare-name form preserved, URI form edited as a pointer segment).
+  - Inline/extract code actions rebase internal references when they move a subtree across documents
+    (same-document and file-relative refs are re-relativized; absolute URIs left unchanged), and are
+    suppressed when relocation cannot be made safe (YAML anchors/aliases, `$id`/`$anchor` scopes,
+    plain-name anchor fragments, `file:` URIs).
+  - The add-missing-path-parameter quick fix replaces an inline empty `parameters: []` with a valid
+    block sequence instead of producing malformed YAML.
+  - Document symbols include OpenAPI 3.1 root-level `webhooks` (with operation children); 3.0
+    documents are unchanged.
+  - Document links classify `$ref` values per RFC 3986: absolute non-filesystem URIs without a `//`
+    authority (e.g. `urn:example:schema`) are no longer exposed as clickable local file links.
+
+- [#75](https://github.com/Lazialize/oasis/pull/75) [`83e68e5`](https://github.com/Lazialize/oasis/commit/83e68e5c98b9544857f2d658977b56e772757071) Thanks [@Lazialize](https://github.com/Lazialize)! - fix: LSP server lifecycle and diagnostics-flow bug fixes (with matching VS Code extension updates, released via the synced extension version)
+
+  - diagnostics for a file shared by multiple project entries are now stored per entry and published as the merged, deduplicated union, so one entry's results no longer clobber another's and unloading an entry removes only its own contribution ([#48](https://github.com/Lazialize/oasis/issues/48))
+  - stale asynchronous validations are discarded: a lint run superseded by a newer edit, a project reload, or a document close can no longer finish late and overwrite newer diagnostics or poison the workspace-graph cache ([#49](https://github.com/Lazialize/oasis/issues/49))
+  - closing a document now revalidates project state from disk: an unsaved project-member buffer's diagnostics are recomputed from the file on disk, and closing an edited `oasis.config.jsonc` reloads the on-disk project configuration ([#50](https://github.com/Lazialize/oasis/issues/50))
+  - external (on-disk) changes to closed project files — git checkout, codegen, another process — now refresh diagnostics: the VS Code extension watches workspace YAML/JSON files and the server invalidates and revalidates affected entry graphs, re-expanding glob entries on create/delete, while never replacing an open unsaved buffer with disk content ([#51](https://github.com/Lazialize/oasis/issues/51))
+  - the lightweight "looks like OpenAPI" guard (server and VS Code extension) now only matches an `openapi` key at the document root, so files with a nested `openapi` property are no longer wrongly synchronized and linted ([#52](https://github.com/Lazialize/oasis/issues/52))
+  - the VS Code extension resynchronizes already-open documents whenever project mode toggles: fragment files gain a synthetic `didOpen` when a config appears, and non-OpenAPI documents are closed on the server when the last config disappears ([#58](https://github.com/Lazialize/oasis/issues/58))
+
+- [#75](https://github.com/Lazialize/oasis/pull/75) [`94b9305`](https://github.com/Lazialize/oasis/commit/94b9305059cc104ca404f2cd2f23381371c39795) Thanks [@Lazialize](https://github.com/Lazialize)! - Centralize version-aware OpenAPI object shape validation and complete the LSP completion contexts
+  ([#65](https://github.com/Lazialize/oasis/issues/65), [#60](https://github.com/Lazialize/oasis/issues/60)).
+
+  - **Linter ([#65](https://github.com/Lazialize/oasis/issues/65)):** a declarative, version-aware object-shape table (`object-shape.ts`) now
+    describes every OpenAPI Object — required fields, per-field value types, 3.0 vs 3.1 field
+    availability, mutually exclusive field groups, `x-*` extension allowance, and referenceable
+    (`$ref`) locations. A new `structure/object-shape` rule validates the metadata objects no other
+    rule covered (Info, Contact, License, Tag, External Documentation), preserving each
+    diagnostic's source range and owning document. Existing `structure/*` rules and their diagnostics
+    are unchanged; the table is exported from `@oasis/linter` as the shared foundation.
+  - **Server ([#60](https://github.com/Lazialize/oasis/issues/60)):** completion contexts are driven from that shared table, so suggestions offer only
+    the keys legal at the cursor for the document's version. Newly covered: root `webhooks` and
+    `jsonSchemaDialect` (3.1), `components.headers`/`examples`/`links`/`callbacks` and 3.1
+    `pathItems`, Header/Example/Link/Callback/Encoding/OAuth Flow(s) Objects, and every JSON Schema
+    2020-12 applicator (`$defs`, `prefixItems`, `patternProperties`, `if`/`then`/`else`,
+    `dependentSchemas`, `unevaluatedProperties`/`unevaluatedItems`, `propertyNames`, `contains`).
+    Version-specific fields differ correctly between 3.0 and 3.1 (e.g. `nullable`/`example` vs
+    `const`/`examples`/`$defs`; `info.summary`, `license.identifier`).
+
+- Updated dependencies [[`1fd7cbe`](https://github.com/Lazialize/oasis/commit/1fd7cbe435d552d2f9258f438f99d0358c84fb46), [`73ed5c6`](https://github.com/Lazialize/oasis/commit/73ed5c64dc171a52c12eb6cf1550eafbdc82912f), [`d52a1ec`](https://github.com/Lazialize/oasis/commit/d52a1ecef2625796996df0ce06c1a68f032ebe48), [`ffbd8d1`](https://github.com/Lazialize/oasis/commit/ffbd8d1a10694bdc0874b6863b2819c0af32cab0), [`ffbd8d1`](https://github.com/Lazialize/oasis/commit/ffbd8d1a10694bdc0874b6863b2819c0af32cab0), [`94b9305`](https://github.com/Lazialize/oasis/commit/94b9305059cc104ca404f2cd2f23381371c39795), [`c63b61d`](https://github.com/Lazialize/oasis/commit/c63b61de70ce852d8182c0a4ec3ecf6af0a0aad2), [`af3e6d7`](https://github.com/Lazialize/oasis/commit/af3e6d78df2b1b9495312e9d530f7bb2474247f0), [`2523da0`](https://github.com/Lazialize/oasis/commit/2523da0f92a7c12fe4e5c322f023b13adcee2531), [`0d0ae66`](https://github.com/Lazialize/oasis/commit/0d0ae66e01e4f65ccb03774bc176019ea43651ad), [`1d7a640`](https://github.com/Lazialize/oasis/commit/1d7a6407ebdee9ef25cb5710ef0ede21b752ffa1)]:
+  - @oasis/core@0.9.0
+  - @oasis/linter@0.9.0
+
 ## 0.8.4
 
 ### Patch Changes
