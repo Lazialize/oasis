@@ -1,7 +1,7 @@
-import { runLspServer } from "@oasis/server";
 import { runBundleCommand } from "./commands/bundle.ts";
 import { runInitCommand } from "./commands/init.ts";
 import { runLintCommand } from "./commands/lint.ts";
+import { runLspCommand } from "./commands/lsp.ts";
 
 const HELP = `oasis - OpenAPI toolkit (lint / bundle / lsp)
 
@@ -45,10 +45,7 @@ export async function runCli(argv: string[], io: CliIo = defaultIo): Promise<num
       io.stdout(HELP);
       return 0;
     case "lsp":
-      runLspServer();
-      // The server lives for the lifetime of the stdio connection; keep the process running
-      // until the client sends `exit` (handled inside runLspServer, which calls process.exit).
-      return new Promise<number>(() => {});
+      return runLspCommand(rest, io);
     default:
       io.stderr(`oasis: unknown command "${command}"\n\n`);
       io.stdout(HELP);
