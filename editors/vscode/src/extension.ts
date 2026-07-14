@@ -158,6 +158,50 @@ async function detectProjectMode(): Promise<boolean> {
 // types an `openapi:` key into it, rather than being silently ignored for the rest of its life.
 const syncedDocuments = new Set<string>();
 
+/**
+ * Reconcile every open document with the current synchronization predicate (`shouldSync`) by
+ * sending the missing didOpen/didClose notifications (issue #58). Needed whenever
+ * `projectModeActive` flips, because the predicate changes retroactively for documents that are
+ * *already* open:
+ * - standalone -> project: fragment files without a root `openapi` key were never synced (no
+ *   didOpen was forwarded); without a synthetic didOpen they stay invisible to the server until
+ *   edited or reopened.
+ * - project -> standalone: previously-synced non-OpenAPI documents must be closed on the server,
+ *   otherwise their overlay buffers and diagnostics linger while subsequent changes are suppressed
+ *   by the middleware, leaving them permanently stale.
+ */
+async function resyncOpenDocuments(): Promise<void> {
+  if (!client) return;
+  for (const document of vscode.workspace.textDocuments) {
+    if (!["yaml", "json", "jsonc"].includes(document.languageId)) continue;
+    const key = document.uri.toString();
+    const wanted = shouldSync(document);
+    const synced = syncedDocuments.has(key);
+    if (wanted && !synced) {
+      syncedDocuments.add(key);
+      await client.sendNotification("textDocument/didOpen", {
+        textDocument: {
+          uri: key,
+          languageId: document.languageId,
+          version: document.version,
+          text: document.getText(),
+        },
+      });
+    } else if (!wanted && synced) {
+      syncedDocuments.delete(key);
+      await client.sendNotification("textDocument/didClose", { textDocument: { uri: key } });
+    }
+  }
+}
+
+/** Flip `projectModeActive` and, on an actual transition, resync already-open documents against
+ * the new predicate before normal middleware traffic relies on it. */
+function setProjectMode(active: boolean): void {
+  if (projectModeActive === active) return;
+  projectModeActive = active;
+  void resyncOpenDocuments();
+}
+
 function buildServerOptions(): ServerOptions {
   const config = vscode.workspace.getConfiguration("oasis");
   const command = config.get<string>("server.path", "oasis");
@@ -280,15 +324,21 @@ function registerConfigWatcher(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     configWatcher.onDidChange((uri) => notify(uri, FileChangeType.Changed)),
     configWatcher.onDidCreate((uri) => {
-      projectModeActive = true;
       if (!discoveredConfigFiles.includes(uri.fsPath)) discoveredConfigFiles.push(uri.fsPath);
+      // Tell the server about the new config first (so it loads the project), then flip the mode
+      // and resync already-open documents against the relaxed predicate (issue #58). The order
+      // isn't load-bearing — the server's upward discovery also finds the config when a fragment's
+      // didOpen arrives first — but this way the common case avoids that extra walk.
       notify(uri, FileChangeType.Created);
+      setProjectMode(true);
     }),
     configWatcher.onDidDelete((uri) => {
       notify(uri, FileChangeType.Deleted);
       discoveredConfigFiles = discoveredConfigFiles.filter((path) => path !== uri.fsPath);
+      // Another config may still exist elsewhere in the workspace; only leave project mode (and
+      // close now-unsyncable documents on the server, issue #58) when none remain.
       void detectProjectMode().then((active) => {
-        projectModeActive = active;
+        setProjectMode(active);
       });
     }),
   );
