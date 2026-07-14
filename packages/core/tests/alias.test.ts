@@ -3,6 +3,7 @@ import { isMap } from "yaml";
 import { parseDocument } from "../src/parse.ts";
 import { findRefs } from "../src/ref.ts";
 import { nodeAtPointer } from "../src/document.ts";
+import { childAt } from "../src/walk.ts";
 
 const path = "/virtual/anchors.yaml";
 
@@ -44,6 +45,24 @@ describe("YAML anchor/alias handling in core walkers", () => {
     const derived = nodeAtPointer(doc, "/components/schemas/Derived");
     expect(derived).toBeDefined();
     expect(isMap(derived!.node)).toBe(true);
+  });
+
+  test("childAt infers document ownership and follows aliases and merge keys", () => {
+    const doc = parseDocument([
+      "base: &base",
+      "  value: anchored",
+      "direct: *base",
+      "merged:",
+      "  <<: *base",
+    ].join("\n"), path);
+    const root = doc.yamlDoc.contents!;
+    const baseValue = nodeAtPointer(doc, "/base/value")!;
+
+    const direct = childAt(childAt(root, "direct")!, "value");
+    const merged = childAt(childAt(root, "merged")!, "value");
+
+    expect(direct?.range).toEqual(baseValue.node.range);
+    expect(merged?.range).toEqual(baseValue.node.range);
   });
 
   test("detectDuplicateKeys sees duplicates inside an aliased map", () => {
