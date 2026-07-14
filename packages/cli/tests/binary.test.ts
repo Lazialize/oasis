@@ -379,5 +379,43 @@ paths:
         rootClient.kill();
       }
     }, 20000);
+
+    test("--help prints usage and exits 0 without starting server", async () => {
+      const result = await runBinary(["lsp", "--help"]);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("oasis lsp");
+      expect(result.stdout).toContain("--help");
+      expect(result.stdout).toContain("language server");
+      // Ensure no LSP protocol output (which would start with Content-Length or { "jsonrpc"...)
+      expect(result.stdout).not.toContain("Content-Length");
+      expect(result.stdout).not.toContain("jsonrpc");
+    });
+
+    test("-h prints usage and exits 0 without starting server", async () => {
+      const result = await runBinary(["lsp", "-h"]);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("oasis lsp");
+      expect(result.stdout).toContain("--help");
+      // Ensure no LSP protocol output
+      expect(result.stdout).not.toContain("jsonrpc");
+    });
+
+    test("rejects unexpected arguments with exit 2", async () => {
+      const result = await runBinary(["lsp", "--definitely-not-a-real-flag"]);
+      expect(result.exitCode).toBe(2);
+      expect(result.stderr).toContain("unexpected argument");
+      expect(result.stderr).toContain("definitely-not-a-real-flag");
+      // Ensure no stdout (no help, no LSP protocol)
+      expect(result.stdout).toBe("");
+    });
+
+    test("rejects positional arguments with exit 2", async () => {
+      const result = await runBinary(["lsp", "extra"]);
+      expect(result.exitCode).toBe(2);
+      expect(result.stderr).toContain("unexpected argument");
+      expect(result.stderr).toContain("extra");
+      // Ensure no stdout
+      expect(result.stdout).toBe("");
+    });
   });
 });
