@@ -203,4 +203,34 @@ describe("toSarifLog (unit)", () => {
     const uri = log.runs[0]?.results[0]?.locations[0]?.physicalLocation.artifactLocation.uri;
     expect(uri).toBe("file:///C:/Users/name/with%20space%23x.yaml");
   });
+
+  test("percent-encodes a space in a repo-relative URI (#78)", () => {
+    const log = toSarifLog([diagnostic({ range: { ...diagnostic().range, filePath: "/repo/with space.yaml" } })], "/repo");
+    const uri = log.runs[0]?.results[0]?.locations[0]?.physicalLocation.artifactLocation.uri;
+    expect(uri).toBe("with%20space.yaml");
+  });
+
+  test("percent-encodes a `#` fragment marker in a repo-relative URI (#78)", () => {
+    const log = toSarifLog([diagnostic({ range: { ...diagnostic().range, filePath: "/repo/spec#draft.yaml" } })], "/repo");
+    const uri = log.runs[0]?.results[0]?.locations[0]?.physicalLocation.artifactLocation.uri;
+    expect(uri).toBe("spec%23draft.yaml");
+  });
+
+  test("percent-encodes a literal `%` in a repo-relative URI (#78)", () => {
+    const log = toSarifLog([diagnostic({ range: { ...diagnostic().range, filePath: "/repo/100%done.yaml" } })], "/repo");
+    const uri = log.runs[0]?.results[0]?.locations[0]?.physicalLocation.artifactLocation.uri;
+    expect(uri).toBe("100%25done.yaml");
+  });
+
+  test("percent-encodes non-ASCII characters in a repo-relative URI (#78)", () => {
+    const log = toSarifLog([diagnostic({ range: { ...diagnostic().range, filePath: "/repo/仕様.yaml" } })], "/repo");
+    const uri = log.runs[0]?.results[0]?.locations[0]?.physicalLocation.artifactLocation.uri;
+    expect(uri).toBe("%E4%BB%95%E6%A7%98.yaml");
+  });
+
+  test("preserves `/` separators while encoding each segment of a nested repo-relative URI (#78)", () => {
+    const log = toSarifLog([diagnostic({ range: { ...diagnostic().range, filePath: "/repo/sub dir/a#b.yaml" } })], "/repo");
+    const uri = log.runs[0]?.results[0]?.locations[0]?.physicalLocation.artifactLocation.uri;
+    expect(uri).toBe("sub%20dir/a%23b.yaml");
+  });
 });
