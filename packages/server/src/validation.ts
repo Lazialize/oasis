@@ -24,13 +24,27 @@ export interface ValidationRunnerOptions {
 }
 
 export interface ValidationRunner {
-  /** Lint `entryPath`'s graph and publish the merged diagnostics for every affected file. */
+  /**
+   * Lint `entryPath`'s graph and publish the merged diagnostics for every affected file.
+   *
+   * Guarded against stale completions (issue #49): each call is stamped with a fresh per-entry
+   * generation, and a call that finds itself superseded by the time its (async, possibly slow)
+   * lint finishes discards its result instead of publishing — so an older run that completes
+   * *after* a newer edit's run can never overwrite the newer diagnostics.
+   */
   validate(entryPath: string): Promise<void>;
   /**
    * Drop `entryPath`'s stored contribution and republish the merged remainder for every file it
-   * had published to, so only *its* diagnostics disappear (a sibling entry's survive).
+   * had published to, so only *its* diagnostics disappear (a sibling entry's survive). Also
+   * supersedes any outstanding `validate` for the entry.
    */
   clearEntry(entryPath: string): void;
+  /**
+   * Supersede any outstanding `validate` for `entryPath` without touching what's published — for
+   * events (close, project reload) after which in-flight results must not land, but where the
+   * caller decides separately what happens to the published diagnostics.
+   */
+  invalidateEntry(entryPath: string): void;
   /** Publish the current merged set (possibly empty) for a single file, unconditionally. */
   republishFile(filePath: string): void;
 }
@@ -40,6 +54,15 @@ export function createValidationRunner(ctx: ServerContext, options: ValidationRu
 
   /** entryPath -> (filePath -> that entry's diagnostics for the file). */
   const publishedByEntry = new Map<string, Map<string, LspDiagnostic[]>>();
+  /** Per-entry validation generation; a `validate` whose generation is no longer current when its
+   * lint completes discards its result (see `ValidationRunner.validate`). */
+  const generations = new Map<string, number>();
+
+  function bumpGeneration(entryPath: string): number {
+    const generation = (generations.get(entryPath) ?? 0) + 1;
+    generations.set(entryPath, generation);
+    return generation;
+  }
 
   function mergedForFile(filePath: string): LspDiagnostic[] {
     const merged: LspDiagnostic[] = [];
@@ -62,7 +85,11 @@ export function createValidationRunner(ctx: ServerContext, options: ValidationRu
   }
 
   async function validate(entryPath: string): Promise<void> {
+    const generation = bumpGeneration(entryPath);
     const byFile = await getDiagnosticsByFile(ctx, entryPath);
+    // Superseded while linting (a newer validate started, or the entry was cleared/invalidated):
+    // this result reflects content that is no longer current — drop it.
+    if (generations.get(entryPath) !== generation) return;
     const prev = publishedByEntry.get(entryPath);
     publishedByEntry.set(entryPath, byFile);
     // Republish every file the new result touches plus every file the previous one did (a file
@@ -73,11 +100,17 @@ export function createValidationRunner(ctx: ServerContext, options: ValidationRu
   }
 
   function clearEntry(entryPath: string): void {
+    bumpGeneration(entryPath); // an in-flight validate must not resurrect what we're clearing
     const prev = publishedByEntry.get(entryPath);
     if (!prev) return;
     publishedByEntry.delete(entryPath);
     republish(prev.keys());
   }
 
-  return { validate, clearEntry, republishFile: (filePath) => republish([filePath]) };
+  return {
+    validate,
+    clearEntry,
+    invalidateEntry: (entryPath) => void bumpGeneration(entryPath),
+    republishFile: (filePath) => republish([filePath]),
+  };
 }

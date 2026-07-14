@@ -368,6 +368,9 @@ export function startServer(): Connection {
     const wasStandaloneEntry = ctx.openStandaloneEntries.has(path);
     invalidateGraph(ctx, path);
     ctx.openStandaloneEntries.delete(path);
+    // Any validation still in flight for this entry was reading the just-discarded buffer; its
+    // result must not land after the close (issue #49).
+    runner.invalidateEntry(path);
     if (wasStandaloneEntry) clearPublishedFor(path);
     const timer = debounceTimers.get(path);
     if (timer) {
