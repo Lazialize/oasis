@@ -1,5 +1,106 @@
 # @oasis/linter
 
+## 0.9.0
+
+### Patch Changes
+
+- [#72](https://github.com/Lazialize/oasis/pull/72) [`73ed5c6`](https://github.com/Lazialize/oasis/commit/73ed5c64dc171a52c12eb6cf1550eafbdc82912f) Thanks [@Lazialize](https://github.com/Lazialize)! - Replace fixed ten-hop reference limits with cycle-aware traversal ([#47](https://github.com/Lazialize/oasis/issues/47)). `resolveMaybeRef` and the
+  example validator's schema resolver now follow a `$ref` chain until a concrete target is reached,
+  resolution fails, or a Reference Object recurs (a cycle) — a valid acyclic chain of any length
+  (including 11+ links and cross-file chains) now resolves instead of being silently treated as
+  unresolved. The nested-`allOf` property collector likewise guards against cycles with a visited set
+  rather than a hop count.
+
+- [#72](https://github.com/Lazialize/oasis/pull/72) [`d52a1ec`](https://github.com/Lazialize/oasis/commit/d52a1ecef2625796996df0ce06c1a68f032ebe48) Thanks [@Lazialize](https://github.com/Lazialize)! - Three `examples/schema-match` fixes:
+
+  - Count Unicode code points for `minLength`/`maxLength` ([#61](https://github.com/Lazialize/oasis/issues/61)): string length is now measured in
+    code points per JSON Schema, not UTF-16 code units, so a supplementary-plane emoji counts as 1
+    and `maxLength: 1` accepts it. Diagnostics report the same code-point count.
+  - Honor `patternProperties` when validating examples ([#43](https://github.com/Lazialize/oasis/issues/43), 3.1): each example property is matched
+    against every `patternProperties` regex and validated against all matching schemas;
+    `additionalProperties` applies only when neither `properties` nor `patternProperties` matches.
+    Invalid pattern regexes are skipped without crashing. (`unevaluatedProperties` remains
+    deliberately unevaluated — see the rule doc.)
+  - Keep validation diagnostics attached to the owning document ([#42](https://github.com/Lazialize/oasis/issues/42)): a failure that points at a
+    violated schema keyword now carries the schema's own file, so validating an example against a
+    schema in another file no longer produces a diagnostic range converted against the wrong
+    document.
+
+- [#72](https://github.com/Lazialize/oasis/pull/72) [`ffbd8d1`](https://github.com/Lazialize/oasis/commit/ffbd8d1a10694bdc0874b6863b2819c0af32cab0) Thanks [@Lazialize](https://github.com/Lazialize)! - Classify discriminator mapping values as URI references correctly ([#39](https://github.com/Lazialize/oasis/issues/39)). A mapping value is a bare
+  component name (expanded to `#/components/schemas/<name>`) only when it matches
+  `^[a-zA-Z0-9._-]+$` and contains neither `/` nor `:`; anything else — a relative path
+  (`./dog.yaml`, `../schemas/dog.yaml`), an absolute scheme without `//` (`urn:`), a fragment, or a
+  percent-encoded reference — is a URI reference resolved with normal `$ref` semantics.
+  `looksLikeMappingRef` in core (shared by reference discovery and the bundler) and the
+  `structure/discriminator` / `components/no-unused` rules now agree on this classification, so
+  valid relative references are no longer reported unresolved and `urn:`-style values are treated as
+  external targets instead of bogus component names.
+
+- [#72](https://github.com/Lazialize/oasis/pull/72) [`ffbd8d1`](https://github.com/Lazialize/oasis/commit/ffbd8d1a10694bdc0874b6863b2819c0af32cab0) Thanks [@Lazialize](https://github.com/Lazialize)! - Count nested component-pointer references as component usage ([#36](https://github.com/Lazialize/oasis/issues/36)). A `$ref` whose target lies
+  below a top-level component (e.g. `#/components/schemas/Foo/properties/id`, locally or across
+  files) now marks that component (`Foo`) as used, so `components/no-unused` no longer
+  false-positives on it and the remove-unused quick fix can't delete a live component.
+
+- [#75](https://github.com/Lazialize/oasis/pull/75) [`94b9305`](https://github.com/Lazialize/oasis/commit/94b9305059cc104ca404f2cd2f23381371c39795) Thanks [@Lazialize](https://github.com/Lazialize)! - Centralize version-aware OpenAPI object shape validation and complete the LSP completion contexts
+  ([#65](https://github.com/Lazialize/oasis/issues/65), [#60](https://github.com/Lazialize/oasis/issues/60)).
+
+  - **Linter ([#65](https://github.com/Lazialize/oasis/issues/65)):** a declarative, version-aware object-shape table (`object-shape.ts`) now
+    describes every OpenAPI Object — required fields, per-field value types, 3.0 vs 3.1 field
+    availability, mutually exclusive field groups, `x-*` extension allowance, and referenceable
+    (`$ref`) locations. A new `structure/object-shape` rule validates the metadata objects no other
+    rule covered (Info, Contact, License, Tag, External Documentation), preserving each
+    diagnostic's source range and owning document. Existing `structure/*` rules and their diagnostics
+    are unchanged; the table is exported from `@oasis/linter` as the shared foundation.
+  - **Server ([#60](https://github.com/Lazialize/oasis/issues/60)):** completion contexts are driven from that shared table, so suggestions offer only
+    the keys legal at the cursor for the document's version. Newly covered: root `webhooks` and
+    `jsonSchemaDialect` (3.1), `components.headers`/`examples`/`links`/`callbacks` and 3.1
+    `pathItems`, Header/Example/Link/Callback/Encoding/OAuth Flow(s) Objects, and every JSON Schema
+    2020-12 applicator (`$defs`, `prefixItems`, `patternProperties`, `if`/`then`/`else`,
+    `dependentSchemas`, `unevaluatedProperties`/`unevaluatedItems`, `propertyNames`, `contains`).
+    Version-specific fields differ correctly between 3.0 and 3.1 (e.g. `nullable`/`example` vs
+    `const`/`examples`/`$defs`; `info.summary`, `license.identifier`).
+
+- [#72](https://github.com/Lazialize/oasis/pull/72) [`c63b61d`](https://github.com/Lazialize/oasis/commit/c63b61de70ce852d8182c0a4ec3ecf6af0a0aad2) Thanks [@Lazialize](https://github.com/Lazialize)! - Traverse every OpenAPI 3.1 JSON Schema applicator consistently ([#40](https://github.com/Lazialize/oasis/issues/40)). The shared schema walker
+  (`walkSchemaTree`) is now a single version-aware traversal with complete 3.0 and 3.1 child
+  semantics, replacing the previous opt-in flags that let rules miss nested schemas. On 3.1 documents
+  it now descends into `patternProperties`, `prefixItems`, `if`/`then`/`else`, `contains`,
+  `propertyNames`, `dependentSchemas`, `$defs`, `unevaluatedItems`, `unevaluatedProperties`, and
+  `contentSchema` in addition to the previously covered applicators. All schema-inspecting rules
+  (`structure/schema-nullable`, `structure/schema-keywords`, `structure/discriminator`,
+  `structure/xml`, `style/naming-convention`, `examples/schema-match`) reach every applicable schema
+  position — e.g. a forbidden `nullable: true` under `$defs` is now reported.
+
+- [#72](https://github.com/Lazialize/oasis/pull/72) [`af3e6d7`](https://github.com/Lazialize/oasis/commit/af3e6d78df2b1b9495312e9d530f7bb2474247f0) Thanks [@Lazialize](https://github.com/Lazialize)! - Two `security/defined` fixes:
+
+  - Resolve security scheme names in the correct document scope ([#37](https://github.com/Lazialize/oasis/issues/37)): requirement keys are implicit
+    component-name references and now resolve only against the entry document's
+    `components/securitySchemes` — a same-named scheme in an unrelated referenced file no longer
+    makes an undefined requirement appear valid. Diagnostics stay source-ranged to the requirement.
+    `components/no-unused` applies the same scope rule to its by-name security scheme exemption.
+  - Allow role names for non-OAuth security schemes in OpenAPI 3.1 ([#38](https://github.com/Lazialize/oasis/issues/38)): on 3.0, non-OAuth
+    (`apiKey`/`http`/`mutualTLS`) requirement arrays must still be empty; on 3.1 the Security
+    Requirement Object explicitly permits role names there, so non-empty arrays are accepted.
+    OAuth2 values remain validated as declared scopes on both versions.
+
+- [#67](https://github.com/Lazialize/oasis/pull/67) [`2523da0`](https://github.com/Lazialize/oasis/commit/2523da0f92a7c12fe4e5c322f023b13adcee2531) Thanks [@Lazialize](https://github.com/Lazialize)! - Harden several `structure/*` rules that were silently skipping malformed input instead of reporting it:
+
+  - `structure/schema-keywords` now reports `exclusiveMinimum`/`exclusiveMaximum` values of any non-conforming node kind (object, array, `null`, string, ...), not just the other version's scalar form ([#41](https://github.com/Lazialize/oasis/issues/41))
+  - `structure/field-types` and `structure/callbacks` now flag a present but empty Responses Object (`responses: {}`), requiring at least one response code, `default`, or extension (`x-*`) field ([#44](https://github.com/Lazialize/oasis/issues/44))
+  - `structure/server-variables` now validates Server Object shape (array item is an object, `url` present and a string, `variables` is an object) at root/Path Item/Operation level instead of silently skipping malformed entries; variable `default`/`enum` checks still run afterward ([#45](https://github.com/Lazialize/oasis/issues/45))
+  - `structure/field-types` now validates every Parameter Object consistently, wherever it's legal to appear: `components/parameters`, Path Item and Operation `parameters`, and local/external Reference Objects to any of those (previously only some inline operation-level parameters were checked). Adds required `name`/`in`, `in: path` requiring `required: true`, `schema`/`content` exclusivity, and `style`/`explode`/`allowEmptyValue`/`allowReserved` constraints; `collectParameterObjects` now resolves `components/parameters` entries through the workspace graph like every other components-level collector ([#46](https://github.com/Lazialize/oasis/issues/46))
+
+- [#71](https://github.com/Lazialize/oasis/pull/71) [`1d7a640`](https://github.com/Lazialize/oasis/commit/1d7a6407ebdee9ef25cb5710ef0ede21b752ffa1) Thanks [@Lazialize](https://github.com/Lazialize)! - fix: validate `oasis.config.jsonc` structure before resolving lint configuration ([#33](https://github.com/Lazialize/oasis/issues/33))
+
+  Config files were syntax-checked as JSONC but then cast directly to the config type, so a
+  structurally invalid shape (e.g. `"lint": {"overrides": {}}` where an array is expected) crashed
+  `resolveConfig` with a TypeError. The complete config shape (`entries`, `lint`, `lint.rules`,
+  `lint.overrides` and each override's `files`/`rules`) is now validated at the load boundary:
+  invalid fields are dropped and reported as source-ranged `oasis/config` diagnostics (CLI) or
+  config warnings (LSP) instead of crashing or being silently coerced.
+
+- Updated dependencies [[`1fd7cbe`](https://github.com/Lazialize/oasis/commit/1fd7cbe435d552d2f9258f438f99d0358c84fb46), [`ffbd8d1`](https://github.com/Lazialize/oasis/commit/ffbd8d1a10694bdc0874b6863b2819c0af32cab0), [`0d0ae66`](https://github.com/Lazialize/oasis/commit/0d0ae66e01e4f65ccb03774bc176019ea43651ad)]:
+  - @oasis/core@0.9.0
+
 ## 0.8.4
 
 ### Patch Changes

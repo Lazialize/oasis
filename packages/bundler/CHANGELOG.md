@@ -1,5 +1,20 @@
 # @oasis/bundler
 
+## 0.9.0
+
+### Patch Changes
+
+- [#68](https://github.com/Lazialize/oasis/pull/68) [`23b466f`](https://github.com/Lazialize/oasis/commit/23b466f5ae7f8e0c98eaa663ae224de657d34577) Thanks [@Lazialize](https://github.com/Lazialize)! - fix: bundler and bundle CLI bug fixes
+
+  - Whole-document `$ref`s under 3.1 `components/pathItems` are now lifted into `components/pathItems` (not `components/schemas`), matching how a fragment ref to a path item already behaved ([#27](https://github.com/Lazialize/oasis/issues/27))
+  - Specification Extension (`x-*`) payloads are treated as opaque data when bundling: structural-looking keys inside them (`$ref`, `mapping`, `schema`, `properties`, `examples`, ...) are copied through verbatim instead of being rewritten as references ([#28](https://github.com/Lazialize/oasis/issues/28))
+  - `--dereference` reference-cycle slots now go through the same reserved-name/`uniqueName` allocation as normal lifted components, so a cycle slot can no longer overwrite an existing component whose name collides with the pointer tail; each cycle site emits a single deduplicated warning ([#29](https://github.com/Lazialize/oasis/issues/29))
+  - `oasis bundle` no longer aborts when only an external `$ref` target is missing: it now matches the bundler API, emitting the bundle with the unresolved reference left verbatim plus a warning (exit 0). Genuine syntax errors and entry-load failures still abort with exit 2 ([#30](https://github.com/Lazialize/oasis/issues/30))
+  - In `--dereference` mode, retention of unreferenced entry-document components is now independent of source declaration order: preservation is decided up front, so semantically equivalent component maps always retain the same members ([#63](https://github.com/Lazialize/oasis/issues/63))
+
+- Updated dependencies [[`1fd7cbe`](https://github.com/Lazialize/oasis/commit/1fd7cbe435d552d2f9258f438f99d0358c84fb46), [`ffbd8d1`](https://github.com/Lazialize/oasis/commit/ffbd8d1a10694bdc0874b6863b2819c0af32cab0), [`0d0ae66`](https://github.com/Lazialize/oasis/commit/0d0ae66e01e4f65ccb03774bc176019ea43651ad)]:
+  - @oasis/core@0.9.0
+
 ## 0.8.4
 
 ### Patch Changes
