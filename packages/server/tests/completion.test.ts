@@ -40,7 +40,13 @@ describe("keyCompletionsForPointer", () => {
   });
 
   test("unclassifiable pointer yields no suggestions", () => {
-    expect(keyCompletionsForPointer("/servers/0", "3.1")).toEqual([]);
+    // A scalar leaf (`info.title`) is not an object with its own key set.
+    expect(keyCompletionsForPointer("/info/title", "3.1")).toEqual([]);
+  });
+
+  test("server object position suggests Server Object keys", () => {
+    const labels = keyCompletionsForPointer("/servers/0", "3.1").map((i) => i.label);
+    expect(labels).toEqual(["url", "description", "variables"]);
   });
 });
 

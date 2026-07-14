@@ -19,6 +19,7 @@ import { structureExamples } from "./structure-examples.ts";
 import { structureFieldTypes } from "./structure-field-types.ts";
 import { structureHttpMethods } from "./structure-http-methods.ts";
 import { structureLinks } from "./structure-links.ts";
+import { structureObjectShape } from "./structure-object-shape.ts";
 import { structureOpenapiVersion } from "./structure-openapi-version.ts";
 import { structureRequiredFields } from "./structure-required-fields.ts";
 import { structureSchemaKeywords } from "./structure-schema-keywords.ts";
@@ -45,6 +46,7 @@ export const rules: Rule[] = [
   structureDiscriminator,
   structureCallbacks,
   structureLinks,
+  structureObjectShape,
   noDuplicateKeys,
   noUnresolvedRef,
   noRefCycle,
@@ -84,6 +86,7 @@ export {
   structureFieldTypes,
   structureHttpMethods,
   structureLinks,
+  structureObjectShape,
   structureOpenapiVersion,
   structureRequiredFields,
   structureSchemaKeywords,

@@ -91,6 +91,14 @@ export interface ServerContext {
    * that entry, whether or not the file is still a member after the edit.
    */
   lastGraphFiles: Map<string, Set<string>>;
+  /**
+   * Monotonic counter bumped on every graph invalidation (`invalidateGraph`, and the wholesale
+   * `graphCache.clear()`s in `project.ts`). `getGraph` snapshots it before an async load and, if it
+   * moved while the load was in flight, returns the graph *without caching it* — otherwise a slow
+   * load started before an edit could finish after the invalidation and poison the cache with a
+   * graph built from stale content (see issue #49).
+   */
+  graphEpoch: number;
 }
 
 export function createServerContext(fileSystem: FileSystem): ServerContext {
@@ -103,6 +111,7 @@ export function createServerContext(fileSystem: FileSystem): ServerContext {
     standaloneConfigCache: new Map(),
     openStandaloneEntries: new Set(),
     lastGraphFiles: new Map(),
+    graphEpoch: 0,
   };
 }
 
@@ -110,7 +119,13 @@ export function createServerContext(fileSystem: FileSystem): ServerContext {
 export async function getGraph(ctx: ServerContext, entryPath: string): Promise<WorkspaceGraph> {
   const cached = ctx.graphCache.get(entryPath);
   if (cached) return cached;
+  const epoch = ctx.graphEpoch;
   const graph = await loadWorkspaceGraph(ctx.fileSystem, entryPath);
+  // An invalidation raced this load: the graph may have been built from content that changed
+  // mid-load. Hand it to this caller (whose own staleness guard decides what to do with the
+  // result — see `createValidationRunner` in `validation.ts`) but don't let it poison the cache
+  // for later callers.
+  if (ctx.graphEpoch !== epoch) return graph;
   ctx.graphCache.set(entryPath, graph);
   ctx.lastGraphFiles.set(entryPath, new Set(graph.documents.keys()));
   return graph;
@@ -138,6 +153,9 @@ export function findEntriesLastContaining(ctx: ServerContext, path: string, entr
  * Cheap and safe: the next `getGraph` call for an affected entry simply reloads everything.
  */
 export function invalidateGraph(ctx: ServerContext, path: string): void {
+  // Bump unconditionally (not only when a cached graph is evicted): an *in-flight* load may be
+  // reading `path` right now even though nothing for it is cached yet (see `getGraph`).
+  ctx.graphEpoch++;
   for (const [entryPath, graph] of ctx.graphCache) {
     if (entryPath === path || graph.documents.has(path)) {
       ctx.graphCache.delete(entryPath);

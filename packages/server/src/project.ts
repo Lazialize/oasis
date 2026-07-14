@@ -95,6 +95,7 @@ function unloadProject(ctx: ServerContext, configPath: string): void {
   if (ctx.projects.delete(configPath)) {
     // Drop cached graphs and the upward-discovery negative cache: removing a project can change
     // membership/discovery answers for files that were previously resolved against it.
+    ctx.graphEpoch++; // in-flight graph loads must not repopulate the cache (see getGraph)
     ctx.graphCache.clear();
     ctx.upwardMissCache.clear();
   }
@@ -166,6 +167,7 @@ export async function loadProjectAtPath(ctx: ServerContext, rawConfigPath: strin
   ctx.projects.set(configPath, state);
   // Drop cached graphs so a reload (e.g. the config file itself changed) picks up new entries, and
   // the upward-discovery cache so directories under this project are no longer treated as misses.
+  ctx.graphEpoch++; // in-flight graph loads must not repopulate the cache (see getGraph)
   ctx.graphCache.clear();
   ctx.upwardMissCache.clear();
   return state;
