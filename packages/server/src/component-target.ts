@@ -1,7 +1,8 @@
-import { isMap, isScalar } from "yaml";
+import { isMap, isNode, isScalar, isSeq } from "yaml";
 import type { Node } from "yaml";
 import {
   formatPointer,
+  looksLikeMappingRef,
   nodeAtPointer,
   nodeAtPosition,
   offsetAtPosition,
@@ -44,10 +45,96 @@ function keyAtOffset(mapNode: Node, offset: number): { name: string } | undefine
   return undefined;
 }
 
+/** A name-based (non-`$ref`) reference to a component: a Security Requirement Object key naming a
+ * `components/securitySchemes` entry, or a bare discriminator `mapping` value naming a schema. */
+export interface NameBasedRef {
+  section: "securitySchemes" | "schemas";
+  name: string;
+  /** Range of the scalar carrying the name (the requirement key, or the mapping value). */
+  range: Range;
+}
+
 /**
- * Resolve the "component" a cursor position refers to, from either side: on/inside a component's
- * definition (its key, or anywhere within its subtree), or on a `$ref` value pointing at one (in
- * which case it resolves through the ref first, then behaves like the definition side). Returns
+ * Find every name-based OpenAPI reference in `doc` that names a component by bare name rather than
+ * a `$ref`: Security Requirement Object keys (root and operation scope) and discriminator `mapping`
+ * values that are bare schema-component names. URI-style mapping values (`#/components/schemas/Dog`,
+ * `./x.yaml#/Dog`) are left to `findRefs` — a bare name is the only form invisible to it (see
+ * `looksLikeMappingRef`).
+ */
+export function collectNameBasedRefs(doc: OasisDocument): NameBasedRef[] {
+  const results: NameBasedRef[] = [];
+  const root = doc.yamlDoc.contents;
+  if (isNode(root)) walk(root);
+  return results;
+
+  function scalarRange(node: unknown): Range | undefined {
+    if (!isScalar(node) || !node.range) return undefined;
+    return rangeFromOffsets(doc.filePath, doc.lineCounter, node.range[0], node.range[1]);
+  }
+
+  function walk(node: Node): void {
+    if (isMap(node)) {
+      for (const pair of node.items) {
+        const keyStr = isScalar(pair.key) ? String(pair.key.value) : undefined;
+        const value = pair.value;
+
+        // Security Requirement arrays: `security: [ { SchemeName: [scopes] }, ... ]`.
+        if (keyStr === "security" && isSeq(value)) {
+          for (const item of value.items) {
+            if (!isNode(item) || !isMap(item)) continue;
+            for (const reqPair of item.items) {
+              if (!isScalar(reqPair.key)) continue;
+              const range = scalarRange(reqPair.key);
+              if (range) results.push({ section: "securitySchemes", name: String(reqPair.key.value), range });
+            }
+          }
+        }
+
+        // Discriminator bare-name mappings: `discriminator: { mapping: { key: BareName } }`.
+        if (keyStr === "discriminator" && isMap(value)) {
+          const mapping = value.items.find((p) => isScalar(p.key) && p.key.value === "mapping")?.value;
+          if (isNode(mapping) && isMap(mapping)) {
+            for (const mapPair of mapping.items) {
+              if (!isScalar(mapPair.value) || typeof mapPair.value.value !== "string") continue;
+              if (looksLikeMappingRef(mapPair.value.value)) continue; // a URI/pointer form, handled by findRefs
+              const range = scalarRange(mapPair.value);
+              if (range) results.push({ section: "schemas", name: mapPair.value.value, range });
+            }
+          }
+        }
+
+        if (isNode(value)) walk(value);
+      }
+    } else if (isSeq(node)) {
+      for (const item of node.items) if (isNode(item)) walk(item);
+    }
+  }
+}
+
+/** The name-based reference whose own scalar range contains `position`, if any. */
+export function nameBasedRefAtPosition(doc: OasisDocument, position: Position): NameBasedRef | undefined {
+  const offset = offsetAtPosition(doc.lineCounter, position);
+  return collectNameBasedRefs(doc).find((nb) => offset >= nb.range.startOffset && offset <= nb.range.endOffset);
+}
+
+/**
+ * Resolve a name-based reference into the component it names, if that component exists: a Security
+ * Requirement key names a `securitySchemes` entry of the graph's *entry* document's components; a
+ * bare discriminator mapping name names a schema in the *same* document as the discriminator.
+ */
+function resolveNameBasedTarget(graph: WorkspaceGraph, doc: OasisDocument, nb: NameBasedRef): ComponentTarget | undefined {
+  const targetDoc = nb.section === "securitySchemes" ? graph.documents.get(graph.entryPath) : doc;
+  if (!targetDoc) return undefined;
+  const pointer = formatPointer(["components", nb.section, nb.name]);
+  if (!nodeAtPointer(targetDoc, pointer)) return undefined;
+  return { doc: targetDoc, section: nb.section, name: nb.name, pointer };
+}
+
+/**
+ * Resolve the "component" a cursor position refers to, from any side: on/inside a component's
+ * definition (its key, or anywhere within its subtree), on a `$ref` value pointing at one (in
+ * which case it resolves through the ref first, then behaves like the definition side), or on a
+ * name-based reference (a Security Requirement key, or a bare discriminator mapping name). Returns
  * undefined when the cursor isn't on a renameable/referenceable component.
  */
 export function resolveComponentTarget(graph: WorkspaceGraph, doc: OasisDocument, position: Position): ComponentTarget | undefined {
@@ -59,6 +146,9 @@ export function resolveComponentTarget(graph: WorkspaceGraph, doc: OasisDocument
     if (!comp) return undefined;
     return { doc: resolved.doc, ...comp };
   }
+
+  const nameBased = nameBasedRefAtPosition(doc, position);
+  if (nameBased) return resolveNameBasedTarget(graph, doc, nameBased);
 
   const offset = offsetAtPosition(doc.lineCounter, position);
   const found = nodeAtPosition(doc, offset);
@@ -92,16 +182,29 @@ export function componentKeyRange(doc: OasisDocument, target: Pick<ComponentTarg
 }
 
 /**
- * The range of `segmentName` as it appears at the tail of a `$ref` value's raw source text
- * (`refRange`, which spans the whole scalar including any surrounding quotes). Since a pointer
- * segment is always the final path component of the ref string, the rightmost occurrence of the
- * segment's text is unambiguous.
+ * The range of the component-*name* segment within a `$ref` value's raw source text (`refRange`,
+ * which spans the whole scalar including any surrounding quotes). Unlike a plain tail-segment
+ * search, this locates the name specifically as the segment following `components/<section>/`, so a
+ * nested-pointer reference such as `#/components/schemas/Foo/properties/id` yields the range of
+ * `Foo` (not `id`) and rename can replace only the name while preserving the `/properties/id`
+ * suffix. Returns undefined if the marker isn't present or the name isn't a complete segment there.
  */
-export function refSegmentRange(doc: OasisDocument, refRange: Range, segmentName: string): Range | undefined {
+export function componentNameSegmentRange(
+  doc: OasisDocument,
+  refRange: Range,
+  section: string,
+  name: string,
+): Range | undefined {
   const raw = doc.text.slice(refRange.startOffset, refRange.endOffset);
-  const idx = raw.lastIndexOf(segmentName);
-  if (idx === -1) return undefined;
-  const startOffset = refRange.startOffset + idx;
-  const endOffset = startOffset + segmentName.length;
-  return rangeFromOffsets(doc.filePath, doc.lineCounter, startOffset, endOffset);
+  const marker = `components/${section}/`;
+  const markerIdx = raw.indexOf(marker);
+  if (markerIdx === -1) return undefined;
+  const nameStart = markerIdx + marker.length;
+  if (raw.slice(nameStart, nameStart + name.length) !== name) return undefined;
+  // The name must be a complete pointer segment: end-of-string, the next pointer separator, or a
+  // closing quote — never a longer identifier that merely starts with `name`.
+  const after = raw[nameStart + name.length];
+  if (after !== undefined && after !== "/" && after !== '"' && after !== "'") return undefined;
+  const startOffset = refRange.startOffset + nameStart;
+  return rangeFromOffsets(doc.filePath, doc.lineCounter, startOffset, startOffset + name.length);
 }
