@@ -1,5 +1,5 @@
 import { isMap, isNode, isScalar, isSeq } from "yaml";
-import type { Node } from "yaml";
+import type { Node, Scalar } from "yaml";
 import { resolveAnchor } from "./anchor.ts";
 import { nodeAtPointer } from "./document.ts";
 import { resolveAlias } from "./walk.ts";
@@ -118,6 +118,42 @@ export function findRefs(doc: OasisDocument): FoundRef[] {
 
   const results: FoundRef[] = [];
   const root = doc.yamlDoc.contents;
+  if (isNode(root)) {
+    walkSubtreeRefs(doc, root, (value) => {
+      const range = value.range;
+      results.push({
+        value: value.value as string,
+        range: range ? rangeFromOffsets(doc.filePath, doc.lineCounter, range[0], range[1]) : zeroRange(doc.filePath),
+      });
+    });
+  }
+  findRefsCache.set(doc, results);
+  return results;
+}
+
+/**
+ * Find every genuine reference within the subtree rooted at `root`, returning the scalar value node
+ * of each — both `{$ref: "..."}` values and `discriminator.mapping` URI values. Uses the exact same
+ * literal-data, container, and discriminator semantics as `findRefs` (they share `walkSubtreeRefs`),
+ * so a `$ref`-shaped scalar buried in `example`/`default`/`enum`/`const` literal data is *not*
+ * returned, while a discriminator mapping URI *is*.
+ *
+ * `root` is assumed to sit in a normal Schema/Object context (non-literal, non-container,
+ * non-mapping) — e.g. an inline schema or a `$ref` target being relocated. This is the counterpart
+ * of `findRefs` for an arbitrary subtree rather than the whole document, and is not cached.
+ */
+export function findSubtreeRefs(doc: OasisDocument, root: Node): Scalar[] {
+  const results: Scalar[] = [];
+  walkSubtreeRefs(doc, root, (value) => results.push(value));
+  return results;
+}
+
+/**
+ * Shared semantic reference walk used by both `findRefs` and `findSubtreeRefs`. Invokes `onRef` with
+ * the scalar value node of every genuine string reference discovered under `root`, resolving `Alias`
+ * nodes to their anchored targets as it descends and skipping literal-data subtrees.
+ */
+function walkSubtreeRefs(doc: OasisDocument, root: Node, onRef: (value: Scalar) => void): void {
   // Two seen-sets (one per literal-context) so a shared anchor visited once under a literal-data
   // subtree doesn't suppress a later, genuine visit of the same node reached non-literally (or
   // vice versa) — each context is still bounded on its own against alias cycles/diamonds.
@@ -145,13 +181,7 @@ export function findRefs(doc: OasisDocument): FoundRef[] {
           const key = pair.key;
           const value = pair.value;
           if (isScalar(key) && key.value === "$ref" && isScalar(value) && typeof value.value === "string") {
-            const range = value.range;
-            results.push({
-              value: value.value,
-              range: range
-                ? rangeFromOffsets(doc.filePath, doc.lineCounter, range[0], range[1])
-                : zeroRange(doc.filePath),
-            });
+            onRef(value);
           }
         }
         // `discriminator.mapping` entries are references expressed as plain strings (e.g.
@@ -161,13 +191,7 @@ export function findRefs(doc: OasisDocument): FoundRef[] {
           for (const pair of resolved.items) {
             const value = pair.value;
             if (isScalar(value) && typeof value.value === "string" && looksLikeMappingRef(value.value)) {
-              const range = value.range;
-              results.push({
-                value: value.value,
-                range: range
-                  ? rangeFromOffsets(doc.filePath, doc.lineCounter, range[0], range[1])
-                  : zeroRange(doc.filePath),
-              });
+              onRef(value);
             }
           }
         }
@@ -199,9 +223,7 @@ export function findRefs(doc: OasisDocument): FoundRef[] {
     }
   }
 
-  if (isNode(root)) walk(root, false, false, false, false);
-  findRefsCache.set(doc, results);
-  return results;
+  walk(root, false, false, false, false);
 }
 
 export interface ResolvedRef {

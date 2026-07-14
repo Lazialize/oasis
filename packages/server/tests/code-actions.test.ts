@@ -1204,6 +1204,196 @@ components:
   });
 });
 
+describe("Relocation uses semantic reference discovery (#119)", () => {
+  test("cross-directory extract rewrites $ref and discriminator mapping URIs but leaves literal $ref data untouched", async () => {
+    const ROOT = "/proj119a";
+    const CONFIG_PATH = `${ROOT}/oasis.config.jsonc`;
+    const ENTRY_PATH = `${ROOT}/openapi.yaml`;
+    const FRAGMENT_PATH = `${ROOT}/paths/pets.yaml`;
+    const SHARED_PATH = `${ROOT}/paths/shared.yaml`;
+    const MODELS_PATH = `${ROOT}/paths/models.yaml`;
+
+    const ENTRY_TEXT = `openapi: 3.1.0
+info:
+  title: Test API
+  version: "1.0.0"
+paths:
+  /pets:
+    $ref: './paths/pets.yaml'
+`;
+    // The inline schema mixes: a real \$ref, a discriminator mapping URI (a plain-string reference,
+    // not a \{$ref\} object), and a literal example whose payload contains a \$ref-shaped key that is
+    // NOT a reference. All three refs are relative to paths/ and must be rebased for the entry dir,
+    // while the literal payload must be copied verbatim.
+    const FRAGMENT_TEXT = `get:
+  operationId: listPets
+  description: List pets.
+  responses:
+    '200':
+      description: OK
+      content:
+        application/json:
+          schema:
+            type: object
+            discriminator:
+              propertyName: petType
+              mapping:
+                dog: './models.yaml#/Dog'
+            properties:
+              petType:
+                type: string
+              favorite:
+                $ref: './shared.yaml#/Item'
+              sample:
+                type: object
+                example:
+                  $ref: '#/literal-value'
+`;
+    const SHARED_TEXT = `Item:
+  type: string
+`;
+    const MODELS_TEXT = `Dog:
+  type: object
+`;
+
+    const ctx = createServerContext(
+      new InMemoryFileSystem({
+        [CONFIG_PATH]: `{ "entries": ["openapi.yaml"] }`,
+        [ENTRY_PATH]: ENTRY_TEXT,
+        [FRAGMENT_PATH]: FRAGMENT_TEXT,
+        [SHARED_PATH]: SHARED_TEXT,
+        [MODELS_PATH]: MODELS_TEXT,
+      }),
+    );
+    await scanWorkspaceRootsForProjects(ctx, [ROOT]);
+
+    const position = positionOf(FRAGMENT_TEXT, "type: object\n            discriminator:");
+    const results = await getCodeActions(ctx, { path: FRAGMENT_PATH, position, diagnostics: [] });
+    const action = results.find((r) => r.title === "Extract inline schema to components");
+    expect(action).toBeDefined();
+
+    const fragmentEdit = action!.edits.find((e) => e.filePath === FRAGMENT_PATH)!;
+    const entryEdit = action!.edits.find((e) => e.filePath === ENTRY_PATH)!;
+    const newFragmentText = applyEdits(FRAGMENT_TEXT, [fragmentEdit]);
+    const newEntryText = applyEdits(ENTRY_TEXT, [entryEdit]);
+
+    // Genuine references are rebased from paths/ to the entry directory.
+    expect(newEntryText).toContain("$ref: './paths/shared.yaml#/Item'");
+    expect(newEntryText).toContain("dog: './paths/models.yaml#/Dog'");
+    // The literal example payload is copied verbatim — its $ref-shaped key is plain data.
+    expect(newEntryText).toContain("$ref: '#/literal-value'");
+    expect(newEntryText).not.toContain("./paths/#/literal-value");
+
+    // Re-lint the relocated result: every rewritten reference must still resolve, and no syntax error.
+    const ctx2 = createServerContext(
+      new InMemoryFileSystem({
+        [CONFIG_PATH]: `{ "entries": ["openapi.yaml"] }`,
+        [ENTRY_PATH]: newEntryText,
+        [FRAGMENT_PATH]: newFragmentText,
+        [SHARED_PATH]: SHARED_TEXT,
+        [MODELS_PATH]: MODELS_TEXT,
+      }),
+    );
+    await scanWorkspaceRootsForProjects(ctx2, [ROOT]);
+    const entryDiags = (await diagnosticsFor(ctx2, ENTRY_PATH)).get(ENTRY_PATH) ?? [];
+    expect(entryDiags.some((d) => d.code === "refs/no-unresolved")).toBe(false);
+    expect(entryDiags.some((d) => d.code === "syntax-error")).toBe(false);
+  });
+
+  test("cross-directory inline rebases discriminator mapping URIs and leaves literal $ref data untouched", async () => {
+    const ROOT = "/proj119b";
+    const CONFIG_PATH = `${ROOT}/oasis.config.jsonc`;
+    const ENTRY_PATH = `${ROOT}/openapi.yaml`;
+    const FRAGMENT_PATH = `${ROOT}/paths/pets.yaml`;
+    const SHARED_PATH = `${ROOT}/shared.yaml`;
+    const MODELS_PATH = `${ROOT}/models/dog.yaml`;
+
+    // The target schema (in the entry) carries a discriminator mapping URI, an ordinary \$ref, and a
+    // literal example holding a \$ref-shaped key. When inlined into the fragment under paths/, the two
+    // genuine references must be re-relativized while the literal payload stays as-is (it must NOT be
+    // rewritten to '../openapi.yaml#/literal-value').
+    const ENTRY_TEXT = `openapi: 3.1.0
+info:
+  title: Test API
+  version: "1.0.0"
+paths:
+  /pets:
+    $ref: './paths/pets.yaml'
+components:
+  schemas:
+    Animal:
+      type: object
+      discriminator:
+        propertyName: petType
+        mapping:
+          dog: './models/dog.yaml#/Dog'
+      properties:
+        favorite:
+          $ref: './shared.yaml#/Item'
+        sample:
+          type: object
+          example:
+            $ref: '#/literal-value'
+`;
+    const SHARED_TEXT = `Item:
+  type: string
+`;
+    const MODELS_TEXT = `Dog:
+  type: object
+`;
+    const FRAGMENT_TEXT = `get:
+  operationId: listPets
+  description: List pets.
+  responses:
+    '200':
+      description: OK
+      content:
+        application/json:
+          schema:
+            $ref: '../openapi.yaml#/components/schemas/Animal'
+`;
+
+    const ctx = createServerContext(
+      new InMemoryFileSystem({
+        [CONFIG_PATH]: `{ "entries": ["openapi.yaml"] }`,
+        [ENTRY_PATH]: ENTRY_TEXT,
+        [FRAGMENT_PATH]: FRAGMENT_TEXT,
+        [SHARED_PATH]: SHARED_TEXT,
+        [MODELS_PATH]: MODELS_TEXT,
+      }),
+    );
+    await scanWorkspaceRootsForProjects(ctx, [ROOT]);
+
+    const position = positionOf(FRAGMENT_TEXT, "$ref: '../openapi.yaml#/components/schemas/Animal'");
+    const results = await getCodeActions(ctx, { path: FRAGMENT_PATH, position, diagnostics: [] });
+    const action = results.find((r) => r.title === "Inline reference");
+    expect(action).toBeDefined();
+
+    const newFragmentText = applyEdits(FRAGMENT_TEXT, action!.edits);
+
+    // Entry-relative genuine references are re-relativized for the fragment's directory (paths/).
+    expect(newFragmentText).toContain("dog: '../models/dog.yaml#/Dog'");
+    expect(newFragmentText).toContain("$ref: '../shared.yaml#/Item'");
+    // The literal example payload is untouched — not rebased to the source document.
+    expect(newFragmentText).toContain("$ref: '#/literal-value'");
+    expect(newFragmentText).not.toContain("openapi.yaml#/literal-value");
+
+    const ctx2 = createServerContext(
+      new InMemoryFileSystem({
+        [CONFIG_PATH]: `{ "entries": ["openapi.yaml"] }`,
+        [ENTRY_PATH]: ENTRY_TEXT,
+        [FRAGMENT_PATH]: newFragmentText,
+        [SHARED_PATH]: SHARED_TEXT,
+        [MODELS_PATH]: MODELS_TEXT,
+      }),
+    );
+    await scanWorkspaceRootsForProjects(ctx2, [ROOT]);
+    const fragDiags = (await diagnosticsFor(ctx2, ENTRY_PATH)).get(FRAGMENT_PATH) ?? [];
+    expect(fragDiags.some((d) => d.code === "refs/no-unresolved")).toBe(false);
+    expect(fragDiags.some((d) => d.code === "syntax-error")).toBe(false);
+  });
+});
+
 describe("JSON documents get no relocation code actions (#56)", () => {
   test("inline and extract are not offered for a JSON entry document", async () => {
     const ENTRY_PATH = "/repo/openapi.json";
