@@ -4,17 +4,13 @@ import type { Node, Scalar } from "yaml";
 import { resolveAnchor } from "./anchor.ts";
 import { nodeAtPointer, nodeAtPointerFrom, resourceBaseAtPointer } from "./document.ts";
 import { resolveFileReference } from "./filesystem.ts";
+import { containerExtensionsAreOpaque, isContainerKey, isLiteralDataKey } from "./node-context.ts";
 import { resolveAlias } from "./walk.ts";
 import type { OasisDocument } from "./parse.ts";
 import { rangeFromOffsets, zeroRange } from "./position.ts";
 import type { Diagnostic, Range } from "./types.ts";
 import { isExternalUriReference, resolveUriReference, stripUriFragment } from "./uri.ts";
 import type { WorkspaceGraph } from "./graph.ts";
-import {
-  isNamedEntryContainer,
-  NAMED_ENTRY_CONTAINER_KEYS,
-  NAMED_ENTRY_CONTAINER_KEYS_31,
-} from "./named-containers.ts";
 import { detectVersion } from "./version.ts";
 
 export interface RefParts {
@@ -37,36 +33,7 @@ export function parseRefString(ref: string): RefParts {
   return { filePart, pointer };
 }
 
-/**
- * Keys whose value is arbitrary literal instance data (JSON Schema `example`/`default`/`enum`/
- * `const`) rather than a place `$ref` can legitimately point at: a `{"$ref": "..."}` appearing
- * inside is plain data, not a reference to follow. `examples` is ambiguous by name alone — as a
- * *sequence* it's the 3.1 JSON Schema `examples` keyword (literal instances, same as `example`),
- * but as a *map* it's an OpenAPI Media Type/Parameter/Header `examples` field (name -> Example
- * Object), whose entries may legitimately `$ref` into `components/examples` — so only the
- * sequence form is treated as literal data.
- */
-export function isLiteralDataKey(key: string, value: Node): boolean {
-  if (key === "examples") return isSeq(value);
-  return key === "example" || key === "default" || key === "enum" || key === "const";
-}
-
-/**
- * Keys whose value is a map of *user/spec-named entries* (component names, HTTP status codes,
- * media types, property names, ...), not JSON Schema keywords. When descending into such a map,
- * the `isLiteralDataKey` check must NOT be applied to the entry names: an entry named `default`,
- * `example`, `enum`, etc. is an ordinary named object (a Response/Example/Schema Object that may
- * legitimately carry a real `$ref`), not literal instance data. `examples` qualifies only in its
- * *map* form (name -> Example Object); its *sequence* form is the JSON Schema literal keyword.
- */
-/** @deprecated Use `NAMED_ENTRY_CONTAINER_KEYS` and `NAMED_ENTRY_CONTAINER_KEYS_31`. */
-export const CONTAINER_KEYS = new Set<string>([
-  ...NAMED_ENTRY_CONTAINER_KEYS,
-  ...NAMED_ENTRY_CONTAINER_KEYS_31,
-]);
-
-/** @deprecated Use `isNamedEntryContainer`. */
-export const isContainerKey = isNamedEntryContainer;
+export { CONTAINER_KEYS, isContainerKey, isLiteralDataKey } from "./node-context.ts";
 
 /**
  * Distinguishes a `discriminator.mapping` value that is a URI reference (e.g. "./dog.yaml#/Dog",
@@ -278,8 +245,10 @@ export function findRefs(
     baseUri: string,
     literal: boolean,
     inContainer: boolean,
+    extensionsOpaque: boolean,
     isMappingObject: boolean,
     isDiscriminatorObject = false,
+    isComponentsObject = false,
     objectKind?: OpenApiObjectKind,
     entryKind?: OpenApiObjectKind,
   ): void {
@@ -292,7 +261,17 @@ export function findRefs(
         nodeBaseUri = resolveUriReference(baseUri, idPair.value.value);
       }
     }
-    const contextKey = [literal, inContainer, isMappingObject, isDiscriminatorObject, objectKind, entryKind, nodeBaseUri].join(":");
+    const contextKey = [
+      literal,
+      inContainer,
+      extensionsOpaque,
+      isMappingObject,
+      isDiscriminatorObject,
+      isComponentsObject,
+      objectKind,
+      entryKind,
+      nodeBaseUri,
+    ].join(":");
     let seen = seenByContext.get(contextKey);
     if (!seen) {
       seen = new Set<Node>();
@@ -367,9 +346,10 @@ export function findRefs(
         const contextualValue = resolveAlias(pair.value, doc.yamlDoc) ?? pair.value;
         const keyStr = isScalar(pair.key) ? String(pair.key.value) : undefined;
         const childLiteral = literal ||
-          (inContainer && entryKind === "paths-map" && keyStr?.startsWith("x-") === true) ||
           (keyStr !== undefined && isAnyValuedField(objectKind, keyStr)) ||
-          (!inContainer && keyStr !== undefined && isLiteralDataKey(keyStr, contextualValue));
+          (keyStr !== undefined &&
+            ((extensionsOpaque && keyStr.startsWith("x-")) ||
+              (!inContainer && isLiteralDataKey(keyStr, contextualValue))));
         // `!inContainer` (mirroring `childLiteral`): once we're inside a container, its entries are
         // user/spec-named (a component/property/status-code name), so an entry that happens to be
         // named like a container keyword (`parameters`, `headers`, `schemas`, ...) is a plain object
@@ -382,12 +362,17 @@ export function findRefs(
           : undefined;
         const childContainer =
           !inContainer && !literal && keyStr !== undefined &&
-          (isNamedEntryContainer(keyStr, contextualValue, version) || childEntryKind !== undefined);
+          (isContainerKey(keyStr, contextualValue, version) || childEntryKind !== undefined);
+        const childExtensionsOpaque = childContainer
+          ? containerExtensionsAreOpaque(keyStr!, isComponentsObject)
+          : true;
         // Only a `mapping` key reached as the *direct* child of a Discriminator Object counts —
         // an ordinary Schema Object property that happens to be named "mapping" (e.g.
         // `properties: { mapping: { type: string } }`) is plain data, not a discriminator mapping.
         const childIsMappingObject = !literal && isDiscriminatorObject && keyStr === "mapping" && isMap(contextualValue);
         const childIsDiscriminatorObject = !literal && keyStr === "discriminator" && isMap(contextualValue);
+        const childIsComponentsObject =
+          !literal && !inContainer && keyStr === "components" && isMap(contextualValue);
         const childObjectKind = childLiteral
           ? undefined
           : inContainer
@@ -403,21 +388,23 @@ export function findRefs(
           childBaseUri,
           childLiteral,
           childContainer,
+          childExtensionsOpaque,
           childIsMappingObject,
           childIsDiscriminatorObject,
+          childIsComponentsObject,
           childObjectKind,
           childEntryKind,
         );
       }
     } else if (isSeq(resolved)) {
       for (const item of resolved.items) {
-        if (isNode(item)) walk(item, nodeBaseUri, literal, false, false, false, entryKind ?? objectKind);
+        if (isNode(item)) walk(item, nodeBaseUri, literal, false, true, false, false, false, entryKind ?? objectKind);
       }
     }
   }
 
   const rootKind = scopeKind ?? (detectVersion(doc) !== undefined ? "root" : undefined);
-  walk(root, initialBaseUri, false, false, false, false, rootKind);
+  walk(root, initialBaseUri, false, false, true, false, false, false, rootKind);
   const cache = rootCache ?? new Map<string, FoundRef[]>();
   cache.set(cacheKey, results);
   if (!rootCache) findRefsCache.set(root, cache);
