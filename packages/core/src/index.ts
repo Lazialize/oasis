@@ -18,6 +18,7 @@ export type { FoundRef, RefParts, ResolvedRef, ResolveRefResult, UnresolvedRef }
 export {
   CONTAINER_KEYS,
   findRefs,
+  findSubtreeRefs,
   isContainerKey,
   isLiteralDataKey,
   looksLikeMappingRef,

@@ -4,6 +4,7 @@ import {
   classifyUriReference,
   detectVersion,
   findRefs,
+  findSubtreeRefs,
   formatPointer,
   nodeAtPointer,
   nodeAtPosition,
@@ -634,14 +635,28 @@ interface RefRewrite {
  * - same-document JSON Pointer refs (`#/...`) become `<rel-path-to-sourceDoc>#/...`,
  * - file-relative refs (`./x.yaml#/...`) are re-relativized from `destPath`'s directory,
  * - absolute non-filesystem URIs (`https:`, `urn:`) are location-independent and left unchanged.
+ *
+ * Which scalars count as references is decided by core's `findSubtreeRefs`, i.e. the same semantic
+ * discovery that lint/graph loading use: real `{$ref}` objects *and* `discriminator.mapping` URI
+ * values are rewritten, while `$ref`-shaped scalars buried in literal instance data
+ * (`example`/`default`/`enum`/`const`) are left untouched — so relocation neither invents rewrites
+ * for literal payloads nor misses a discriminator mapping URI.
+ *
  * Returns undefined when relocation cannot be made safe by textual rewriting: YAML anchors/aliases
  * (document-scoped), `$id`/`$anchor`/`$dynamicAnchor` (which open nested resolution scopes),
  * plain-name anchor fragments (`#foo`), or `file:` URIs (whose FileSystem mapping is ambiguous) —
  * callers suppress the action in that case rather than emit a semantics-changing edit.
  */
 function planSubtreeRefRewrites(graph: WorkspaceGraph, sourceDoc: OasisDocument, node: Node, destPath: string): RefRewrite[] | undefined {
+  // Structural safety: anchors/aliases are document-scoped and `$id`/`$anchor`/`$dynamicAnchor` open
+  // nested resolution scopes, so a textual copy of any of them changes meaning — suppress instead.
+  if (!isSubtreeRelocatable(node)) return undefined;
+
   const rewrites: RefRewrite[] = [];
-  if (!visit(node)) return undefined;
+  for (const ref of findSubtreeRefs(sourceDoc, node)) {
+    if (typeof ref.value !== "string" || !ref.range) return undefined;
+    if (!planRef(ref.value, ref.range)) return undefined;
+  }
   return rewrites;
 
   function planRef(value: string, range: readonly [number, number, number]): boolean {
@@ -661,30 +676,29 @@ function planSubtreeRefRewrites(graph: WorkspaceGraph, sourceDoc: OasisDocument,
     rewrites.push({ start: range[0], end: range[1], newText: `'${newRef}'` });
     return true;
   }
+}
 
-  function visit(n: Node): boolean {
-    if (isAlias(n)) return false; // aliases/anchors are document-scoped; a textual copy breaks them
-    if (isScalar(n)) return !n.anchor;
-    if (n.anchor) return false;
-    if (isMap(n)) {
-      for (const pair of n.items) {
-        const keyStr = isScalar(pair.key) ? String(pair.key.value) : undefined;
-        // `$id`/`$anchor`/`$dynamicAnchor` open nested resolution scopes the destination changes.
-        if (keyStr === "$id" || keyStr === "$anchor" || keyStr === "$dynamicAnchor") return false;
-        if (keyStr === "$ref" && isScalar(pair.value) && typeof pair.value.value === "string") {
-          if (!pair.value.range) return false;
-          if (!planRef(pair.value.value, pair.value.range)) return false;
-          continue;
-        }
-        if (isNode(pair.value) && !visit(pair.value)) return false;
-      }
-      return true;
-    }
-    if (isSeq(n)) {
-      return n.items.every((item) => !isNode(item) || visit(item));
+/**
+ * Whether the subtree at `node` can be textually copied into another document without changing
+ * meaning. Distinct from *reference discovery* (which core owns): this is relocation-specific
+ * structural policy — YAML anchors/aliases are document-scoped, and `$id`/`$anchor`/`$dynamicAnchor`
+ * open nested JSON Schema resolution scopes; any of them present makes a raw text copy unsafe.
+ */
+function isSubtreeRelocatable(node: Node): boolean {
+  if (isAlias(node)) return false; // aliases/anchors are document-scoped; a textual copy breaks them
+  if (node.anchor) return false;
+  if (isMap(node)) {
+    for (const pair of node.items) {
+      const keyStr = isScalar(pair.key) ? String(pair.key.value) : undefined;
+      if (keyStr === "$id" || keyStr === "$anchor" || keyStr === "$dynamicAnchor") return false;
+      if (isNode(pair.value) && !isSubtreeRelocatable(pair.value)) return false;
     }
     return true;
   }
+  if (isSeq(node)) {
+    return node.items.every((item) => !isNode(item) || isSubtreeRelocatable(item));
+  }
+  return true;
 }
 
 /** Apply `rewrites` (absolute offsets into `text`) to the slice `[sliceStart, sliceEnd)`. */
