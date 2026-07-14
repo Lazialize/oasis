@@ -1,6 +1,7 @@
-import { isMap, isNode, isScalar, isSeq } from "yaml";
+import { isAlias, isMap, isNode, isScalar, isSeq } from "yaml";
 import type { Node } from "yaml";
 import {
+  classifyUriReference,
   detectVersion,
   findRefs,
   formatPointer,
@@ -479,11 +480,27 @@ function collectSchemaNames(entryDoc: OasisDocument): Set<string> {
 }
 
 /** Build the entry-document edit that inserts `name: <schema>` under `components/schemas`, creating
- * `components:`/`schemas:` scaffolding as needed. */
-function buildInsertComponentSchemaEdit(entryDoc: OasisDocument, name: string, sourceDoc: OasisDocument, schemaNode: Node): CodeActionFileEdit | undefined {
+ * `components:`/`schemas:` scaffolding as needed. When the schema moves across documents, internal
+ * references are rewritten to keep resolving to the same canonical targets from the entry document
+ * (or the whole action is suppressed — undefined — when that can't be done safely). */
+function buildInsertComponentSchemaEdit(
+  graph: WorkspaceGraph,
+  entryDoc: OasisDocument,
+  name: string,
+  sourceDoc: OasisDocument,
+  schemaNode: Node,
+): CodeActionFileEdit | undefined {
   if (!schemaNode.range) return undefined;
+
+  let rewrites: RefRewrite[] = [];
+  if (sourceDoc.filePath !== entryDoc.filePath) {
+    const planned = planSubtreeRefRewrites(graph, sourceDoc, schemaNode, entryDoc.filePath);
+    if (!planned) return undefined;
+    rewrites = planned;
+  }
+
   const sliceEnd = trimTrailingWhitespaceEnd(sourceDoc.text, schemaNode.range[0], schemaNode.range[1]);
-  const sliceText = sourceDoc.text.slice(schemaNode.range[0], sliceEnd);
+  const sliceText = applyRewritesToSlice(sourceDoc.text, schemaNode.range[0], sliceEnd, rewrites);
   const oldBaseIndent = columnAt(sourceDoc, schemaNode.range[0]);
 
   const root = entryDoc.yamlDoc.contents;
@@ -573,7 +590,7 @@ function buildExtractToComponent(graph: WorkspaceGraph, entryDoc: OasisDocument,
   const candidateName = `${toPascal(baseId)}${kindSuffix}`;
 
   const name = dedupeName(candidateName, collectSchemaNames(entryDoc));
-  const entryEdit = buildInsertComponentSchemaEdit(entryDoc, name, doc, schemaResult.node);
+  const entryEdit = buildInsertComponentSchemaEdit(graph, entryDoc, name, doc, schemaResult.node);
   if (!entryEdit) return undefined;
 
   const refValue = doc.filePath === entryDoc.filePath ? `#/components/schemas/${name}` : `${relativeRefPath(doc.filePath, entryDoc.filePath)}#/components/schemas/${name}`;
@@ -604,24 +621,81 @@ function findRefObjectAtPosition(doc: OasisDocument, offset: number): { node: No
   return { node: parent.node, pointer: parentPointer };
 }
 
-/** Whether any `$ref` nested inside `node` points at another file (a non-empty file part). Such
- * refs are relative to the *target's* file; copying them verbatim into a different file's
- * directory could silently point somewhere else (or nowhere). Rewriting them is more machinery
- * than this action is worth, so cross-file inlining is simply not offered when this is true. */
-function subtreeHasExternalRef(node: Node): boolean {
-  if (isMap(node)) {
-    for (const pair of node.items) {
-      if (isScalar(pair.key) && pair.key.value === "$ref" && isScalar(pair.value) && typeof pair.value.value === "string") {
-        if (parseRefString(pair.value.value).filePart !== "") return true;
-      }
-      if (isNode(pair.value) && subtreeHasExternalRef(pair.value)) return true;
+/** A planned in-place replacement within a source document's text (absolute offsets). */
+interface RefRewrite {
+  start: number;
+  end: number;
+  newText: string;
+}
+
+/**
+ * Plan the reference rewrites needed so that a subtree serialized out of `sourceDoc` still resolves
+ * every internal reference to the same canonical target once it lives in `destPath`:
+ * - same-document JSON Pointer refs (`#/...`) become `<rel-path-to-sourceDoc>#/...`,
+ * - file-relative refs (`./x.yaml#/...`) are re-relativized from `destPath`'s directory,
+ * - absolute non-filesystem URIs (`https:`, `urn:`) are location-independent and left unchanged.
+ * Returns undefined when relocation cannot be made safe by textual rewriting: YAML anchors/aliases
+ * (document-scoped), `$id`/`$anchor`/`$dynamicAnchor` (which open nested resolution scopes),
+ * plain-name anchor fragments (`#foo`), or `file:` URIs (whose FileSystem mapping is ambiguous) —
+ * callers suppress the action in that case rather than emit a semantics-changing edit.
+ */
+function planSubtreeRefRewrites(graph: WorkspaceGraph, sourceDoc: OasisDocument, node: Node, destPath: string): RefRewrite[] | undefined {
+  const rewrites: RefRewrite[] = [];
+  if (!visit(node)) return undefined;
+  return rewrites;
+
+  function planRef(value: string, range: readonly [number, number, number]): boolean {
+    const kind = classifyUriReference(value);
+    if (kind === "absolute") {
+      // `https:`/`urn:` refs resolve identically from anywhere; `file:` URIs are routed through
+      // the FileSystem abstraction in ways relocation can't reason about, so they suppress.
+      return !/^file:/i.test(value);
     }
-    return false;
+    const { filePart, pointer } = parseRefString(value);
+    if (pointer !== "" && !pointer.startsWith("/")) return false; // plain-name anchor: scope-dependent
+    const targetPath = filePart === "" ? sourceDoc.filePath : graph.fileSystem.resolve(sourceDoc.filePath, filePart);
+    const fragment = pointer === "" && filePart !== "" ? "" : `#${pointer}`;
+    const newRef = targetPath === destPath ? `#${pointer}` : `${relativeRefPath(destPath, targetPath)}${fragment}`;
+    if (newRef === value) return true;
+    if (targetPath === destPath && pointer === "") return false; // a whole-file self-ref makes no sense
+    rewrites.push({ start: range[0], end: range[1], newText: `'${newRef}'` });
+    return true;
   }
-  if (isSeq(node)) {
-    return node.items.some((item) => isNode(item) && subtreeHasExternalRef(item));
+
+  function visit(n: Node): boolean {
+    if (isAlias(n)) return false; // aliases/anchors are document-scoped; a textual copy breaks them
+    if (isScalar(n)) return !n.anchor;
+    if (n.anchor) return false;
+    if (isMap(n)) {
+      for (const pair of n.items) {
+        const keyStr = isScalar(pair.key) ? String(pair.key.value) : undefined;
+        // `$id`/`$anchor`/`$dynamicAnchor` open nested resolution scopes the destination changes.
+        if (keyStr === "$id" || keyStr === "$anchor" || keyStr === "$dynamicAnchor") return false;
+        if (keyStr === "$ref" && isScalar(pair.value) && typeof pair.value.value === "string") {
+          if (!pair.value.range) return false;
+          if (!planRef(pair.value.value, pair.value.range)) return false;
+          continue;
+        }
+        if (isNode(pair.value) && !visit(pair.value)) return false;
+      }
+      return true;
+    }
+    if (isSeq(n)) {
+      return n.items.every((item) => !isNode(item) || visit(item));
+    }
+    return true;
   }
-  return false;
+}
+
+/** Apply `rewrites` (absolute offsets into `text`) to the slice `[sliceStart, sliceEnd)`. */
+function applyRewritesToSlice(text: string, sliceStart: number, sliceEnd: number, rewrites: RefRewrite[]): string {
+  let out = text.slice(sliceStart, sliceEnd);
+  const sorted = [...rewrites].sort((a, b) => b.start - a.start);
+  for (const r of sorted) {
+    if (r.start < sliceStart || r.end > sliceEnd) continue;
+    out = out.slice(0, r.start - sliceStart) + r.newText + out.slice(r.end - sliceStart);
+  }
+  return out;
 }
 
 function buildInlineRef(graph: WorkspaceGraph, entryDoc: OasisDocument, doc: OasisDocument, position: Position): CodeActionResult | undefined {
@@ -655,10 +729,19 @@ function buildInlineRef(graph: WorkspaceGraph, entryDoc: OasisDocument, doc: Oas
     if (targetIsAncestor) return undefined;
   }
 
-  if (result.doc.filePath !== doc.filePath && subtreeHasExternalRef(result.node)) return undefined;
+  // Cross-file inlining copies the target's serialized subtree into this document, where its
+  // internal references would resolve against the wrong base. Rewrite every reference so it keeps
+  // resolving to the same canonical target from here, or suppress the action when that can't be
+  // done safely (anchors/aliases, $id scopes, plain-name anchors — see planSubtreeRefRewrites).
+  let rewrites: RefRewrite[] = [];
+  if (result.doc.filePath !== doc.filePath) {
+    const planned = planSubtreeRefRewrites(graph, result.doc, result.node, doc.filePath);
+    if (!planned) return undefined;
+    rewrites = planned;
+  }
 
   const sliceEnd = trimTrailingWhitespaceEnd(result.doc.text, result.node.range[0], result.node.range[1]);
-  const sliceText = result.doc.text.slice(result.node.range[0], sliceEnd);
+  const sliceText = applyRewritesToSlice(result.doc.text, result.node.range[0], sliceEnd, rewrites);
   const oldBaseIndent = columnAt(result.doc, result.node.range[0]);
   const newBaseIndent = columnAt(doc, refNode.range[0]);
   const newText = reindentBlock(sliceText, oldBaseIndent, newBaseIndent);
