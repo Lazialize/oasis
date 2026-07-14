@@ -37,6 +37,24 @@ export interface BundleResult {
 
 const COMPONENT_SECTION_SET = new Set<string>(COMPONENT_SECTIONS);
 
+/**
+ * Assign `value` at `key` as an own data property, immune to inherited accessors on
+ * `Object.prototype` — most importantly the legacy `__proto__` setter. Every map the bundler
+ * builds from untrusted, document-controlled keys (component names, schema property names,
+ * literal payload keys, extension payload keys) must go through this instead of `obj[key] = value`:
+ * a document that names something `__proto__` is common (it's a valid component name and a valid
+ * arbitrary schema property name) and a plain assignment would silently drop the entry while
+ * mutating the containing object's prototype instead of adding data.
+ */
+function setKey(obj: Record<string, unknown>, key: string, value: unknown): void {
+  Object.defineProperty(obj, key, { value, writable: true, enumerable: true, configurable: true });
+}
+
+/** Copy every own enumerable property of `source` onto `target` via `setKey` (a `__proto__`-safe `Object.assign`). */
+function assignKeys(target: Record<string, unknown>, source: Record<string, unknown>): void {
+  for (const key of Object.keys(source)) setKey(target, key, source[key]);
+}
+
 function findRefPair(node: Node): Pair | undefined {
   if (!isMap(node)) return undefined;
   return node.items.find(
@@ -91,7 +109,7 @@ function ensureSectionObject(ctx: BundleContext, section: string): Record<string
   let obj = ctx.componentsOutput[section] as Record<string, unknown> | undefined;
   if (!obj) {
     obj = {};
-    ctx.componentsOutput[section] = obj;
+    setKey(ctx.componentsOutput, section, obj);
   }
   return obj;
 }
@@ -131,7 +149,7 @@ function mapChildren(ctx: BundleContext, doc: OasisDocument, mapNode: Node, hint
   const out: Record<string, unknown> = {};
   for (const pair of mapNode.items) {
     if (!isNode(pair.value)) continue;
-    out[keyToString(pair.key)] = convertValue(ctx, doc, pair.value, hint);
+    setKey(out, keyToString(pair.key), convertValue(ctx, doc, pair.value, hint));
   }
   return out;
 }
@@ -176,7 +194,7 @@ function convertRef(ctx: BundleContext, doc: OasisDocument, mapNode: Node, refPa
     // Register before recursing so ref cycles among lifted components terminate.
     ctx.identityMap.set(identityKey, assigned);
     const content = convertValue(ctx, result.doc, result.node, section);
-    ensureSectionObject(ctx, section)[name] = content;
+    setKey(ensureSectionObject(ctx, section), name, content);
   }
 
   return withSiblings(ctx, doc, mapNode, `#/components/${assigned.section}/${assigned.name}`, hint);
@@ -227,7 +245,7 @@ function mergeSiblingsInto(ctx: BundleContext, doc: OasisDocument, mapNode: Node
   const base: Record<string, unknown> =
     typeof content === "object" && content !== null && !Array.isArray(content) ? { ...(content as Record<string, unknown>) } : {};
   for (const pair of siblingPairs) {
-    base[keyToString(pair.key)] = convertValue(ctx, doc, pair.value as Node, hint);
+    setKey(base, keyToString(pair.key), convertValue(ctx, doc, pair.value as Node, hint));
   }
   return base;
 }
@@ -276,7 +294,7 @@ function withSiblings(ctx: BundleContext, doc: OasisDocument, mapNode: Node, new
   for (const pair of mapNode.items) {
     const key = keyToString(pair.key);
     if (key === "$ref" || !isNode(pair.value)) continue;
-    out[key] = convertValue(ctx, doc, pair.value, hint);
+    setKey(out, key, convertValue(ctx, doc, pair.value, hint));
   }
   return out;
 }
@@ -333,7 +351,7 @@ function withPathItemSiblings(ctx: BundleContext, doc: OasisDocument, node: Node
   const base: Record<string, unknown> =
     typeof target === "object" && target !== null && !Array.isArray(target) ? { ...(target as Record<string, unknown>) } : {};
   for (const pair of siblingPairs) {
-    base[keyToString(pair.key)] = convertValue(ctx, doc, pair.value as Node, undefined);
+    setKey(base, keyToString(pair.key), convertValue(ctx, doc, pair.value as Node, undefined));
   }
   return base;
 }
@@ -349,7 +367,7 @@ function convertPathItemMap(ctx: BundleContext, doc: OasisDocument, mapNode: Nod
   const out: Record<string, unknown> = {};
   for (const pair of mapNode.items) {
     if (!isNode(pair.value)) continue;
-    out[keyToString(pair.key)] = convertPathItem(ctx, doc, pair.value);
+    setKey(out, keyToString(pair.key), convertPathItem(ctx, doc, pair.value));
   }
   return out;
 }
@@ -370,7 +388,7 @@ function convertCallbacks(ctx: BundleContext, doc: OasisDocument, mapNode: Node)
     if (!isNode(value)) continue;
     const refPair = findRefPair(value);
     // `$ref` at callbacks/<name>: lift the whole Callback Object into components/callbacks.
-    out[keyToString(pair.key)] = refPair ? convertRef(ctx, doc, value, refPair, "callbacks") : convertPathItemMap(ctx, doc, value);
+    setKey(out, keyToString(pair.key), refPair ? convertRef(ctx, doc, value, refPair, "callbacks") : convertPathItemMap(ctx, doc, value));
   }
   return out;
 }
@@ -406,7 +424,7 @@ function resolveMappingRefTarget(ctx: BundleContext, doc: OasisDocument, value: 
     // Register before recursing so ref cycles among lifted components terminate (mirrors `convertRef`).
     ctx.identityMap.set(identityKey, assigned);
     const content = convertValue(ctx, result.doc, result.node, section);
-    ensureSectionObject(ctx, section)[name] = content;
+    setKey(ensureSectionObject(ctx, section), name, content);
   }
   return `#/components/${assigned.section}/${assigned.name}`;
 }
@@ -424,9 +442,9 @@ function convertDiscriminatorMapping(ctx: BundleContext, doc: OasisDocument, map
     const value = pair.value;
     if (!isNode(value)) continue;
     if (isScalar(value) && typeof value.value === "string" && looksLikeMappingRef(value.value)) {
-      out[keyToString(pair.key)] = resolveMappingRefTarget(ctx, doc, value, "schemas");
+      setKey(out, keyToString(pair.key), resolveMappingRefTarget(ctx, doc, value, "schemas"));
     } else {
-      out[keyToString(pair.key)] = convertValue(ctx, doc, value, "schemas");
+      setKey(out, keyToString(pair.key), convertValue(ctx, doc, value, "schemas"));
     }
   }
   return out;
@@ -478,7 +496,7 @@ function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undef
       const key = keyToString(pair.key);
       const value = pair.value;
       if (!isNode(value)) {
-        out[key] = value;
+        setKey(out, key, value);
         continue;
       }
       // A Specification Extension (`x-*`) key introduces an opaque payload: everything below it is
@@ -489,11 +507,11 @@ function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undef
       // object's own member keys — user/spec-named container entries are routed via `mapChildren`
       // and never reach here — so an `x-` key here is always a real extension, not a data name.)
       if (!literal && key.startsWith("x-")) {
-        out[key] = convertValue(ctx, doc, value, hint, true);
+        setKey(out, key, convertValue(ctx, doc, value, hint, true));
         continue;
       }
       if (!literal && isLiteralDataKey(key, value)) {
-        out[key] = convertValue(ctx, doc, value, hint, true);
+        setKey(out, key, convertValue(ctx, doc, value, hint, true));
         continue;
       }
       // Once inside literal data, the structural key-hints below (which route real OpenAPI
@@ -501,58 +519,58 @@ function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undef
       // apply — a key of that name here is just user data that happens to share it. Recurse
       // generically, keeping the literal flag set for the rest of the subtree.
       if (literal) {
-        out[key] = convertValue(ctx, doc, value, hint, true);
+        setKey(out, key, convertValue(ctx, doc, value, hint, true));
         continue;
       }
       switch (key) {
         case "paths":
-          out[key] = convertPathItemMap(ctx, doc, value);
+          setKey(out, key, convertPathItemMap(ctx, doc, value));
           break;
         case "schema":
         case "items":
         case "additionalProperties":
         case "not":
-          out[key] = convertValue(ctx, doc, value, "schemas");
+          setKey(out, key, convertValue(ctx, doc, value, "schemas"));
           break;
         case "properties":
         case "patternProperties":
         case "schemas":
         case "$defs":
         case "definitions":
-          out[key] = mapChildren(ctx, doc, value, "schemas");
+          setKey(out, key, mapChildren(ctx, doc, value, "schemas"));
           break;
         case "allOf":
         case "oneOf":
         case "anyOf":
-          out[key] = isSeq(value) ? value.items.filter(isNode).map((item) => convertValue(ctx, doc, item, "schemas")) : convertValue(ctx, doc, value, "schemas");
+          setKey(out, key, isSeq(value) ? value.items.filter(isNode).map((item) => convertValue(ctx, doc, item, "schemas")) : convertValue(ctx, doc, value, "schemas"));
           break;
         case "requestBody":
-          out[key] = convertValue(ctx, doc, value, "requestBodies");
+          setKey(out, key, convertValue(ctx, doc, value, "requestBodies"));
           break;
         case "requestBodies":
-          out[key] = mapChildren(ctx, doc, value, "requestBodies");
+          setKey(out, key, mapChildren(ctx, doc, value, "requestBodies"));
           break;
         case "parameters":
-          if (isSeq(value)) out[key] = value.items.filter(isNode).map((item) => convertValue(ctx, doc, item, "parameters"));
-          else out[key] = mapChildren(ctx, doc, value, "parameters");
+          if (isSeq(value)) setKey(out, key, value.items.filter(isNode).map((item) => convertValue(ctx, doc, item, "parameters")));
+          else setKey(out, key, mapChildren(ctx, doc, value, "parameters"));
           break;
         case "responses":
-          out[key] = mapChildren(ctx, doc, value, "responses");
+          setKey(out, key, mapChildren(ctx, doc, value, "responses"));
           break;
         case "headers":
-          out[key] = mapChildren(ctx, doc, value, "headers");
+          setKey(out, key, mapChildren(ctx, doc, value, "headers"));
           break;
         case "examples":
-          out[key] = mapChildren(ctx, doc, value, "examples");
+          setKey(out, key, mapChildren(ctx, doc, value, "examples"));
           break;
         case "links":
-          out[key] = mapChildren(ctx, doc, value, "links");
+          setKey(out, key, mapChildren(ctx, doc, value, "links"));
           break;
         case "callbacks":
-          out[key] = convertCallbacks(ctx, doc, value);
+          setKey(out, key, convertCallbacks(ctx, doc, value));
           break;
         case "securitySchemes":
-          out[key] = mapChildren(ctx, doc, value, "securitySchemes");
+          setKey(out, key, mapChildren(ctx, doc, value, "securitySchemes"));
           break;
         // 3.1-only `components/pathItems`: a map of name -> (Path Item Object | Reference Object).
         // Unlike a path-item `$ref` under `paths` (inlined in place — 3.0 has no pathItems section),
@@ -560,7 +578,7 @@ function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undef
         // `components/pathItems` like any other component (never `components/schemas`). Refs *inside*
         // a lifted path item are lifted normally by the recursive `convertValue`.
         case "pathItems":
-          out[key] = mapChildren(ctx, doc, value, "pathItems");
+          setKey(out, key, mapChildren(ctx, doc, value, "pathItems"));
           break;
         // Maps of user/spec-named entries (not JSON Schema keywords): route through `mapChildren`
         // so an entry named `default`/`example`/`enum`/... is converted as a real object (and any
@@ -569,16 +587,16 @@ function convertValue(ctx: BundleContext, doc: OasisDocument, node: Node | undef
         case "variables":
         case "encoding":
         case "scopes":
-          out[key] = mapChildren(ctx, doc, value, hint ?? "schemas");
+          setKey(out, key, mapChildren(ctx, doc, value, hint ?? "schemas"));
           break;
         // `discriminator.mapping` entries are references expressed as plain strings, not `{$ref}`
         // objects (see `convertDiscriminatorMapping`), so they need their own conversion path
         // instead of `mapChildren`'s generic per-entry `convertValue`.
         case "mapping":
-          out[key] = convertDiscriminatorMapping(ctx, doc, value);
+          setKey(out, key, convertDiscriminatorMapping(ctx, doc, value));
           break;
         default:
-          out[key] = convertValue(ctx, doc, value, hint);
+          setKey(out, key, convertValue(ctx, doc, value, hint));
       }
     }
     return out;
@@ -635,7 +653,7 @@ export function bundle(graph: WorkspaceGraph, options: BundleOptions = {}): Bund
     const key = keyToString(pair.key);
     const value = pair.value;
     if (!isNode(value)) {
-      out[key] = value;
+      setKey(out, key, value);
       continue;
     }
     if (key === "components") {
@@ -646,8 +664,8 @@ export function bundle(graph: WorkspaceGraph, options: BundleOptions = {}): Bund
         continue;
       }
       const converted = convertValue(ctx, entryDoc, value, undefined) as Record<string, unknown>;
-      for (const [section, sectionValue] of Object.entries(converted)) {
-        Object.assign(ensureSectionObject(ctx, section), sectionValue as Record<string, unknown>);
+      for (const section of Object.keys(converted)) {
+        assignKeys(ensureSectionObject(ctx, section), converted[section] as Record<string, unknown>);
       }
       out.components = ctx.componentsOutput;
       componentsInserted = true;
@@ -657,10 +675,10 @@ export function bundle(graph: WorkspaceGraph, options: BundleOptions = {}): Bund
     // inlined in place (never lifted — 3.0 has no components/pathItems), refs inside them lifted
     // normally, and 3.1 summary/description siblings on a path-item ref preserved.
     if (key === "paths" || key === "webhooks") {
-      out[key] = convertPathItemMap(ctx, entryDoc, value);
+      setKey(out, key, convertPathItemMap(ctx, entryDoc, value));
       continue;
     }
-    out[key] = convertValue(ctx, entryDoc, value, undefined);
+    setKey(out, key, convertValue(ctx, entryDoc, value, undefined));
   }
 
   if (dereference && componentsPair && isNode(componentsPair.value)) {
@@ -706,6 +724,6 @@ function addUnreferencedEntryComponents(ctx: BundleContext, componentsNode: Node
 
   for (const { section, name, value } of toEmit) {
     const content = convertValue(ctx, ctx.entryDoc, value, section);
-    ensureSectionObject(ctx, section)[name] = content;
+    setKey(ensureSectionObject(ctx, section), name, content);
   }
 }

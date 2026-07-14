@@ -1,0 +1,4 @@
+components:
+  schemas:
+    __proto__:
+      type: string
