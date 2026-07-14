@@ -200,6 +200,102 @@ components:
   });
 });
 
+describe("getReferences ignores lookalikes in literal data contexts (#118)", () => {
+  const PATH = "/ctx/openapi.yaml";
+  // `security` and `discriminator.mapping` structures also appear inside literal-data contexts
+  // (`example`, `default`, `enum`, `const`, and an `x-*` vendor extension). Only the genuine
+  // Security Requirement Objects (root + operation) and the discriminator on a real Schema Object
+  // are semantic references; the payload copies must be invisible to find-references.
+  const TEXT = `openapi: 3.1.0
+info:
+  title: Test
+  version: "1.0.0"
+security:
+  - Auth: []
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      security:
+        - Auth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  kind:
+                    type: string
+                example:
+                  security:
+                    - Auth: []
+                  discriminator:
+                    mapping:
+                      dog: Dog
+                default:
+                  security:
+                    - Auth: []
+                enum:
+                  - security:
+                      - Auth: []
+                x-vendor:
+                  security:
+                    - Auth: []
+components:
+  securitySchemes:
+    Auth:
+      type: http
+      scheme: basic
+  schemas:
+    Animal:
+      type: object
+      discriminator:
+        propertyName: kind
+        mapping:
+          dog: Dog
+      oneOf:
+        - $ref: '#/components/schemas/Dog'
+    Dog:
+      type: object
+    Fake:
+      type: object
+      const:
+        discriminator:
+          mapping:
+            dog: Dog
+`;
+
+  function namedCtx() {
+    return createServerContext(new InMemoryFileSystem({ [PATH]: TEXT }));
+  }
+
+  test("security-scheme references skip Security Requirement lookalikes under literal data", async () => {
+    // "Auth:" also matches the six `- Auth: []` requirement copies; the definition key is the 7th.
+    const position = positionOf(TEXT, "Auth:", 6); // definition key under securitySchemes
+    const results = await getReferences(namedCtx(), { path: PATH, position, includeDeclaration: false });
+
+    // Only the root and operation Security Requirement keys, never the example/default/enum/x-* copies.
+    expect(results).toHaveLength(2);
+    const lines = results.map((r) => r.range.start.line).sort((a, b) => a - b);
+    expect(lines).toEqual([positionOf(TEXT, "- Auth: []").line, positionOf(TEXT, "- Auth: []", 1).line].sort((a, b) => a - b));
+  });
+
+  test("schema references skip discriminator mapping lookalikes under literal data", async () => {
+    const position = positionOf(TEXT, "Dog:"); // definition key under schemas
+    const results = await getReferences(namedCtx(), { path: PATH, position, includeDeclaration: false });
+
+    // Only the real discriminator mapping value and the $ref, never the example/const copies.
+    expect(results).toHaveLength(2);
+    const lines = new Set(results.map((r) => r.range.start.line));
+    // The genuine mapping is the one under Animal's discriminator (occurrence index 1 of "dog: Dog"):
+    // index 0 is the example copy, index 2 the const copy.
+    expect(lines.has(positionOf(TEXT, "dog: Dog", 1).line)).toBe(true);
+    expect(lines.has(positionOf(TEXT, "$ref: '#/components/schemas/Dog'").line)).toBe(true);
+  });
+});
+
 describe("getReferences across multiple project entries", () => {
   async function multiEntryContext() {
     const ctx = createServerContext(new InMemoryFileSystem(multiEntryFiles()));

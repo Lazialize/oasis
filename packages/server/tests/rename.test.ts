@@ -433,6 +433,108 @@ components:
   });
 });
 
+describe("renameComponent ignores lookalikes in literal data contexts (#118)", () => {
+  const PATH = "/ctx/openapi.yaml";
+  const TEXT = `openapi: 3.1.0
+info:
+  title: Test
+  version: "1.0.0"
+security:
+  - Auth: []
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      security:
+        - Auth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  kind:
+                    type: string
+                example:
+                  security:
+                    - Auth: []
+                  discriminator:
+                    mapping:
+                      dog: Dog
+                default:
+                  security:
+                    - Auth: []
+                enum:
+                  - security:
+                      - Auth: []
+                x-vendor:
+                  security:
+                    - Auth: []
+components:
+  securitySchemes:
+    Auth:
+      type: http
+      scheme: basic
+  schemas:
+    Animal:
+      type: object
+      discriminator:
+        propertyName: kind
+        mapping:
+          dog: Dog
+      oneOf:
+        - $ref: '#/components/schemas/Dog'
+    Dog:
+      type: object
+    Fake:
+      type: object
+      const:
+        discriminator:
+          mapping:
+            dog: Dog
+`;
+
+  function ctx() {
+    return createServerContext(new InMemoryFileSystem({ [PATH]: TEXT }));
+  }
+
+  /** Line numbers of the literal-data `- Auth: []` copies (example, default, enum, x-vendor). */
+  function payloadAuthLines(): Set<number> {
+    return new Set([2, 3, 4, 5].map((i) => positionOf(TEXT, "- Auth: []", i).line));
+  }
+
+  test("renaming a security scheme edits only genuine Security Requirement keys, leaving payloads untouched", async () => {
+    const edits = await renameComponent(ctx(), { path: PATH, position: positionOf(TEXT, "Auth:", 6), newName: "AuthV2" });
+
+    expect(edits).toBeDefined();
+    // Definition key + root requirement + operation requirement — nothing under example/default/enum/x-*.
+    expect(edits).toHaveLength(3);
+    for (const edit of edits!) {
+      expect(edit.newText).toBe("AuthV2");
+      expect(textAt(TEXT, edit.range)).toBe("Auth");
+    }
+    const editLines = new Set(edits!.map((e) => e.range.start.line));
+    for (const payloadLine of payloadAuthLines()) expect(editLines.has(payloadLine)).toBe(false);
+    expect(editLines.has(positionOf(TEXT, "- Auth: []").line)).toBe(true);
+    expect(editLines.has(positionOf(TEXT, "- Auth: []", 1).line)).toBe(true);
+  });
+
+  test("renaming a schema edits only the genuine discriminator mapping, leaving payloads untouched", async () => {
+    const edits = await renameComponent(ctx(), { path: PATH, position: positionOf(TEXT, "Dog:"), newName: "Hound" });
+
+    expect(edits).toBeDefined();
+    // Definition key + genuine discriminator mapping + $ref — never the example/const copies.
+    expect(edits).toHaveLength(3);
+    const editLines = new Set(edits!.map((e) => e.range.start.line));
+    // The example and const copies of "dog: Dog" (occurrences 0 and 2) must not be edited.
+    expect(editLines.has(positionOf(TEXT, "dog: Dog", 0).line)).toBe(false);
+    expect(editLines.has(positionOf(TEXT, "dog: Dog", 2).line)).toBe(false);
+    expect(editLines.has(positionOf(TEXT, "dog: Dog", 1).line)).toBe(true);
+  });
+});
+
 describe("renameComponent with unsaved overlay content", () => {
   const dir = mkdtempSync(join(tmpdir(), "oasis-rename-overlay-"));
   const entryPath = join(dir, "openapi.yaml");

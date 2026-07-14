@@ -11,6 +11,7 @@ import {
   resolveRef,
 } from "@oasis/core";
 import type { OasisDocument, Position, Range, WorkspaceGraph } from "@oasis/core";
+import { classifyPointer, inferRootKind } from "./keywords.ts";
 import { findRefAtPosition } from "./refs.ts";
 
 /** A resolved `components/<section>/<name>` definition, shared by find-references and rename. */
@@ -60,11 +61,20 @@ export interface NameBasedRef {
  * values that are bare schema-component names. URI-style mapping values (`#/components/schemas/Dog`,
  * `./x.yaml#/Dog`) are left to `findRefs` — a bare name is the only form invisible to it (see
  * `looksLikeMappingRef`).
+ *
+ * Collection is gated on the *semantic* OpenAPI object kind of the enclosing map, classified from
+ * the traversal pointer (#118): a `security` key is only a Security Requirement Object on the root
+ * or an Operation Object, and a `discriminator` is only semantic on a Schema Object. Lookalike
+ * `security`/`discriminator` structures sitting inside literal-data contexts — `example`, `examples`
+ * values, `default`, `enum`, `const`, or an `x-*` vendor extension — classify to no known kind (the
+ * pointer walk yields `undefined` once it descends into non-schema data), so they are skipped and a
+ * rename can never rewrite a documented payload.
  */
 export function collectNameBasedRefs(doc: OasisDocument): NameBasedRef[] {
   const results: NameBasedRef[] = [];
   const root = doc.yamlDoc.contents;
-  if (isNode(root)) walk(root);
+  const rootKind = inferRootKind(doc);
+  if (isNode(root)) walk(root, []);
   return results;
 
   function scalarRange(node: unknown): Range | undefined {
@@ -72,14 +82,20 @@ export function collectNameBasedRefs(doc: OasisDocument): NameBasedRef[] {
     return rangeFromOffsets(doc.filePath, doc.lineCounter, node.range[0], node.range[1]);
   }
 
-  function walk(node: Node): void {
+  function walk(node: Node, path: string[]): void {
     if (isMap(node)) {
+      // The kind of *this* map: the object whose fields (`security`, `discriminator`) we inspect.
+      const kind = classifyPointer(formatPointer(path), rootKind);
+      const semanticSecurity = kind === "root" || kind === "operation";
+      const semanticSchema = kind === "schema";
+
       for (const pair of node.items) {
         const keyStr = isScalar(pair.key) ? String(pair.key.value) : undefined;
         const value = pair.value;
 
-        // Security Requirement arrays: `security: [ { SchemeName: [scopes] }, ... ]`.
-        if (keyStr === "security" && isSeq(value)) {
+        // Security Requirement arrays: `security: [ { SchemeName: [scopes] }, ... ]`, but only where
+        // `security` is a genuine field of the OpenAPI/Operation object, not literal example data.
+        if (semanticSecurity && keyStr === "security" && isSeq(value)) {
           for (const item of value.items) {
             if (!isNode(item) || !isMap(item)) continue;
             for (const reqPair of item.items) {
@@ -90,8 +106,9 @@ export function collectNameBasedRefs(doc: OasisDocument): NameBasedRef[] {
           }
         }
 
-        // Discriminator bare-name mappings: `discriminator: { mapping: { key: BareName } }`.
-        if (keyStr === "discriminator" && isMap(value)) {
+        // Discriminator bare-name mappings: `discriminator: { mapping: { key: BareName } }`, but only
+        // on an actual Schema Object — never a `discriminator`-shaped value inside literal data.
+        if (semanticSchema && keyStr === "discriminator" && isMap(value)) {
           const mapping = value.items.find((p) => isScalar(p.key) && p.key.value === "mapping")?.value;
           if (isNode(mapping) && isMap(mapping)) {
             for (const mapPair of mapping.items) {
@@ -103,10 +120,12 @@ export function collectNameBasedRefs(doc: OasisDocument): NameBasedRef[] {
           }
         }
 
-        if (isNode(value)) walk(value);
+        if (isNode(value) && keyStr !== undefined) walk(value, [...path, keyStr]);
       }
     } else if (isSeq(node)) {
-      for (const item of node.items) if (isNode(item)) walk(item);
+      node.items.forEach((item, index) => {
+        if (isNode(item)) walk(item, [...path, String(index)]);
+      });
     }
   }
 }
