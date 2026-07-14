@@ -2,7 +2,7 @@ import { LineCounter, isMap, isNode, parseDocument as yamlParseDocument } from "
 import type { Document as YamlDocument } from "yaml";
 import type { Diagnostic } from "./types.ts";
 import { rangeFromOffsets, zeroRange } from "./position.ts";
-import { keyToString, walkNodes } from "./walk.ts";
+import { keyToString, registerNodeDocument, walkNodes } from "./walk.ts";
 
 export interface OasisDocument {
   /** Absolute path (or synthetic URI) identifying this document. */
@@ -36,6 +36,7 @@ export function parseDocument(text: string, filePath: string): OasisDocument {
   });
 
   const diagnostics: Diagnostic[] = [];
+  if (isNode(yamlDoc.contents)) registerNodeDocument(yamlDoc.contents, yamlDoc);
 
   for (const err of yamlDoc.errors) {
     diagnostics.push({

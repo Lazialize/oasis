@@ -1,5 +1,6 @@
 import { isMap, isNode, isSeq } from "yaml";
 import type { Node, Pair } from "yaml";
+import { resolveAlias } from "@oasis/core";
 import type { OasisDocument, OpenApiVersion, WorkspaceGraph } from "@oasis/core";
 import { childAt, keyToString, resolveMaybeRef } from "./util.ts";
 
@@ -256,8 +257,10 @@ function computeIterateSchemas(
     if (!contentNode || !isMap(contentNode)) return;
     for (const pair of contentNode.items) {
       const mediaType = keyToString(pair.key);
-      if (!isNode(pair.value) || !isMap(pair.value)) continue;
-      const schema = childAt(pair.value, "schema");
+      if (!isNode(pair.value)) continue;
+      const mediaTypeNode = resolveAlias(pair.value);
+      if (!mediaTypeNode || !isMap(mediaTypeNode)) continue;
+      const schema = childAt(mediaTypeNode, "schema");
       if (schema) addSchema(doc, schema, `${pointer}/${mediaType}/schema`);
     }
   }
@@ -477,9 +480,10 @@ export function walkSchemaTree(
   version: OpenApiVersion | undefined,
   seen: Set<Node> = new Set(),
 ): void {
-  if (!isMap(node) || seen.has(node)) return;
-  seen.add(node);
-  visit(node);
+  const resolved = resolveAlias(node);
+  if (!resolved || !isMap(resolved) || seen.has(resolved)) return;
+  seen.add(resolved);
+  visit(resolved);
 
   const include31 = version !== "3.0";
   const singleKeys = include31 ? [...SINGLE_SCHEMA_KEYS_COMMON, ...SINGLE_SCHEMA_KEYS_31] : SINGLE_SCHEMA_KEYS_COMMON;
@@ -487,12 +491,12 @@ export function walkSchemaTree(
   const seqKeys = include31 ? [...SEQ_OF_SCHEMAS_KEYS_COMMON, ...SEQ_OF_SCHEMAS_KEYS_31] : SEQ_OF_SCHEMAS_KEYS_COMMON;
 
   for (const key of singleKeys) {
-    const child = childAt(node, key);
+    const child = childAt(resolved, key);
     if (isNode(child)) walkSchemaTree(child, visit, version, seen);
   }
 
   for (const key of mapKeys) {
-    const map = childAt(node, key);
+    const map = childAt(resolved, key);
     if (isMap(map)) {
       for (const pair of map.items) {
         if (isNode(pair.value)) walkSchemaTree(pair.value, visit, version, seen);
@@ -501,7 +505,7 @@ export function walkSchemaTree(
   }
 
   for (const key of seqKeys) {
-    const seq = childAt(node, key);
+    const seq = childAt(resolved, key);
     if (isSeq(seq)) {
       for (const item of seq.items) {
         if (isNode(item)) walkSchemaTree(item, visit, version, seen);

@@ -1,6 +1,14 @@
 import { isMap, isScalar } from "yaml";
 import type { Node } from "yaml";
-import { childAt, isExternalUriReference, keyToString, looksLikeMappingRef, nodeAtPointer, resolveRef } from "@oasis/core";
+import {
+  childAt,
+  isExternalUriReference,
+  keyToString,
+  looksLikeMappingRef,
+  nodeAtPointer,
+  resolveAlias,
+  resolveRef,
+} from "@oasis/core";
 import type { OasisDocument, WorkspaceGraph } from "@oasis/core";
 
 export { childAt, keyToString };
@@ -45,7 +53,7 @@ export function resolveMaybeRef(
   node: Node,
   pointer: string,
 ): ResolvedLocation {
-  let current: ResolvedLocation = { doc, node, pointer };
+  let current: ResolvedLocation = { doc, node: resolveAlias(node) ?? node, pointer };
   const visited = new Set<Node>();
   for (;;) {
     if (!isMap(current.node)) return current;
@@ -56,7 +64,7 @@ export function resolveMaybeRef(
     visited.add(current.node);
     const result = resolveRef(graph, current.doc, refPair.value.value, undefined);
     if (!result.ok) return current;
-    current = { doc: result.doc, node: result.node, pointer: result.pointer };
+    current = { doc: result.doc, node: resolveAlias(result.node) ?? result.node, pointer: result.pointer };
   }
 }
 

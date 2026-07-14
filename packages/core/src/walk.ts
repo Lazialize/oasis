@@ -1,6 +1,30 @@
 import { isAlias, isMap, isNode, isScalar, isSeq } from "yaml";
 import type { Document as YamlDocument, Node } from "yaml";
 
+const ownerDocuments = new WeakMap<Node, YamlDocument>();
+
+/** Register the owning YAML document for every physical AST node. */
+export function registerNodeDocument(root: Node, doc: YamlDocument): void {
+  const seen = new Set<Node>();
+  walk(root);
+
+  function walk(node: Node): void {
+    if (seen.has(node)) return;
+    seen.add(node);
+    ownerDocuments.set(node, doc);
+    if (isMap(node)) {
+      for (const pair of node.items) {
+        if (isNode(pair.key)) walk(pair.key);
+        if (isNode(pair.value)) walk(pair.value);
+      }
+    } else if (isSeq(node)) {
+      for (const item of node.items) {
+        if (isNode(item)) walk(item);
+      }
+    }
+  }
+}
+
 /** The string form of a map key, as used for JSON Pointer segments. */
 export function keyToString(key: unknown): string {
   if (isScalar(key)) return String(key.value);
@@ -15,12 +39,14 @@ export function keyToString(key: unknown): string {
  * Range semantics: the returned node is the *anchor target*, so an aliased value is treated as the
  * value it stands for — its source range points at the anchored definition, never lost.
  */
-export function resolveAlias(node: Node, doc: YamlDocument, seen: Set<Node> = new Set()): Node | undefined {
+export function resolveAlias(node: Node, doc?: YamlDocument, seen: Set<Node> = new Set()): Node | undefined {
+  const owningDoc = doc ?? ownerDocuments.get(node);
   let current: Node = node;
   while (isAlias(current)) {
+    if (!owningDoc) return undefined;
     if (seen.has(current)) return undefined;
     seen.add(current);
-    const target = current.resolve(doc);
+    const target = current.resolve(owningDoc);
     if (!target) return undefined;
     current = target;
   }
@@ -87,11 +113,38 @@ function mapKeyIndex(node: Node & { items: readonly { key: unknown; value: unkno
  * pointer traversal descends through `*alias` / merge-key values.
  */
 export function childAt(node: Node, segment: string, doc?: YamlDocument): Node | undefined {
-  if (!doc) return childAtDirect(node, segment);
-  const container = resolveAlias(node, doc);
+  const owningDoc = doc ?? ownerDocuments.get(node);
+  if (!owningDoc) return childAtDirect(node, segment);
+  const container = resolveAlias(node, owningDoc);
   if (!container) return undefined;
-  const child = childAtDirect(container, segment);
-  return child ? resolveAlias(child, doc) : undefined;
+  return childAtWithMerges(container, segment, owningDoc, new Set());
+}
+
+function childAtWithMerges(node: Node, segment: string, doc: YamlDocument, seen: Set<Node>): Node | undefined {
+  const container = resolveAlias(node, doc);
+  if (!container || seen.has(container)) return undefined;
+  seen.add(container);
+
+  const direct = childAtDirect(container, segment);
+  if (direct) return resolveAlias(direct, doc);
+  if (!isMap(container)) return undefined;
+
+  for (const pair of container.items) {
+    if (keyToString(pair.key) !== "<<" || !isNode(pair.value)) continue;
+    const merged = resolveAlias(pair.value, doc);
+    if (!merged) continue;
+    if (isMap(merged)) {
+      const found = childAtWithMerges(merged, segment, doc, seen);
+      if (found) return found;
+    } else if (isSeq(merged)) {
+      for (const item of merged.items) {
+        if (!isNode(item)) continue;
+        const found = childAtWithMerges(item, segment, doc, seen);
+        if (found) return found;
+      }
+    }
+  }
+  return undefined;
 }
 
 function childAtDirect(node: Node, segment: string): Node | undefined {

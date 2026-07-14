@@ -40,7 +40,7 @@ export { offsetAtPosition, positionAtOffset, rangeFromOffsets, zeroRange } from 
 export type { FileSuppressions, SuppressedRules } from "./suppressions.ts";
 export { extractSuppressions, isSuppressed } from "./suppressions.ts";
 
-export { childAt, keyToString } from "./walk.ts";
+export { childAt, keyToString, resolveAlias } from "./walk.ts";
 
 export type { ComponentSection } from "./components.ts";
 export { COMPONENT_SECTIONS } from "./components.ts";
