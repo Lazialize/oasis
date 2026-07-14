@@ -40,7 +40,7 @@ import {
   scanWorkspaceRootsForProjects,
 } from "./project.ts";
 import { createValidationRunner } from "./validation.ts";
-import { createServerContext, invalidateGraph } from "./workspace.ts";
+import { createServerContext, findEntriesLastContaining, invalidateGraph } from "./workspace.ts";
 
 const DEBOUNCE_MS = 250;
 
@@ -356,27 +356,47 @@ export function startServer(): Connection {
     runSafely(connection, "handleDocumentEvent", () => handleDocumentEvent(uriToPath(event.document.uri), event.document.getText()));
   });
 
-  documents.onDidClose((event) => {
-    const path = uriToPath(event.document.uri);
-    // Only standalone entries (no owning project) need their diagnostics cleared here: a
-    // project-member document keeps being linted by its project regardless of whether it's open
-    // (project mode publishes diagnostics for every file in a project's entry graphs unconditionally),
-    // so closing it must not touch what's published. A standalone entry's diagnostics, though, only
-    // ever came from *this* document being open — once it closes there's no watcher left to
-    // refresh or clear them (only `oasis.config.jsonc` is watched), so without this they'd linger
-    // in the Problems panel forever.
+  /** Closing a document discards its in-memory buffer: from now on the overlay FS reads this path
+   * from *disk*, so anything computed from the (possibly unsaved, now-discarded) buffer content
+   * must be recomputed (issue #50). */
+  async function handleDocumentClose(path: string): Promise<void> {
     const wasStandaloneEntry = ctx.openStandaloneEntries.has(path);
     invalidateGraph(ctx, path);
     ctx.openStandaloneEntries.delete(path);
     // Any validation still in flight for this entry was reading the just-discarded buffer; its
-    // result must not land after the close (issue #49).
+    // result must not land after the close (issue #49). Same for a still-pending debounce.
     runner.invalidateEntry(path);
-    if (wasStandaloneEntry) clearPublishedFor(path);
     const timer = debounceTimers.get(path);
     if (timer) {
       clearTimeout(timer);
       debounceTimers.delete(path);
     }
+
+    // Closing an edited-but-unsaved config buffer must snap the project back to what the config
+    // file on disk says (the overlay no longer covers this path, so this reload reads disk).
+    if (isConfigFilePath(path)) {
+      await reloadProjectAtConfigPath(path);
+      return;
+    }
+
+    // A standalone entry's diagnostics only ever came from *this* document being open — once it
+    // closes there's nothing left to refresh or clear them, so clear now (only this entry's
+    // contribution; a sibling graph's diagnostics on shared files survive the merge).
+    if (wasStandaloneEntry) clearPublishedFor(path);
+
+    // The closed document may be a member of one or more project entry graphs, or a `$ref`'d
+    // fragment of other open standalone entries, whose published diagnostics were computed from
+    // the discarded buffer: revalidate those entries from the underlying FileSystem so unsaved
+    // content stops being reflected in the Problems panel.
+    const projectEntries = [...ctx.projects.values()].flatMap((project) => project.entryPaths);
+    const affected = new Set(findEntriesLastContaining(ctx, path, projectEntries));
+    if (projectEntries.includes(path)) affected.add(path);
+    for (const entryPath of findEntriesLastContaining(ctx, path, ctx.openStandaloneEntries)) affected.add(entryPath);
+    for (const entryPath of affected) await validate(entryPath);
+  }
+
+  documents.onDidClose((event) => {
+    runSafely(connection, "handleDocumentClose", () => handleDocumentClose(uriToPath(event.document.uri)));
   });
 
   connection.onDefinition(async (params) => {

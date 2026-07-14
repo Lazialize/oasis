@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -347,5 +348,144 @@ paths:
       15000,
     );
     expect(cleared.params.diagnostics).toEqual([]);
+  }, 20000);
+
+  test("closing an unsaved project-member buffer revalidates it from disk (#50)", async () => {
+    // On disk everything is clean; the open buffer for the fragment is edited (unsaved) to drop
+    // its operationId. Closing that buffer discards the edit, so the server must recompute the
+    // project's diagnostics from disk instead of leaving the discarded buffer's error published.
+    const dir = mkdtempSync(join(tmpdir(), "oasis-lsp-close-revalidate-"));
+    mkdirSync(join(dir, "paths"), { recursive: true });
+    const fragmentPath = join(dir, "paths", "pets.yaml");
+    const fragmentUri = pathToFileURL(fragmentPath).toString();
+    writeFileSync(join(dir, "oasis.config.jsonc"), `{ "entries": ["openapi.yaml"] }`);
+    writeFileSync(
+      join(dir, "openapi.yaml"),
+      `openapi: 3.1.0
+info:
+  title: Entry
+  version: "1.0.0"
+paths:
+  /pets:
+    $ref: './paths/pets.yaml'
+`,
+    );
+    const fragmentTextGood = `get:
+  operationId: listPets
+  tags: [pets]
+  description: List pets.
+  responses:
+    '200':
+      description: OK
+`;
+    writeFileSync(fragmentPath, fragmentTextGood);
+
+    client = new LspClient();
+    const initResult = await client.request("initialize", {
+      processId: null,
+      rootUri: pathToFileURL(dir).toString(),
+      capabilities: {},
+    });
+    expect(initResult.result?.capabilities).toBeDefined();
+    client.notify("initialized", {});
+
+    // Project mode publishes eagerly at startup: the on-disk fragment is clean.
+    const initial = await client.waitFor(
+      (msg) => msg.method === "textDocument/publishDiagnostics" && msg.params?.uri === fragmentUri,
+      15000,
+    );
+    expect(initial.params.diagnostics).toEqual([]);
+
+    // Open the fragment with unsaved bad content: the missing operationId shows up.
+    client.notify("textDocument/didOpen", {
+      textDocument: {
+        uri: fragmentUri,
+        languageId: "yaml",
+        version: 1,
+        text: fragmentTextGood.replace("  operationId: listPets\n", ""),
+      },
+    });
+    await client.waitFor(
+      (msg) =>
+        msg.method === "textDocument/publishDiagnostics" &&
+        msg.params?.uri === fragmentUri &&
+        msg.params.diagnostics.some((d: { code?: string }) => d.code === "operation/operation-id"),
+      15000,
+    );
+
+    // Close the buffer without saving: diagnostics must be recomputed from the (clean) disk file.
+    client.notify("textDocument/didClose", { textDocument: { uri: fragmentUri } });
+    const afterClose = await client.waitFor(
+      (msg) =>
+        msg.method === "textDocument/publishDiagnostics" &&
+        msg.params?.uri === fragmentUri &&
+        !msg.params.diagnostics.some((d: { code?: string }) => d.code === "operation/operation-id"),
+      15000,
+    );
+    expect(afterClose.params.diagnostics).toEqual([]);
+  }, 20000);
+
+  test("closing an unsaved oasis.config.jsonc buffer reloads project config from disk (#50)", async () => {
+    // On disk the config declares one (bad) entry. The open config buffer is edited (unsaved) to
+    // an empty entries list, unloading the project and clearing its diagnostics. Closing that
+    // buffer must reload the config from disk and bring the entry's diagnostics back.
+    const dir = mkdtempSync(join(tmpdir(), "oasis-lsp-config-close-"));
+    const configPath = join(dir, "oasis.config.jsonc");
+    const entryUri = pathToFileURL(join(dir, "a.yaml")).toString();
+    writeFileSync(configPath, `{ "entries": ["a.yaml"] }`);
+    writeFileSync(
+      join(dir, "a.yaml"),
+      `openapi: 3.1.0
+info:
+  title: Bad
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Missing'
+`,
+    );
+
+    client = new LspClient();
+    const initResult = await client.request("initialize", {
+      processId: null,
+      rootUri: pathToFileURL(dir).toString(),
+      capabilities: {},
+    });
+    expect(initResult.result?.capabilities).toBeDefined();
+    client.notify("initialized", {});
+
+    const hasUnresolvedRef = (msg: any): boolean =>
+      msg.method === "textDocument/publishDiagnostics" &&
+      msg.params?.uri === entryUri &&
+      msg.params.diagnostics.some((d: { code?: string }) => d.code === "refs/no-unresolved");
+
+    await client.waitFor(hasUnresolvedRef, 15000);
+
+    // Unsaved config edit drops all entries: the project unloads and a.yaml's diagnostics clear.
+    client.notify("textDocument/didOpen", {
+      textDocument: {
+        uri: pathToFileURL(configPath).toString(),
+        languageId: "jsonc",
+        version: 1,
+        text: `{ "entries": [] }`,
+      },
+    });
+    const cleared = await client.waitFor(
+      (msg) =>
+        msg.method === "textDocument/publishDiagnostics" && msg.params?.uri === entryUri && msg.params.diagnostics.length === 0,
+      15000,
+    );
+    expect(cleared.params.diagnostics).toEqual([]);
+
+    // Closing the unsaved buffer must snap back to the on-disk config: entry linted again.
+    client.notify("textDocument/didClose", { textDocument: { uri: pathToFileURL(configPath).toString() } });
+    await client.waitFor(hasUnresolvedRef, 15000);
   }, 20000);
 });
