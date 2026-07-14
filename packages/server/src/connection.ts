@@ -1,5 +1,7 @@
+import { sep } from "node:path";
 import {
   createConnection,
+  FileChangeType,
   TextDocuments,
   TextDocumentSyncKind,
   CompletionItemKind as LspCompletionItemKind,
@@ -29,7 +31,7 @@ import { prepareRename, renameComponent } from "./handlers/rename.ts";
 import { getWorkspaceSymbols } from "./handlers/workspace-symbol.ts";
 import type { SymbolNodeKind, SymbolResult } from "./handlers/document-symbol.ts";
 import type { WorkspaceSymbolKind } from "./handlers/workspace-symbol.ts";
-import { getDiagnosticsByFile, toLspRange } from "./diagnostics.ts";
+import { toLspRange } from "./diagnostics.ts";
 import { routeDocument } from "./document-routing.ts";
 import { OverlayFileSystem } from "./overlay-fs.ts";
 import {
@@ -39,7 +41,8 @@ import {
   resolveConfigForEntry,
   scanWorkspaceRootsForProjects,
 } from "./project.ts";
-import { createServerContext, invalidateGraph } from "./workspace.ts";
+import { createValidationRunner } from "./validation.ts";
+import { createServerContext, findEntriesLastContaining, invalidateGraph } from "./workspace.ts";
 
 const DEBOUNCE_MS = 250;
 
@@ -129,24 +132,19 @@ export function startServer(): Connection {
   let initConfigFiles: unknown;
 
   const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  const lastPublishedFiles = new Map<string, Set<string>>();
+  // Per-entry diagnostics bookkeeping (issue #48): diagnostics are stored per `entry -> file` and
+  // every publish is the merged, deduplicated union across entries, so a file shared by several
+  // entry graphs never has one entry's findings clobber another's.
+  const runner = createValidationRunner(ctx, {
+    publish: (filePath, diagnostics) => connection.sendDiagnostics({ uri: pathToUri(filePath), diagnostics }),
+  });
   // The config path a standalone (non-project-member) entry last had a config warning published
   // against, so a later validate() that resolves to no warning (or a different config path) can
   // clear the stale one rather than leaving it to linger (see `resolveConfigForEntry`).
   const standaloneConfigWarningPaths = new Map<string, string>();
 
   async function validate(entryPath: string): Promise<void> {
-    const byFile = await getDiagnosticsByFile(ctx, entryPath);
-    const prev = lastPublishedFiles.get(entryPath) ?? new Set<string>();
-    for (const file of prev) {
-      if (!byFile.has(file)) {
-        connection.sendDiagnostics({ uri: pathToUri(file), diagnostics: [] });
-      }
-    }
-    for (const [file, diagnostics] of byFile) {
-      connection.sendDiagnostics({ uri: pathToUri(file), diagnostics });
-    }
-    lastPublishedFiles.set(entryPath, new Set(byFile.keys()));
+    await runner.validate(entryPath);
 
     // Standalone entries have no project registration to hang a config warning off of
     // (`reloadProjectAtConfigPath` only runs for project config paths), so surface/clear the
@@ -167,14 +165,11 @@ export function startServer(): Connection {
   }
 
   /** Clear previously-published diagnostics for an entry whose project was unloaded (config
-   * deleted, or the entry dropped from `entries`), so stale diagnostics don't linger. */
+   * deleted, or the entry dropped from `entries`), so stale diagnostics don't linger. Only this
+   * entry's *contribution* is removed: a file shared with a sibling entry keeps the sibling's
+   * diagnostics (see `createValidationRunner`). */
   function clearPublishedFor(entryPath: string): void {
-    const prev = lastPublishedFiles.get(entryPath);
-    if (!prev) return;
-    for (const file of prev) {
-      connection.sendDiagnostics({ uri: pathToUri(file), diagnostics: [] });
-    }
-    lastPublishedFiles.delete(entryPath);
+    runner.clearEntry(entryPath);
   }
 
   function scheduleValidate(entryPath: string): void {
@@ -297,10 +292,11 @@ export function startServer(): Connection {
         }
         clearPublishedFor(path);
         // `clearPublishedFor` only sends a publish for `path` when a previous `validate` recorded
-        // one (e.g. this document was a standalone entry before this edit); publish an empty set
-        // unconditionally too, so the client always hears about this document's own (lack of)
-        // diagnostics on this transition, even the first time it's ever seen (never validated).
-        connection.sendDiagnostics({ uri: pathToUri(path), diagnostics: [] });
+        // one (e.g. this document was a standalone entry before this edit); publish unconditionally
+        // too, so the client always hears about this document's own diagnostics on this transition,
+        // even the first time it's ever seen (never validated). Publishing the *merged* set (not a
+        // blanket empty) keeps any contribution another entry's graph still has for this file.
+        runner.republishFile(path);
         // It may still be a $ref'd fragment of one or more open standalone entries (see
         // `routeDocument`'s "ignored" case): re-validate those so their published diagnostics don't
         // go stale until the entry document itself is next edited. This also republishes the
@@ -309,6 +305,53 @@ export function startServer(): Connection {
         for (const entryPath of route.dependentStandaloneEntries ?? []) scheduleValidate(entryPath);
         return;
       }
+    }
+  }
+
+  /**
+   * External (on-disk) change to a watched non-config file — git checkout, codegen, another
+   * process — reported by the client's workspace-scoped YAML/JSON watcher (issue #51). The server
+   * filters by membership itself: only entries whose graph involves `path` are revalidated, and a
+   * file that's currently open is skipped entirely (its content comes from the overlay buffer;
+   * disk must never replace unsaved edits — the close handler reconciles with disk later).
+   */
+  async function handleWatchedFileChange(path: string, changeType: FileChangeType): Promise<void> {
+    if (documents.get(pathToUri(path))) return;
+
+    invalidateGraph(ctx, path);
+
+    // Entries affected per the last-known graph membership (survives the invalidation above):
+    // project entries and open standalone entries whose graph contained the file, plus the file
+    // itself when it is a project entry.
+    const projectEntries = [...ctx.projects.values()].flatMap((project) => project.entryPaths);
+    const affected = new Set(findEntriesLastContaining(ctx, path, projectEntries));
+    if (projectEntries.includes(path)) affected.add(path);
+    for (const entryPath of findEntriesLastContaining(ctx, path, ctx.openStandaloneEntries)) affected.add(entryPath);
+
+    if (changeType === FileChangeType.Created) {
+      // A new file can change glob-expanded `entries` membership, so re-resolve projects whose
+      // directory tree contains it; and it can satisfy a previously-unresolved `$ref` in *any*
+      // graph (an unresolved target never made it into `lastGraphFiles`), so revalidate every
+      // project entry rather than trying to guess which graphs wanted this file.
+      for (const project of [...ctx.projects.values()]) {
+        if (path.startsWith(project.configDir + sep)) await reloadProjectAtConfigPath(project.configPath);
+      }
+      for (const project of ctx.projects.values()) {
+        for (const entryPath of project.entryPaths) affected.add(entryPath);
+      }
+    } else if (changeType === FileChangeType.Deleted && projectEntries.includes(path)) {
+      // A deleted entry file shrinks project membership (declared entries get a warning, glob
+      // matches drop out); reload so stale entries don't keep getting linted.
+      for (const project of [...ctx.projects.values()]) {
+        if (project.entryPaths.includes(path)) await reloadProjectAtConfigPath(project.configPath);
+      }
+    }
+
+    // Reloads above may have changed which entries still exist; only revalidate live ones (a
+    // dropped entry's diagnostics were already cleared by `reloadProjectAtConfigPath`).
+    const liveEntries = new Set([...ctx.projects.values()].flatMap((project) => project.entryPaths));
+    for (const entryPath of affected) {
+      if (liveEntries.has(entryPath) || ctx.openStandaloneEntries.has(entryPath)) scheduleValidate(entryPath);
     }
   }
 
@@ -350,6 +393,8 @@ export function startServer(): Connection {
       const path = uriToPath(change.uri);
       if (isConfigFilePath(path)) {
         runSafely(connection, "reloadProjectAtConfigPath", () => reloadProjectAtConfigPath(path));
+      } else {
+        runSafely(connection, "handleWatchedFileChange", () => handleWatchedFileChange(path, change.type));
       }
     }
   });
@@ -362,24 +407,47 @@ export function startServer(): Connection {
     runSafely(connection, "handleDocumentEvent", () => handleDocumentEvent(uriToPath(event.document.uri), event.document.getText()));
   });
 
-  documents.onDidClose((event) => {
-    const path = uriToPath(event.document.uri);
-    // Only standalone entries (no owning project) need their diagnostics cleared here: a
-    // project-member document keeps being linted by its project regardless of whether it's open
-    // (project mode publishes diagnostics for every file in a project's entry graphs unconditionally),
-    // so closing it must not touch what's published. A standalone entry's diagnostics, though, only
-    // ever came from *this* document being open — once it closes there's no watcher left to
-    // refresh or clear them (only `oasis.config.jsonc` is watched), so without this they'd linger
-    // in the Problems panel forever.
+  /** Closing a document discards its in-memory buffer: from now on the overlay FS reads this path
+   * from *disk*, so anything computed from the (possibly unsaved, now-discarded) buffer content
+   * must be recomputed (issue #50). */
+  async function handleDocumentClose(path: string): Promise<void> {
     const wasStandaloneEntry = ctx.openStandaloneEntries.has(path);
     invalidateGraph(ctx, path);
     ctx.openStandaloneEntries.delete(path);
-    if (wasStandaloneEntry) clearPublishedFor(path);
+    // Any validation still in flight for this entry was reading the just-discarded buffer; its
+    // result must not land after the close (issue #49). Same for a still-pending debounce.
+    runner.invalidateEntry(path);
     const timer = debounceTimers.get(path);
     if (timer) {
       clearTimeout(timer);
       debounceTimers.delete(path);
     }
+
+    // Closing an edited-but-unsaved config buffer must snap the project back to what the config
+    // file on disk says (the overlay no longer covers this path, so this reload reads disk).
+    if (isConfigFilePath(path)) {
+      await reloadProjectAtConfigPath(path);
+      return;
+    }
+
+    // A standalone entry's diagnostics only ever came from *this* document being open — once it
+    // closes there's nothing left to refresh or clear them, so clear now (only this entry's
+    // contribution; a sibling graph's diagnostics on shared files survive the merge).
+    if (wasStandaloneEntry) clearPublishedFor(path);
+
+    // The closed document may be a member of one or more project entry graphs, or a `$ref`'d
+    // fragment of other open standalone entries, whose published diagnostics were computed from
+    // the discarded buffer: revalidate those entries from the underlying FileSystem so unsaved
+    // content stops being reflected in the Problems panel.
+    const projectEntries = [...ctx.projects.values()].flatMap((project) => project.entryPaths);
+    const affected = new Set(findEntriesLastContaining(ctx, path, projectEntries));
+    if (projectEntries.includes(path)) affected.add(path);
+    for (const entryPath of findEntriesLastContaining(ctx, path, ctx.openStandaloneEntries)) affected.add(entryPath);
+    for (const entryPath of affected) await validate(entryPath);
+  }
+
+  documents.onDidClose((event) => {
+    runSafely(connection, "handleDocumentClose", () => handleDocumentClose(uriToPath(event.document.uri)));
   });
 
   connection.onDefinition(async (params) => {
