@@ -10,6 +10,7 @@ import {
   nodeAtPointer,
   nodeAtPosition,
   offsetAtPosition,
+  parseFragmentPointer,
   parsePointer,
   parseRefString,
   positionAtOffset,
@@ -746,7 +747,7 @@ function buildInlineRef(graph: WorkspaceGraph, entryDoc: OasisDocument, doc: Oas
   // Cycle check: would inlining loop back into one of the ref's own ancestors? Same-document only
   // (a simple ancestor-pointer check, not a full cross-file cycle search).
   if (result.doc.filePath === doc.filePath) {
-    const targetSegs = parsePointer(result.pointer);
+    const targetSegs = parseFragmentPointer(result.pointer);
     const targetIsAncestor = targetSegs.length <= segments.length && targetSegs.every((seg, i) => seg === segments[i]);
     if (targetIsAncestor) return undefined;
   }

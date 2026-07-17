@@ -23,33 +23,40 @@ export function safeDecodeURIComponent(segment: string): string {
 }
 
 /**
- * Split a JSON Pointer string (e.g. "/paths/~1users/get") into unescaped segments. When a pointer
- * comes from a `$ref` fragment (a URI-reference), each segment may additionally be percent-encoded
- * per URI syntax; per RFC 6901 §6 that percent-encoding is undone *before* the `~1`/`~0` JSON
- * Pointer escaping (percent-encoding is a URI-level concern, layered on top of the pointer's own
- * escaping). Segments that are never URI-encoded (the common case) round-trip unchanged.
+ * Split a plain RFC 6901 JSON Pointer string (e.g. "/paths/~1users/get") into unescaped segments.
+ * This implements RFC 6901 alone: only `~1`/`~0` escaping is undone, with no URI percent-decoding.
+ * A pointer that comes from a `$ref` URI fragment carries an *additional* percent-encoding layer on
+ * top of this — use `parseFragmentPointer` for that case instead.
  */
 export function parsePointer(pointer: string): string[] {
   if (pointer === "") return [];
   const raw = pointer.startsWith("/") ? pointer.slice(1) : pointer;
   if (raw === "") return [""];
-  return raw.split("/").map((seg) => unescapePointerSegment(safeDecodeURIComponent(seg)));
+  return raw.split("/").map((seg) => unescapePointerSegment(seg));
 }
 
 /**
- * Join unescaped segments back into a JSON Pointer string, as the exact inverse of
- * `parsePointer`. Because `parsePointer` percent-decodes each segment (for `$ref`-fragment
- * pointers), a literal `%` that happens to be followed by two hex digits would be corrupted on
- * re-parse unless it is percent-encoded here. Only that case is encoded — a `%` not followed by
- * hex survives `safeDecodeURIComponent` unchanged — so pointers stay human-readable in
- * diagnostics for the common case.
+ * Join unescaped segments back into a plain RFC 6901 JSON Pointer string, the exact inverse of
+ * `parsePointer`.
  */
 export function formatPointer(segments: string[]): string {
   if (segments.length === 0) return "";
-  return (
-    "/" +
-    segments
-      .map((seg) => escapePointerSegment(seg).replace(/%(?=[0-9a-fA-F]{2})/g, "%25"))
-      .join("/")
-  );
+  return "/" + segments.map((seg) => escapePointerSegment(seg)).join("/");
+}
+
+/**
+ * Split a JSON Pointer taken from a `$ref` URI fragment (e.g. "#/paths/~1users/get" with the
+ * leading "#" already stripped) into unescaped segments. Per RFC 6901 §6, a URI fragment carries an
+ * extra percent-encoding layer on top of the pointer's own `~1`/`~0` escaping; that layer is undone
+ * here, exactly once, before RFC 6901 unescaping — segments are split on the *raw* (not yet decoded)
+ * string first so an encoded `%2F` cannot masquerade as a pointer separator. Segments that are never
+ * percent-encoded (the common case) round-trip unchanged. Plain, non-fragment pointers (e.g. the
+ * public `nodeAtPointer` API) must go through `parsePointer` instead — applying this decoding there
+ * would corrupt a literal `%`-containing key.
+ */
+export function parseFragmentPointer(fragment: string): string[] {
+  if (fragment === "") return [];
+  const raw = fragment.startsWith("/") ? fragment.slice(1) : fragment;
+  if (raw === "") return [""];
+  return raw.split("/").map((seg) => unescapePointerSegment(safeDecodeURIComponent(seg)));
 }

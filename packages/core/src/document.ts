@@ -3,7 +3,7 @@ import type { Node } from "yaml";
 import type { OasisDocument } from "./parse.ts";
 import type { Range } from "./types.ts";
 import { rangeFromOffsets } from "./position.ts";
-import { formatPointer, parsePointer } from "./pointer.ts";
+import { formatPointer, parseFragmentPointer, parsePointer } from "./pointer.ts";
 import { childAt, keyToString } from "./walk.ts";
 import { resolveUriReference, stripUriFragment } from "./uri.ts";
 
@@ -22,7 +22,27 @@ export function nodeAtPointer(doc: OasisDocument, pointer: string): PointerLooku
 
 /** Resolve a JSON Pointer relative to an embedded JSON Schema resource root. */
 export function nodeAtPointerFrom(doc: OasisDocument, root: Node, pointer: string): PointerLookupResult | undefined {
-  const segments = parsePointer(pointer);
+  return nodeAtSegments(doc, root, parsePointer(pointer));
+}
+
+/**
+ * Resolve a `$ref` URI fragment (percent-encoded per URI syntax, on top of RFC 6901 `~1`/`~0`
+ * escaping) to the AST node + range at that location. Use this — never `nodeAtPointer` — for a
+ * pointer taken from a `$ref` string, so exactly one URI-decoding layer is undone before the plain
+ * RFC 6901 walk.
+ */
+export function nodeAtFragmentPointer(doc: OasisDocument, fragment: string): PointerLookupResult | undefined {
+  const root = doc.yamlDoc.contents;
+  if (!isNode(root)) return undefined;
+  return nodeAtSegments(doc, root, parseFragmentPointer(fragment));
+}
+
+/** Resolve a `$ref` URI fragment relative to an embedded JSON Schema resource root. */
+export function nodeAtFragmentPointerFrom(doc: OasisDocument, root: Node, fragment: string): PointerLookupResult | undefined {
+  return nodeAtSegments(doc, root, parseFragmentPointer(fragment));
+}
+
+function nodeAtSegments(doc: OasisDocument, root: Node, segments: string[]): PointerLookupResult | undefined {
   let current: Node = root;
   for (const seg of segments) {
     const next = childAt(current, seg, doc.yamlDoc);
@@ -32,14 +52,10 @@ export function nodeAtPointerFrom(doc: OasisDocument, root: Node, pointer: strin
   return nodeToResult(current, doc);
 }
 
-/**
- * Recover the canonical base at one concrete JSON Pointer occurrence. Unlike a node-identity map,
- * this distinguishes the same YAML alias target reached below different `$id` ancestors.
- */
-export function resourceBaseAtPointer(doc: OasisDocument, root: Node, pointer: string, initialBaseUri: string): string {
+function resourceBaseAtSegments(doc: OasisDocument, root: Node, segments: string[], initialBaseUri: string): string {
   let current: Node = root;
   let baseUri = initialBaseUri;
-  for (const segment of parsePointer(pointer)) {
+  for (const segment of segments) {
     const next = childAt(current, segment, doc.yamlDoc);
     if (!next) break;
     current = next;
@@ -53,30 +69,26 @@ export function resourceBaseAtPointer(doc: OasisDocument, root: Node, pointer: s
 }
 
 /**
- * Recover the base active immediately before the JSON Pointer target applies its own `$id`.
+ * Recover the canonical base at one concrete `$ref` fragment occurrence. Unlike a node-identity map,
+ * this distinguishes the same YAML alias target reached below different `$id` ancestors.
+ */
+export function resourceBaseAtFragmentPointer(doc: OasisDocument, root: Node, fragment: string, initialBaseUri: string): string {
+  return resourceBaseAtSegments(doc, root, parseFragmentPointer(fragment), initialBaseUri);
+}
+
+/**
+ * Recover the base active immediately before a `$ref` fragment's target applies its own `$id`.
  * `initialBaseUri` is the effective base of `root`; ancestor `$id`s below `root` are applied, but
  * the final target is deliberately excluded so a scoped traversal can process its `$id` once.
  */
-export function resourceBaseBeforePointerTarget(
+export function resourceBaseBeforeFragmentPointerTarget(
   doc: OasisDocument,
   root: Node,
-  pointer: string,
+  fragment: string,
   initialBaseUri: string,
 ): string {
-  let current: Node = root;
-  let baseUri = initialBaseUri;
-  const segments = parsePointer(pointer);
-  for (let index = 0; index < segments.length - 1; index++) {
-    const next = childAt(current, segments[index]!, doc.yamlDoc);
-    if (!next) break;
-    current = next;
-    if (!isMap(current)) continue;
-    const idPair = current.items.find((pair) => isScalar(pair.key) && pair.key.value === "$id");
-    if (isScalar(idPair?.value) && typeof idPair.value.value === "string") {
-      baseUri = stripUriFragment(resolveUriReference(baseUri, idPair.value.value));
-    }
-  }
-  return baseUri;
+  const segments = parseFragmentPointer(fragment);
+  return resourceBaseAtSegments(doc, root, segments.slice(0, -1), initialBaseUri);
 }
 
 function nodeToResult(node: Node, doc: OasisDocument): PointerLookupResult | undefined {

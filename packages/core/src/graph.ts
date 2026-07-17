@@ -3,7 +3,7 @@ import { isNode } from "yaml";
 import type { Node } from "yaml";
 import { buildAnchorIndex, resolveAnchor } from "./anchor.ts";
 import type { AnchorIndex, SchemaResourceEntry } from "./anchor.ts";
-import { nodeAtPointerFrom, resourceBaseBeforePointerTarget } from "./document.ts";
+import { nodeAtFragmentPointerFrom, resourceBaseBeforeFragmentPointerTarget } from "./document.ts";
 import type { FileSystem } from "./filesystem.ts";
 import { type OasisDocument, parseDocument } from "./parse.ts";
 import { rangeFromOffsets, zeroRange } from "./position.ts";
@@ -112,11 +112,11 @@ export async function loadWorkspaceGraph(fs: FileSystem, entryPath: string): Pro
   function targetScope(resource: GraphResource, pointer: string): { node: Node; baseUri: string } | undefined {
     if (pointer === "") return { node: resource.node, baseUri: resource.parentBaseUri };
     if (pointer.startsWith("/")) {
-      const node = nodeAtPointerFrom(resource.doc, resource.node, pointer)?.node;
+      const node = nodeAtFragmentPointerFrom(resource.doc, resource.node, pointer)?.node;
       return node
         ? {
           node,
-          baseUri: resourceBaseBeforePointerTarget(resource.doc, resource.node, pointer, resource.baseUri),
+          baseUri: resourceBaseBeforeFragmentPointerTarget(resource.doc, resource.node, pointer, resource.baseUri),
         }
         : undefined;
     }

@@ -18,7 +18,7 @@ import {
   type Range,
   type ResolvedRef,
   type WorkspaceGraph,
-  parsePointer,
+  parseFragmentPointer,
   parseRefString,
   rangeFromOffsets,
   resolveRef,
@@ -187,18 +187,18 @@ function ensureSectionObject(ctx: BundleContext, section: string): Record<string
   return obj;
 }
 
-/** Derive the components section a lifted value belongs in. */
+/** Derive the components section a lifted value belongs in. `pointer` is a resolved `$ref` fragment. */
 function deriveSection(pointer: string, hint: string | undefined): string {
-  const segs = parsePointer(pointer);
+  const segs = parseFragmentPointer(pointer);
   if (segs[0] === "components" && segs.length >= 2 && COMPONENT_SECTION_SET.has(segs[1] ?? "")) {
     return segs[1] as string;
   }
   return hint ?? "schemas";
 }
 
-/** Derive a deterministic, unique candidate name for a lifted value. */
+/** Derive a deterministic, unique candidate name for a lifted value. `pointer` is a resolved `$ref` fragment. */
 function deriveName(ctx: BundleContext, pointer: string, doc: OasisDocument, section: string): string {
-  const segs = parsePointer(pointer);
+  const segs = parseFragmentPointer(pointer);
   const raw = segs.length > 0 ? segs[segs.length - 1] ?? "" : fileStem(doc.filePath);
   const candidate = sanitizeName(raw === "" ? fileStem(doc.filePath) : raw);
   return uniqueName(candidate, ensureUsedNames(ctx, section));
@@ -351,7 +351,7 @@ function assignCycleSlot(
   if (existing) return { assigned: existing, isNew: false };
 
   const section = deriveSection(result.pointer, hint);
-  const segs = parsePointer(result.pointer);
+  const segs = parseFragmentPointer(result.pointer);
   const pointsAtEntryComponent =
     result.doc.filePath === ctx.entryDoc.filePath &&
     segs.length === 3 &&

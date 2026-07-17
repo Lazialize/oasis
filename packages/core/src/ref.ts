@@ -2,7 +2,7 @@ import { pathToFileURL } from "node:url";
 import { isMap, isNode, isScalar, isSeq } from "yaml";
 import type { Node, Scalar } from "yaml";
 import { resolveAnchor } from "./anchor.ts";
-import { nodeAtPointer, nodeAtPointerFrom, resourceBaseAtPointer } from "./document.ts";
+import { nodeAtFragmentPointer, nodeAtFragmentPointerFrom, resourceBaseAtFragmentPointer } from "./document.ts";
 import { resolveFileReference } from "./filesystem.ts";
 import { containerExtensionsAreOpaque, isContainerKey, isLiteralDataKey } from "./node-context.ts";
 import { resolveAlias } from "./walk.ts";
@@ -23,8 +23,8 @@ export interface RefParts {
 /**
  * Split a `$ref` string like "./other%20v2.yaml#/components/schemas/Foo" into its raw URI parts.
  * Neither part is decoded here: URI classification must see the original file part (otherwise an
- * encoded colon in a relative filename can become an apparent scheme), and `parsePointer` decodes
- * fragment segments individually so an encoded `/` cannot become a pointer separator.
+ * encoded colon in a relative filename can become an apparent scheme), and `parseFragmentPointer`
+ * decodes fragment segments individually so an encoded `/` cannot become a pointer separator.
  */
 export function parseRefString(ref: string): RefParts {
   const hashIdx = ref.indexOf("#");
@@ -476,10 +476,10 @@ export function resolveRef(
     } else {
       const result = pointer === ""
         ? { node: resource.node, range: resource.range }
-        : nodeAtPointerFrom(resource.doc, resource.node, pointer);
+        : nodeAtFragmentPointerFrom(resource.doc, resource.node, pointer);
       if (result) {
         const targetBase = contextualRef?.targetKind === "schema" && pointer.startsWith("/")
-          ? resourceBaseAtPointer(resource.doc, resource.node, pointer, resource.baseUri)
+          ? resourceBaseAtFragmentPointer(resource.doc, resource.node, pointer, resource.baseUri)
           : resource.baseUri;
         return { ok: true, doc: resource.doc, node: result.node, pointer, range: result.range, resourceUri: targetBase };
       }
@@ -558,7 +558,7 @@ export function resolveRef(
     return { ok: true, doc: targetDoc, node: anchor.node, pointer, range: anchor.range };
   }
 
-  const result = nodeAtPointer(targetDoc, pointer);
+  const result = nodeAtFragmentPointer(targetDoc, pointer);
   if (!result) {
     return {
       ok: false,
