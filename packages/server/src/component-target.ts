@@ -6,6 +6,7 @@ import {
   nodeAtPointer,
   nodeAtPosition,
   offsetAtPosition,
+  parseFragmentPointer,
   parsePointer,
   rangeFromOffsets,
   resolveAlias,
@@ -27,9 +28,10 @@ export interface ComponentTarget {
   pointer: string;
 }
 
-/** If `pointer` is at or under `/components/<section>/<name>`, return the enclosing component. */
-function enclosingComponent(pointer: string): { section: string; name: string; pointer: string } | undefined {
-  const segments = parsePointer(pointer);
+/** If `fragment` (a resolved `$ref` pointer) is at or under `/components/<section>/<name>`, return
+ * the enclosing component. */
+function enclosingComponent(fragment: string): { section: string; name: string; pointer: string } | undefined {
+  const segments = parseFragmentPointer(fragment);
   if (segments[0] !== "components" || segments.length < 3) return undefined;
   const section = segments[1]!;
   const name = segments[2]!;

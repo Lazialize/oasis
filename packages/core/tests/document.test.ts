@@ -58,3 +58,43 @@ describe("pointer <-> position round trips", () => {
     expect(isScalar(result?.node) && result?.node.value).toBe("List users");
   });
 });
+
+describe("nodeAtPointer is a plain RFC 6901 pointer API (no URI percent-decoding)", () => {
+  // A literal percent-escape-looking key ("%7Bid%7D") and a literal-brace key ("{id}") coexist as
+  // distinct sibling keys — only a `$ref` fragment's extra percent-encoding layer should ever
+  // conflate them (see issue #96).
+  const text = [
+    "paths:",
+    "  /pets/%7Bid%7D:",
+    "    get:",
+    "      summary: literal percent-escape key",
+    "  /pets/{id}:",
+    "    get:",
+    "      summary: brace key",
+  ].join("\n");
+  const filePath = `${fixturesDir}/pointer-percent.yaml`;
+  const doc = parseDocument(text, filePath);
+
+  test("resolves the literal '%7Bid%7D' key, not the '{id}' key", () => {
+    const result = nodeAtPointer(doc, "/paths/~1pets~1%7Bid%7D/get/summary");
+    expect(isScalar(result?.node) && result?.node.value).toBe("literal percent-escape key");
+  });
+
+  test("resolves the '{id}' key via its own (unescaped) segment", () => {
+    const result = nodeAtPointer(doc, "/paths/~1pets~1{id}/get/summary");
+    expect(isScalar(result?.node) && result?.node.value).toBe("brace key");
+  });
+
+  test("nodeAtPosition -> nodeAtPointer round-trips through a plain, non-percent-encoded pointer", () => {
+    const needle = "literal percent-escape key";
+    const offset = text.indexOf(needle) + 1;
+    const found = nodeAtPosition(doc, offset);
+    expect(found).toBeDefined();
+    expect(found?.pointer).toBe("/paths/~1pets~1%7Bid%7D/get/summary");
+    // No more compensating "%25..." double-encoding in the emitted pointer.
+    expect(found?.pointer).not.toContain("%25");
+
+    const byPointer = nodeAtPointer(doc, found!.pointer);
+    expect(byPointer?.range).toEqual(found!.range);
+  });
+});

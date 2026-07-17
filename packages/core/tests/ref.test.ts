@@ -549,6 +549,50 @@ describe("InMemoryFileSystem workspace graph", () => {
   });
 });
 
+describe("$ref fragment resolution decodes exactly one URI percent-encoding layer (issue #96)", () => {
+  test("resolves a percent-encoded fragment to the literal key, not its unencoded sibling", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": [
+        "openapi: 3.0.3",
+        "paths:",
+        "  /pets/%7Bid%7D:",
+        "    get:",
+        "      summary: literal percent-escape key",
+        "  /pets/{id}:",
+        "    get:",
+        "      summary: brace key",
+        "components:",
+        "  schemas:",
+        "    Percent:",
+        "      $ref: '#/paths/~1pets~1%257Bid%257D/get'",
+        "    Brace:",
+        "      $ref: '#/paths/~1pets~1{id}/get'",
+        "",
+      ].join("\n"),
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    expect(allDiagnostics(graph)).toEqual([]);
+    const entryDoc = graph.documents.get("/virtual/entry.yaml")!;
+
+    // "%257B" in the $ref fragment percent-decodes (once) to the literal pointer segment
+    // "~1pets~1%7Bid%7D", which RFC 6901-unescapes to the path key "/pets/%7Bid%7D".
+    const percentResult = resolveRef(graph, entryDoc, "#/paths/~1pets~1%257Bid%257D/get");
+    expect(percentResult.ok).toBe(true);
+    if (!percentResult.ok) throw new Error("expected resolved ref");
+    const percentSummary = isMap(percentResult.node) &&
+      percentResult.node.items.find((p) => isScalar(p.key) && p.key.value === "summary")?.value;
+    expect(isScalar(percentSummary) && percentSummary.value).toBe("literal percent-escape key");
+
+    // The plain (unencoded) fragment resolves to the distinct "{id}" sibling.
+    const braceResult = resolveRef(graph, entryDoc, "#/paths/~1pets~1{id}/get");
+    expect(braceResult.ok).toBe(true);
+    if (!braceResult.ok) throw new Error("expected resolved ref");
+    const braceSummary = isMap(braceResult.node) &&
+      braceResult.node.items.find((p) => isScalar(p.key) && p.key.value === "summary")?.value;
+    expect(isScalar(braceSummary) && braceSummary.value).toBe("brace key");
+  });
+});
+
 describe("failed-load negative cache", () => {
   test("a missing file referenced from multiple sites yields one diagnostic", async () => {
     const fs = new InMemoryFileSystem({

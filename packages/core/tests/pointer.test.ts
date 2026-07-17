@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { escapePointerSegment, formatPointer, parsePointer, unescapePointerSegment } from "../src/pointer.ts";
+import { escapePointerSegment, formatPointer, parseFragmentPointer, parsePointer, unescapePointerSegment } from "../src/pointer.ts";
 
 describe("JSON Pointer escaping", () => {
   test("escapes ~ and /", () => {
@@ -20,7 +20,7 @@ describe("JSON Pointer escaping", () => {
   });
 });
 
-describe("parsePointer / formatPointer", () => {
+describe("parsePointer / formatPointer (plain RFC 6901, no URI decoding)", () => {
   test("parses a simple pointer", () => {
     expect(parsePointer("/paths/~1users/get")).toEqual(["paths", "/users", "get"]);
   });
@@ -37,49 +37,75 @@ describe("parsePointer / formatPointer", () => {
   test("formatPointer of no segments is the empty string", () => {
     expect(formatPointer([])).toBe("");
   });
+
+  test("does not percent-decode a segment", () => {
+    // Percent-encoding is a URI-fragment concern, not part of plain RFC 6901; a literal "%7Bid%7D"
+    // key must round-trip as itself, never as the distinct key "{id}" (issue #96).
+    expect(parsePointer("/pets/%7Bid%7D")).toEqual(["pets", "%7Bid%7D"]);
+    expect(parsePointer("/pet%20store/Foo")).toEqual(["pet%20store", "Foo"]);
+  });
+
+  test("formatPointer does not add compensating percent-encoding", () => {
+    expect(formatPointer(["a", "%41"])).toBe("/a/%41");
+    expect(formatPointer(["pets", "%7Bid%7D"])).toBe("/pets/%7Bid%7D");
+  });
 });
 
-describe("formatPointer / parsePointer inverse property", () => {
+describe("formatPointer / parsePointer inverse property (plain RFC 6901)", () => {
   test("round-trips a segment containing a literal % followed by hex digits", () => {
     const segments = ["components", "schemas", "Foo%41Bar"];
     expect(parsePointer(formatPointer(segments))).toEqual(segments);
   });
 
-  test("encodes only the corruptible case, keeping other % literal", () => {
-    // "%zz" / a trailing "%" survive safeDecodeURIComponent unchanged, so they stay unencoded.
-    expect(formatPointer(["a", "100%"])).toBe("/a/100%");
-    expect(formatPointer(["a", "%zz"])).toBe("/a/%zz");
-    expect(formatPointer(["a", "%41"])).toBe("/a/%2541");
-    expect(parsePointer(formatPointer(["a", "100%"]))).toEqual(["a", "100%"]);
-    expect(parsePointer(formatPointer(["a", "%zz"]))).toEqual(["a", "%zz"]);
-  });
-
-  test("round-trips ~, /, unicode, and mixed segments", () => {
+  test("round-trips ~, /, unicode, percent-escape-looking, and mixed segments", () => {
     for (const segments of [
       ["a~b", "c/d"],
       ["日本語", "emoji 🐫"],
       ["%7E0", "~0", "%2F"],
+      ["pets", "{id}"],
+      ["pets", "%7Bid%7D"],
       [""],
     ]) {
       expect(parsePointer(formatPointer(segments))).toEqual(segments);
     }
   });
+
+  test("distinguishes a literal '{id}' key from a literal '%7Bid%7D' key", () => {
+    // The exact scenario from issue #96: two distinct sibling keys that must never collide.
+    const braceKey = formatPointer(["paths", "/pets/{id}"]);
+    const percentKey = formatPointer(["paths", "/pets/%7Bid%7D"]);
+    expect(braceKey).not.toBe(percentKey);
+    expect(parsePointer(braceKey)).toEqual(["paths", "/pets/{id}"]);
+    expect(parsePointer(percentKey)).toEqual(["paths", "/pets/%7Bid%7D"]);
+  });
 });
 
-describe("percent-decoding (URI-encoded $ref fragments)", () => {
+describe("parseFragmentPointer ($ref URI fragments: one percent-decode, then RFC 6901)", () => {
   test("percent-decodes a segment before applying ~ unescaping", () => {
     // "%7E0" percent-decodes to the literal text "~0", which is then unescaped as a JSON Pointer
     // escape to "~" -- same final result as writing the escape directly, unencoded.
-    expect(parsePointer("/a/%7E0")).toEqual(["a", "~"]);
-    expect(parsePointer("/a/~0")).toEqual(["a", "~"]);
+    expect(parseFragmentPointer("/a/%7E0")).toEqual(["a", "~"]);
+    expect(parseFragmentPointer("/a/~0")).toEqual(["a", "~"]);
   });
 
   test("percent-decodes a plain (non ~-escaped) segment", () => {
-    expect(parsePointer("/pet%20store/Foo")).toEqual(["pet store", "Foo"]);
+    expect(parseFragmentPointer("/pet%20store/Foo")).toEqual(["pet store", "Foo"]);
   });
 
   test("a malformed percent-encoding is treated as literal text instead of throwing", () => {
-    expect(() => parsePointer("/a%/b")).not.toThrow();
-    expect(parsePointer("/a%/b")).toEqual(["a%", "b"]);
+    expect(() => parseFragmentPointer("/a%/b")).not.toThrow();
+    expect(parseFragmentPointer("/a%/b")).toEqual(["a%", "b"]);
+  });
+
+  test("resolves a fragment pointer to the same segments plain parsePointer would give for the unencoded form", () => {
+    expect(parseFragmentPointer("/pets/%7Bid%7D")).toEqual(parsePointer("/pets/{id}"));
+  });
+
+  test("parses the root fragment", () => {
+    expect(parseFragmentPointer("")).toEqual([]);
+  });
+
+  test("an encoded '/' (%2F) inside a segment does not become a pointer separator", () => {
+    expect(parseFragmentPointer("/a%2Fb/c")).toEqual(["a/b", "c"]);
   });
 });
