@@ -2,7 +2,8 @@ import { pathToFileURL } from "node:url";
 import { isMap, isNode, isScalar, isSeq } from "yaml";
 import type { Node, Scalar } from "yaml";
 import { resolveAnchor } from "./anchor.ts";
-import { nodeAtFragmentPointer, nodeAtFragmentPointerFrom, resourceBaseAtFragmentPointer } from "./document.ts";
+import { nodeAtFragmentPointer, nodeAtFragmentPointerFrom, pointerToNode, resourceBaseAtFragmentPointer } from "./document.ts";
+import { canonicalPointer } from "./pointer.ts";
 import { resolveFileReference } from "./filesystem.ts";
 import { containerExtensionsAreOpaque, isContainerKey, isLiteralDataKey } from "./node-context.ts";
 import { resolveAlias } from "./walk.ts";
@@ -431,6 +432,13 @@ export interface ResolvedRef {
   node: Node;
   pointer: string;
   range: Range;
+  /**
+   * Canonical RFC 6901 pointer of the target *within its resource*, independent of the input
+   * fragment's spelling: URI percent-encoding is decoded and an anchor is mapped to the pointer of
+   * the node it names. Together with `resourceUri` this is the target's canonical identity, so two
+   * URI-equivalent refs (percent-encoding variants, anchor vs pointer) deduplicate to one target.
+   */
+  canonicalPointer: string;
   /** Canonical JSON Schema resource containing the target, when known. */
   resourceUri?: string;
 }
@@ -472,7 +480,17 @@ export function resolveRef(
     if (pointer !== "" && !pointer.startsWith("/")) {
       const anchor = resolveAnchor(resource.doc, pointer, resource.baseUri, resource.index) ??
         (!contextualRef ? resolveAnchor(resource.doc, pointer, undefined, resource.index) : undefined);
-      if (anchor) return { ok: true, doc: resource.doc, node: anchor.node, pointer, range: anchor.range, resourceUri: resource.baseUri };
+      if (anchor) {
+        return {
+          ok: true,
+          doc: resource.doc,
+          node: anchor.node,
+          pointer,
+          canonicalPointer: pointerToNode(resource.doc, resource.node, anchor.node) ?? canonicalPointer(pointer),
+          range: anchor.range,
+          resourceUri: resource.baseUri,
+        };
+      }
     } else {
       const result = pointer === ""
         ? { node: resource.node, range: resource.range }
@@ -481,7 +499,7 @@ export function resolveRef(
         const targetBase = contextualRef?.targetKind === "schema" && pointer.startsWith("/")
           ? resourceBaseAtFragmentPointer(resource.doc, resource.node, pointer, resource.baseUri)
           : resource.baseUri;
-        return { ok: true, doc: resource.doc, node: result.node, pointer, range: result.range, resourceUri: targetBase };
+        return { ok: true, doc: resource.doc, node: result.node, pointer, canonicalPointer: canonicalPointer(pointer), range: result.range, resourceUri: targetBase };
       }
     }
   }
@@ -555,7 +573,9 @@ export function resolveRef(
         },
       };
     }
-    return { ok: true, doc: targetDoc, node: anchor.node, pointer, range: anchor.range };
+    const root = targetDoc.yamlDoc.contents;
+    const canonical = isNode(root) ? pointerToNode(targetDoc, root, anchor.node) : undefined;
+    return { ok: true, doc: targetDoc, node: anchor.node, pointer, canonicalPointer: canonical ?? canonicalPointer(pointer), range: anchor.range };
   }
 
   const result = nodeAtFragmentPointer(targetDoc, pointer);
@@ -572,5 +592,5 @@ export function resolveRef(
     };
   }
 
-  return { ok: true, doc: targetDoc, node: result.node, pointer, range: result.range };
+  return { ok: true, doc: targetDoc, node: result.node, pointer, canonicalPointer: canonicalPointer(pointer), range: result.range };
 }

@@ -4,7 +4,7 @@ import type { OasisDocument } from "./parse.ts";
 import type { Range } from "./types.ts";
 import { rangeFromOffsets } from "./position.ts";
 import { formatPointer, parseFragmentPointer, parsePointer } from "./pointer.ts";
-import { childAt, keyToString } from "./walk.ts";
+import { childAt, keyToString, resolveAlias } from "./walk.ts";
 import { resolveUriReference, stripUriFragment } from "./uri.ts";
 
 export interface PointerLookupResult {
@@ -89,6 +89,45 @@ export function resourceBaseBeforeFragmentPointerTarget(
 ): string {
   const segments = parseFragmentPointer(fragment);
   return resourceBaseAtSegments(doc, root, segments.slice(0, -1), initialBaseUri);
+}
+
+/**
+ * Compute the canonical RFC 6901 pointer of `target` within the resource rooted at `root`, or
+ * `undefined` when `target` is not reachable from `root`. Used to give an anchor target (or any
+ * resolved node) the same canonical identity a JSON Pointer `$ref` to the same node produces, so the
+ * bundler can deduplicate a node reached via an anchor against one reached via a pointer. YAML
+ * aliases are resolved as the search descends, and the first path found in document order wins, so
+ * the result is deterministic. `root` maps to "".
+ */
+export function pointerToNode(doc: OasisDocument, root: Node, target: Node): string | undefined {
+  const wanted = resolveAlias(target, doc.yamlDoc) ?? target;
+  const seen = new Set<Node>();
+
+  function search(node: Node, segments: string[]): string[] | undefined {
+    const resolved = resolveAlias(node, doc.yamlDoc);
+    if (!resolved) return undefined;
+    if (resolved === wanted) return segments;
+    if (seen.has(resolved)) return undefined;
+    seen.add(resolved);
+    if (isMap(resolved)) {
+      for (const pair of resolved.items) {
+        if (!isNode(pair.value)) continue;
+        const found = search(pair.value, [...segments, keyToString(pair.key)]);
+        if (found) return found;
+      }
+    } else if (isSeq(resolved)) {
+      for (let index = 0; index < resolved.items.length; index++) {
+        const item = resolved.items[index];
+        if (!isNode(item)) continue;
+        const found = search(item, [...segments, String(index)]);
+        if (found) return found;
+      }
+    }
+    return undefined;
+  }
+
+  const segments = search(root, []);
+  return segments ? formatPointer(segments) : undefined;
 }
 
 function nodeToResult(node: Node, doc: OasisDocument): PointerLookupResult | undefined {

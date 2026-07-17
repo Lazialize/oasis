@@ -165,8 +165,19 @@ function isAnyValuedField(kind: OpenApiObjectKind | undefined, key: string): boo
     (kind === "link" && (key === "parameters" || key === "requestBody"));
 }
 
+/**
+ * The canonical identity of a resolved target: its containing resource plus the target's canonical
+ * RFC 6901 pointer within that resource. Keying by canonical identity (rather than the raw input
+ * fragment spelling) means URI-equivalent refs — percent-encoding variants, or an anchor vs a JSON
+ * Pointer to the same node — lift a single shared component, while distinct embedded `$id` resources
+ * that happen to share a within-resource pointer stay separate.
+ */
+function identityKey(resourceUri: string, canonicalPointer: string): string {
+  return `${resourceUri} ${canonicalPointer}`;
+}
+
 function identityKeyOf(result: ResolvedRef): string {
-  return `${result.doc.filePath} ${result.pointer}`;
+  return identityKey(result.resourceUri ?? pathToFileURL(result.doc.filePath).href, result.canonicalPointer);
 }
 
 function ensureUsedNames(ctx: BundleContext, section: string): Set<string> {
@@ -1065,8 +1076,8 @@ function addUnreferencedEntryComponents(ctx: BundleContext, componentsNode: Node
           if (!isNode(entryPair.value)) continue;
           const name = keyToString(entryPair.key);
           const pointer = formatPointer(["components", section, name]);
-          const identityKey = `${ctx.entryDoc.filePath} ${pointer}`;
-          if (ctx.visitedEntryIdentities.has(identityKey) || ctx.cycleAssignments.has(identityKey)) continue;
+          const key = identityKey(pathToFileURL(ctx.entryDoc.filePath).href, pointer);
+          if (ctx.visitedEntryIdentities.has(key) || ctx.cycleAssignments.has(key)) continue;
           toEmit.push({ section, name, value: entryPair.value });
         }
       });

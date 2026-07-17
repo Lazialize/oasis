@@ -45,6 +45,18 @@ export function formatPointer(segments: string[]): string {
 }
 
 /**
+ * Canonicalize a `$ref` JSON Pointer fragment (a URI-reference fragment, e.g.
+ * "/components/schemas/%46oo") into a pure RFC 6901 pointer ("/components/schemas/Foo"): the
+ * fragment's URI percent-encoding layer is undone once, then the segments are re-emitted with only
+ * JSON Pointer (`~0`/`~1`) escaping. URI-equivalent spellings of the same target (`/Foo` vs
+ * `/%46oo`, differently escaped segments) therefore collapse to one identity string, so callers can
+ * key a resolved target by its canonical pointer instead of its raw spelling.
+ */
+export function canonicalPointer(fragment: string): string {
+  return formatPointer(parseFragmentPointer(fragment));
+}
+
+/**
  * Split a JSON Pointer taken from a `$ref` URI fragment (e.g. "#/paths/~1users/get" with the
  * leading "#" already stripped) into unescaped segments. Per RFC 6901 §6, a URI fragment carries an
  * extra percent-encoding layer on top of the pointer's own `~1`/`~0` escaping; that layer is undone
