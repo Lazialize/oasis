@@ -5,6 +5,7 @@ import {
   type Diagnostic,
   detectVersion,
   formatPointer,
+  graphReferences,
   isLiteralDataKey,
   isNamedEntryContainer,
   keyToString,
@@ -16,6 +17,7 @@ import {
   type ResolvedRef,
   type WorkspaceGraph,
   parsePointer,
+  parseRefString,
   rangeFromOffsets,
   resolveRef,
   zeroRange,
@@ -753,6 +755,26 @@ export function bundle(graph: WorkspaceGraph, options: BundleOptions = {}): Bund
   const diagnostics: Diagnostic[] = [];
   const entryDoc = graph.documents.get(graph.entryPath);
   if (!entryDoc) return { output: "", diagnostics };
+
+  // A fragment-only `$dynamicRef` owned by the entry remains valid because its resource is not
+  // relocated. Any external file part, or a fragment-only ref inside a schema lifted from another
+  // document, can change dynamic scope during bundling. Preserve it verbatim, but diagnose the
+  // unsupported relocation instead of silently claiming a semantics-preserving bundle.
+  for (const doc of graph.documents.values()) {
+    for (const ref of graphReferences(graph, doc)) {
+      if (
+        ref.kind !== "dynamic-ref" ||
+        (parseRefString(ref.value).filePart === "" && doc.filePath === graph.entryPath)
+      ) continue;
+      diagnostics.push({
+        message: `$dynamicRef "${ref.value}" from "${doc.filePath}" was preserved because its JSON Schema dynamic scope cannot be safely relocated during bundling`,
+        severity: "warning",
+        code: "unsupported-dynamic-ref",
+        source: "bundler",
+        range: ref.range,
+      });
+    }
+  }
 
   const root = entryDoc.yamlDoc.contents;
   if (!isNode(root) || !isMap(root)) return { output: "", diagnostics };

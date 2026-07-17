@@ -24,7 +24,7 @@ export interface WorkspaceGraph {
 }
 
 /**
- * Load an entry document and transitively follow every `$ref` that points at another file,
+ * Load an entry document and transitively follow every semantic reference that points at another file,
  * building a workspace graph. Never throws: missing files and reference cycles are recorded as
  * diagnostics on the returned graph.
  */
@@ -81,6 +81,7 @@ export async function loadWorkspaceGraph(fs: FileSystem, entryPath: string): Pro
     if (!refs.some((existing) =>
       existing.value === ref.value &&
       existing.range.startOffset === ref.range.startOffset &&
+      existing.kind === ref.kind &&
       existing.targetKind === ref.targetKind
     )) refs.push(ref);
     references.set(path, refs);
