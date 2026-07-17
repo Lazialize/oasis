@@ -377,19 +377,72 @@ function assignCycleSlot(
   return { assigned, isNew: true };
 }
 
-/** Merge sibling keys (alongside `$ref`) into an already-dereferenced value, converted with the same mode. */
+/**
+ * Combine the sibling keys found alongside a `$ref` with the already-dereferenced target `content`,
+ * honoring version- and object-specific `$ref` sibling semantics rather than a blind shallow overlay:
+ *
+ * - **Schema Object** (a `$ref` in a schema position, `hint === "schemas"`):
+ *   - 3.1: `$ref` is a JSON Schema 2020-12 keyword and siblings are independent conjunctive keywords.
+ *     A last-write-wins overlay would silently drop the target when a sibling keyword conflicts, so
+ *     the conjunction is preserved by wrapping both in `allOf: [<target>, {<siblings>}]` (which also
+ *     handles boolean-schema targets, where an overlay isn't even expressible).
+ *   - 3.0: `$ref` follows JSON Reference semantics — sibling keywords are ignored.
+ * - **Reference Object** (a `$ref` in any non-schema position):
+ *   - 3.1: only `summary`/`description` may override the target; all other siblings are ignored.
+ *   - 3.0: the Reference Object has no fields besides `$ref`; all siblings are ignored.
+ */
 function mergeSiblingsInto(ctx: BundleContext, doc: OasisDocument, mapNode: Node, content: unknown, hint: string | undefined): unknown {
   if (!isMap(mapNode)) return content;
   const siblingPairs = mapNode.items.filter((p) => keyToString(p.key) !== "$ref" && isNode(p.value));
   if (siblingPairs.length === 0) return content;
 
+  const version = detectVersion(doc) ?? detectVersion(ctx.entryDoc);
+
+  if (hint === "schemas") {
+    if (version !== "3.1") return content; // 3.0 Schema Object: JSON Reference — siblings ignored.
+
+    // Real JSON Schema keyword siblings are conjunctive: preserve them via `allOf` so a conflicting
+    // keyword can't overwrite the target (and so a boolean-schema target survives). `x-*` siblings
+    // are annotations, not validation keywords — they never conflict, so they attach to the schema
+    // object directly (matching a `$ref`'s own extension placement) rather than joining the allOf.
+    const keywordSiblings = siblingPairs.filter((p) => !keyToString(p.key).startsWith("x-"));
+    const extensionSiblings = siblingPairs.filter((p) => keyToString(p.key).startsWith("x-"));
+
+    let result: unknown = content;
+    if (keywordSiblings.length > 0) {
+      const siblings: Record<string, unknown> = {};
+      for (const pair of keywordSiblings) {
+        const key = keyToString(pair.key);
+        setKey(siblings, key, convertObjectMember(ctx, doc, key, pair.value as Node, hint));
+      }
+      result = { allOf: [content, siblings] };
+    }
+    if (extensionSiblings.length > 0) {
+      const base: Record<string, unknown> =
+        typeof result === "object" && result !== null && !Array.isArray(result)
+          ? { ...(result as Record<string, unknown>) }
+          : { allOf: [result] };
+      for (const pair of extensionSiblings) {
+        const key = keyToString(pair.key);
+        setKey(base, key, convertObjectMember(ctx, doc, key, pair.value as Node, hint));
+      }
+      result = base;
+    }
+    return result;
+  }
+
+  // Reference Object: 3.1 allows `summary`/`description` overrides; 3.0 allows none.
+  if (version !== "3.1") return content;
   const base: Record<string, unknown> =
     typeof content === "object" && content !== null && !Array.isArray(content) ? { ...(content as Record<string, unknown>) } : {};
+  let overridden = false;
   for (const pair of siblingPairs) {
     const key = keyToString(pair.key);
+    if (key !== "summary" && key !== "description") continue;
     setKey(base, key, convertObjectMember(ctx, doc, key, pair.value as Node, hint));
+    overridden = true;
   }
-  return base;
+  return overridden ? base : content;
 }
 
 /**

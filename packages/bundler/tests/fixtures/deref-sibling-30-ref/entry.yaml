@@ -1,0 +1,14 @@
+openapi: 3.0.3
+info:
+  title: Deref Sibling 3.0 Reference Object
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      tags: [pets]
+      description: List pets.
+      responses:
+        '200':
+          $ref: './response.yaml#/Response'
+          description: sibling-must-be-ignored

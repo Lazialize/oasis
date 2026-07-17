@@ -1,0 +1,17 @@
+openapi: 3.1.0
+info:
+  title: Deref Sibling 3.1 Reference Object
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          $ref: './response.yaml#/Response'
+          summary: overridden-summary
+          description: overridden-description
+          content:
+            application/json:
+              schema:
+                type: integer
