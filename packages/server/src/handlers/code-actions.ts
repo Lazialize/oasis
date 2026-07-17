@@ -3,8 +3,8 @@ import type { Node } from "yaml";
 import {
   classifyUriReference,
   detectVersion,
-  findRefs,
   findSubtreeRefs,
+  graphReferences,
   formatPointer,
   nodeAtPointer,
   nodeAtPosition,
@@ -356,7 +356,7 @@ function isReferencedInAnyGraph(graphs: WorkspaceGraph[], targetFilePath: string
   for (const graph of graphs) {
     if (!graph.documents.has(targetFilePath)) continue;
     for (const fileDoc of graph.documents.values()) {
-      for (const ref of findRefs(fileDoc)) {
+      for (const ref of graphReferences(graph, fileDoc)) {
         const resolved = resolveRef(graph, fileDoc, ref.value);
         if (resolved.ok && resolved.doc.filePath === targetFilePath && resolved.pointer === pointer) return true;
       }
@@ -732,9 +732,12 @@ function buildInlineRef(graph: WorkspaceGraph, entryDoc: OasisDocument, doc: Oas
   if (segments.length === 2 && (segments[0] === "paths" || segments[0] === "webhooks")) return undefined;
 
   const refPair = refNode.items.find((p) => keyToString(p.key) === "$ref");
-  if (!refPair || !isScalar(refPair.value) || typeof refPair.value.value !== "string") return undefined;
+  const refValue = refPair && isNode(refPair.value)
+    ? isAlias(refPair.value) ? refPair.value.resolve(doc.yamlDoc) : refPair.value
+    : undefined;
+  if (!isScalar(refValue) || typeof refValue.value !== "string") return undefined;
 
-  const result = resolveRef(graph, doc, refPair.value.value);
+  const result = resolveRef(graph, doc, refValue.value);
   if (!result.ok || !result.node.range) return undefined; // unresolved target: not offered
 
   // Cycle check: would inlining loop back into one of the ref's own ancestors? Same-document only

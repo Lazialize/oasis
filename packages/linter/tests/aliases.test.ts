@@ -104,3 +104,52 @@ test("#104 aliases and merge keys preserve general OpenAPI lint traversal", asyn
     expect(diagnostic.range.start.line).toBe(4);
   }
 });
+
+test("scalar aliases retain $ref resolution, example validation, and discriminator mapping semantics", async () => {
+  const entry = "/virtual/entry.yaml";
+  const graph = await loadWorkspaceGraph(new InMemoryFileSystem({
+    [entry]: [
+      "openapi: 3.0.3",
+      "info: { title: t, version: '1' }",
+      "x-schema-uri: &schemaUri './schemas.yaml#/Thing'",
+      "x-dog-uri: &dogUri './schemas.yaml#/Dog'",
+      "paths:",
+      "  /thing:",
+      "    get:",
+      "      operationId: getThing",
+      "      responses:",
+      "        '200':",
+      "          description: ok",
+      "          content:",
+      "            application/json:",
+      "              schema: { $ref: *schemaUri }",
+      "              example: wrong",
+      "components:",
+      "  schemas:",
+      "    Pet:",
+      "      type: object",
+      "      required: [petType]",
+      "      properties: { petType: { type: string } }",
+      "      discriminator:",
+      "        propertyName: petType",
+      "        mapping: { dog: *dogUri }",
+      "      oneOf:",
+      "        - $ref: *dogUri",
+    ].join("\n"),
+    "/virtual/schemas.yaml": [
+      "Thing: { type: integer }",
+      "Dog:",
+      "  type: object",
+      "  required: [petType]",
+      "  properties: { petType: { type: string } }",
+    ].join("\n"),
+  }), entry);
+
+  const diagnostics = lint(graph, resolveConfig(undefined));
+  expect(diagnostics.filter((diagnostic) => diagnostic.rule === "examples/schema-match")).toHaveLength(1);
+  expect(
+    diagnostics.filter((diagnostic) =>
+      diagnostic.rule === "structure/discriminator" && diagnostic.message.includes("mapping")
+    ),
+  ).toEqual([]);
+});

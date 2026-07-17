@@ -44,6 +44,24 @@ describe("refs/no-unresolved", () => {
     const diagnostics = await lintFixture("valid/openapi.yaml");
     expect(diagnostics.some((d) => d.rule === "refs/no-unresolved")).toBe(false);
   });
+
+  test("ignores missing files named only inside an external Example value", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": [
+        "openapi: 3.1.0",
+        "info: { title: t, version: '1' }",
+        "paths: {}",
+        "components:",
+        "  examples:",
+        "    E: { $ref: './example.yaml' }",
+      ].join("\n"),
+      "/virtual/example.yaml": "value: { $ref: './missing-literal.yaml#/X' }",
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+
+    expect(diagnostics.filter((diagnostic) => diagnostic.rule === "refs/no-unresolved")).toEqual([]);
+  });
 });
 
 describe("refs/no-cycle", () => {

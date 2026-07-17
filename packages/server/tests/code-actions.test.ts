@@ -694,6 +694,37 @@ get:
 });
 
 describe("Inline reference", () => {
+  test("a $ref scalar Alias is resolved before inlining", async () => {
+    const ENTRY_PATH = "/repo/openapi.yaml";
+    const TEXT = `openapi: 3.0.3
+info: { title: Test, version: "1" }
+x-pet-ref: &petRef '#/components/schemas/Pet'
+paths:
+  /pets:
+    get:
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: *petRef
+components:
+  schemas:
+    Pet:
+      type: string
+`;
+    const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: TEXT }));
+    const position = positionOf(TEXT, "$ref: *petRef");
+    const results = await getCodeActions(ctx, { path: ENTRY_PATH, position, diagnostics: [] });
+    const action = results.find((result) => result.title === "Inline reference");
+
+    expect(action).toBeDefined();
+    const newText = applyEdits(TEXT, action!.edits);
+    expect(newText).not.toContain("$ref: *petRef");
+    expect(newText).toContain("              schema:\n                type: string\n");
+  });
+
   test("same-document ref: replaces the $ref with the target's re-indented content", async () => {
     const ENTRY_PATH = "/repo/openapi.yaml";
     const TEXT = `openapi: 3.1.0

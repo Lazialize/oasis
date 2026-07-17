@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { InMemoryFileSystem } from "@oasis/core";
+import { InMemoryFileSystem, loadWorkspaceGraph } from "@oasis/core";
+import { collectNameBasedRefs } from "../src/component-target.ts";
 import { getReferences } from "../src/handlers/references.ts";
 import { scanWorkspaceRootsForProjects } from "../src/project.ts";
 import { createServerContext } from "../src/workspace.ts";
@@ -12,6 +13,84 @@ async function contextWithProject() {
   await scanWorkspaceRootsForProjects(ctx, [ROOT]);
   return ctx;
 }
+
+async function nameBasedRefs(text: string) {
+  const path = "/aliases/openapi.yaml";
+  const graph = await loadWorkspaceGraph(new InMemoryFileSystem({ [path]: text }), path);
+  return collectNameBasedRefs(graph.documents.get(path)!);
+}
+
+describe("collectNameBasedRefs with YAML aliases", () => {
+  test("collects a security scheme from an aliased Security Requirement item", async () => {
+    const refs = await nameBasedRefs(`openapi: 3.1.0
+info: { title: Test, version: "1" }
+x-requirement: &requirement { ApiKey: [] }
+security: [*requirement]
+paths: {}
+components:
+  securitySchemes:
+    ApiKey: { type: apiKey, in: header, name: X-API-Key }
+`);
+
+    expect(refs.filter((ref) => ref.section === "securitySchemes").map((ref) => ref.name)).toEqual(["ApiKey"]);
+  });
+
+  test("collects a bare name from an aliased discriminator mapping object", async () => {
+    const refs = await nameBasedRefs(`openapi: 3.1.0
+info: { title: Test, version: "1" }
+x-mapping: &mapping
+  dog: Dog
+paths: {}
+components:
+  schemas:
+    Animal:
+      discriminator:
+        propertyName: kind
+        mapping: *mapping
+    Dog: { type: object }
+`);
+
+    expect(refs.filter((ref) => ref.section === "schemas").map((ref) => ref.name)).toEqual(["Dog"]);
+  });
+
+  test("collects a bare name from an aliased Discriminator Object", async () => {
+    const refs = await nameBasedRefs(`openapi: 3.1.0
+info: { title: Test, version: "1" }
+x-discriminator: &discriminator
+  propertyName: kind
+  mapping:
+    dog: Dog
+paths: {}
+components:
+  schemas:
+    Animal:
+      discriminator: *discriminator
+    Dog: { type: object }
+`);
+
+    expect(refs.filter((ref) => ref.section === "schemas").map((ref) => ref.name)).toEqual(["Dog"]);
+  });
+
+  test("bounds recursive aliases without suppressing later semantic occurrences", async () => {
+    const refs = await nameBasedRefs(`openapi: 3.1.0
+info: { title: Test, version: "1" }
+x-cycle: &cycle
+  self: *cycle
+x-discriminator: &discriminator
+  propertyName: kind
+  mapping:
+    dog: Dog
+paths: {}
+components:
+  schemas:
+    Animal:
+      discriminator: *discriminator
+    Dog: { type: object }
+`);
+
+    expect(refs.filter((ref) => ref.section === "schemas").map((ref) => ref.name)).toEqual(["Dog"]);
+  });
+});
 
 /** The three `$ref`s that resolve to `Pet`: two in the fragment file, one within the entry. */
 function expectAllPetRefs(results: { filePath: string }[]) {

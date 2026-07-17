@@ -1,4 +1,4 @@
-import { isMap, isScalar } from "yaml";
+import { isMap, isNode, isScalar } from "yaml";
 import type { Node } from "yaml";
 import {
   childAt,
@@ -58,11 +58,14 @@ export function resolveMaybeRef(
   for (;;) {
     if (!isMap(current.node)) return current;
     const refPair = current.node.items.find((p) => keyToString(p.key) === "$ref");
-    if (!refPair || !isScalar(refPair.value) || typeof refPair.value.value !== "string") return current;
+    const refValue = refPair && isNode(refPair.value)
+      ? resolveAlias(refPair.value, current.doc.yamlDoc) ?? refPair.value
+      : undefined;
+    if (!isScalar(refValue) || typeof refValue.value !== "string") return current;
     // A Reference Object seen twice on this chain means the chain loops back on itself.
     if (visited.has(current.node)) return current;
     visited.add(current.node);
-    const result = resolveRef(graph, current.doc, refPair.value.value, undefined);
+    const result = resolveRef(graph, current.doc, refValue.value, undefined);
     if (!result.ok) return current;
     current = { doc: result.doc, node: resolveAlias(result.node) ?? result.node, pointer: result.pointer };
   }

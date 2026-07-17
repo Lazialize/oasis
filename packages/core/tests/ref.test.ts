@@ -217,6 +217,81 @@ describe("$ref-as-literal-data is not treated as a reference", () => {
     expect(found).toHaveLength(1);
     expect(found[0]?.value).toBe("#/components/schemas/Foo");
   });
+
+  test("skips $ref-shaped data in Example.value and Link Any-valued fields", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": [
+        "openapi: 3.1.0",
+        "components:",
+        "  examples:",
+        "    Payload:",
+        "      value:",
+        "        $ref: './literal-only.yaml#/ExampleValue'",
+        "    Referenced:",
+        "      $ref: './targets.yaml#/Example'",
+        "    WholeFile:",
+        "      $ref: './whole-example.yaml'",
+        "  links:",
+        "    Next:",
+        "      operationId: receive",
+        "      parameters:",
+        "        payload:",
+        "          $ref: './literal-only.yaml#/ParameterValue'",
+        "      requestBody:",
+        "        $ref: './literal-only.yaml#/RequestBodyValue'",
+        "    Referenced:",
+        "      $ref: './targets.yaml#/Link'",
+      ].join("\n"),
+      "/virtual/targets.yaml": [
+        "Example:",
+        "  value: { $ref: './literal-example.yaml#/X' }",
+        "Link:",
+        "  operationId: receive",
+        "  requestBody: { $ref: './literal-link.yaml#/X' }",
+      ].join("\n"),
+      "/virtual/whole-example.yaml": "value: { $ref: './literal-whole.yaml#/X' }",
+      "/virtual/literal-example.yaml": "X: { ignored: true }",
+      "/virtual/literal-link.yaml": "X: { ignored: true }",
+      "/virtual/literal-whole.yaml": "X: { ignored: true }",
+    });
+
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const entryDoc = graph.documents.get("/virtual/entry.yaml")!;
+
+    expect(graph.documents.size).toBe(3);
+    expect(allDiagnostics(graph)).toEqual([]);
+    expect(findRefs(entryDoc).map((ref) => ref.value)).toEqual([
+      "./targets.yaml#/Example",
+      "./whole-example.yaml",
+      "./targets.yaml#/Link",
+    ]);
+  });
+
+  test("missing files named only by external Any payloads produce no diagnostics", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": [
+        "openapi: 3.1.0",
+        "components:",
+        "  examples:",
+        "    E: { $ref: './example.yaml' }",
+        "  links:",
+        "    L: { $ref: './targets.yaml#/Link' }",
+      ].join("\n"),
+      "/virtual/example.yaml": "value: { $ref: './missing-example.yaml#/X' }",
+      "/virtual/targets.yaml": [
+        "Link:",
+        "  operationId: receive",
+        "  parameters:",
+        "    payload: { $ref: './missing-parameter.yaml#/X' }",
+        "  requestBody: { $ref: './missing-body.yaml#/X' }",
+      ].join("\n"),
+    });
+
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+
+    expect(graph.documents.size).toBe(3);
+    expect(allDiagnostics(graph)).toEqual([]);
+  });
 });
 
 describe("container entries named like literal-data keywords are still references", () => {
@@ -279,6 +354,56 @@ describe("container entries named like literal-data keywords are still reference
 });
 
 describe("discriminator.mapping values are references", () => {
+  test("an aliased discriminator.mapping map retains reference semantics", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": [
+        "openapi: 3.0.3",
+        "components:",
+        "  schemas:",
+        "    Pet:",
+        "      type: object",
+        "      x-shared-mapping: &petMapping",
+        "        dog: './dog.yaml#/Dog'",
+        "      discriminator:",
+        "        propertyName: petType",
+        "        mapping: *petMapping",
+      ].join("\n"),
+      "/virtual/dog.yaml": "Dog:\n  type: object\n",
+    });
+
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    expect([...graph.documents.keys()].sort()).toEqual(["/virtual/dog.yaml", "/virtual/entry.yaml"]);
+    expect(allDiagnostics(graph)).toEqual([]);
+    expect(findRefs(graph.documents.get("/virtual/entry.yaml")!).map((ref) => ref.value)).toEqual([
+      "./dog.yaml#/Dog",
+    ]);
+  });
+
+  test("an aliased discriminator.mapping scalar retains its target value and source range", async () => {
+    const entry = "/virtual/entry.yaml";
+    const graph = await loadWorkspaceGraph(new InMemoryFileSystem({
+      [entry]: [
+        "openapi: 3.0.3",
+        "components:",
+        "  schemas:",
+        "    Source:",
+        "      default: &dogUri './dog.yaml#/Dog'",
+        "    Pet:",
+        "      discriminator:",
+        "        propertyName: petType",
+        "        mapping:",
+        "          dog: *dogUri",
+      ].join("\n"),
+      "/virtual/dog.yaml": "Dog:\n  type: object\n",
+    }), entry);
+
+    expect(graph.documents.has("/virtual/dog.yaml")).toBe(true);
+    expect(allDiagnostics(graph)).toEqual([]);
+    const refs = findRefs(graph.documents.get(entry)!);
+    expect(refs.map((ref) => ref.value)).toEqual(["./dog.yaml#/Dog"]);
+    expect(refs[0]?.range.start.line).toBe(4);
+  });
+
   test("a mapping value shaped like a $ref (file+pointer) is found by findRefs and its file is loaded into the workspace graph, even when nothing else references that file", async () => {
     const fs = new InMemoryFileSystem({
       "/virtual/entry.yaml": [
@@ -361,6 +486,50 @@ describe("discriminator.mapping values are references", () => {
     expect(graph.documents.size).toBe(1);
     expect(allDiagnostics(graph)).toEqual([]);
   });
+});
+
+test("a $ref scalar Alias is discovered using the anchor target's value and range", async () => {
+  const entry = "/virtual/entry.yaml";
+  const graph = await loadWorkspaceGraph(new InMemoryFileSystem({
+    [entry]: [
+      "openapi: 3.0.3",
+      "components:",
+      "  schemas:",
+      "    Source:",
+      "      default: &schemaUri './external.yaml#/External'",
+      "    Matrix:",
+      "      $ref: *schemaUri",
+    ].join("\n"),
+    "/virtual/external.yaml": "External:\n  type: string\n",
+  }), entry);
+
+  expect(graph.documents.has("/virtual/external.yaml")).toBe(true);
+  expect(allDiagnostics(graph)).toEqual([]);
+  const refs = findRefs(graph.documents.get(entry)!);
+  expect(refs.map((ref) => ref.value)).toEqual(["./external.yaml#/External"]);
+  expect(refs[0]?.range.start.line).toBe(4);
+});
+
+test("an aliased Schema examples sequence remains literal instance data", async () => {
+  const entry = "/virtual/entry.yaml";
+  const graph = await loadWorkspaceGraph(new InMemoryFileSystem({
+    [entry]: [
+      "openapi: 3.1.0",
+      "components:",
+      "  schemas:",
+      "    Source:",
+      "      type: array",
+      "      default: &values",
+      "        - $ref: './ghost.yaml#/Literal'",
+      "    Matrix:",
+      "      type: array",
+      "      examples: *values",
+    ].join("\n"),
+  }), entry);
+
+  expect([...graph.documents.keys()]).toEqual([entry]);
+  expect(allDiagnostics(graph)).toEqual([]);
+  expect(findRefs(graph.documents.get(entry)!)).toEqual([]);
 });
 
 describe("InMemoryFileSystem workspace graph", () => {

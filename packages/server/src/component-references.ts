@@ -1,4 +1,4 @@
-import { findRefs, resolveRef } from "@oasis/core";
+import { graphReferences, resolveRef } from "@oasis/core";
 import type { OasisDocument, Range, WorkspaceGraph } from "@oasis/core";
 import { collectNameBasedRefs, componentNameSegmentRange } from "./component-target.ts";
 import type { ComponentTarget } from "./component-target.ts";
@@ -69,7 +69,7 @@ export function collectComponentReferences(
   for (const { doc, graph } of referringDocs) {
     // `$ref`-based references (this also covers URI-style discriminator mappings, which `findRefs`
     // surfaces). A reference counts when it resolves to the component root or anywhere beneath it.
-    for (const ref of findRefs(doc)) {
+    for (const ref of graphReferences(graph, doc)) {
       const resolved = resolveRef(graph, doc, ref.value);
       if (!resolved.ok || resolved.doc.filePath !== target.doc.filePath) continue;
       if (resolved.pointer !== target.pointer && !resolved.pointer.startsWith(nestedPrefix)) continue;

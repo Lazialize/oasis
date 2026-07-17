@@ -1,6 +1,6 @@
 import { isMap, isNode, isScalar, isSeq } from "yaml";
 import type { Node } from "yaml";
-import { resolveRef } from "@oasis/core";
+import { resolveAlias, resolveRef } from "@oasis/core";
 import type { OasisDocument, OpenApiVersion, WorkspaceGraph } from "@oasis/core";
 import { childAt, keyToString } from "../util.ts";
 
@@ -61,10 +61,13 @@ function resolveSchema(env: ValidateEnv, loc: SchemaLoc): SchemaLoc | "unresolve
     if (!isMap(current.node)) return current;
     const refPair = current.node.items.find((p) => keyToString(p.key) === "$ref");
     if (!refPair) return current;
-    if (!isScalar(refPair.value) || typeof refPair.value.value !== "string") return "unresolved";
+    const refValue = isNode(refPair.value)
+      ? resolveAlias(refPair.value, current.doc.yamlDoc) ?? refPair.value
+      : undefined;
+    if (!isScalar(refValue) || typeof refValue.value !== "string") return "unresolved";
     if (visited.has(current.node)) return "unresolved";
     visited.add(current.node);
-    const result = resolveRef(env.graph, current.doc, refPair.value.value, undefined);
+    const result = resolveRef(env.graph, current.doc, refValue.value, undefined);
     if (!result.ok) return "unresolved";
     current = { doc: result.doc, node: result.node };
   }
