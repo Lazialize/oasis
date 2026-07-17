@@ -238,6 +238,23 @@ function mapChildren(
   });
 }
 
+/** Convert one object member while preserving both OpenAPI Any fields and opaque payloads. */
+function convertObjectMember(
+  ctx: BundleContext,
+  doc: OasisDocument,
+  key: string,
+  value: Node,
+  hint: string | undefined,
+): unknown {
+  const objectKind = objectKindForSection(hint);
+  const contextualValue = isAlias(value) ? value.resolve(doc.yamlDoc) ?? value : value;
+  const literal =
+    key.startsWith("x-") ||
+    isLiteralDataKey(key, contextualValue) ||
+    isAnyValuedField(objectKind, key);
+  return convertValue(ctx, doc, value, hint, literal, objectKind);
+}
+
 /** Resolve `refPair`'s `$ref`, returning the resolution (or undefined + a recorded warning diagnostic). */
 function nextRefOccurrence(ctx: BundleContext, scalar: Scalar): FoundRef | undefined {
   const refs = ctx.refOccurrences.get(scalar);
@@ -357,10 +374,9 @@ function mergeSiblingsInto(ctx: BundleContext, doc: OasisDocument, mapNode: Node
 
   const base: Record<string, unknown> =
     typeof content === "object" && content !== null && !Array.isArray(content) ? { ...(content as Record<string, unknown>) } : {};
-  const objectKind = objectKindForSection(hint);
   for (const pair of siblingPairs) {
     const key = keyToString(pair.key);
-    setKey(base, key, convertValue(ctx, doc, pair.value as Node, hint, isAnyValuedField(objectKind, key)));
+    setKey(base, key, convertObjectMember(ctx, doc, key, pair.value as Node, hint));
   }
   return base;
 }
@@ -406,11 +422,10 @@ function convertRefDereference(ctx: BundleContext, doc: OasisDocument, mapNode: 
 function withSiblings(ctx: BundleContext, doc: OasisDocument, mapNode: Node, newRef: string, hint: string | undefined): Record<string, unknown> {
   const out: Record<string, unknown> = { $ref: newRef };
   if (!isMap(mapNode)) return out;
-  const objectKind = objectKindForSection(hint);
   for (const pair of mapNode.items) {
     const key = keyToString(pair.key);
     if (key === "$ref" || !isNode(pair.value)) continue;
-    setKey(out, key, convertValue(ctx, doc, pair.value, hint, isAnyValuedField(objectKind, key)));
+    setKey(out, key, convertObjectMember(ctx, doc, key, pair.value, hint));
   }
   return out;
 }
@@ -468,7 +483,8 @@ function withPathItemSiblings(ctx: BundleContext, doc: OasisDocument, node: Node
   const base: Record<string, unknown> =
     typeof target === "object" && target !== null && !Array.isArray(target) ? { ...(target as Record<string, unknown>) } : {};
   for (const pair of siblingPairs) {
-    setKey(base, keyToString(pair.key), convertValue(ctx, doc, pair.value as Node, undefined));
+    const key = keyToString(pair.key);
+    setKey(base, key, convertObjectMember(ctx, doc, key, pair.value as Node, undefined));
   }
   return base;
 }
@@ -479,13 +495,26 @@ function withPathItemSiblings(ctx: BundleContext, doc: OasisDocument, node: Node
  * through `convertPathItem` so a path-item `$ref` is inlined in place (never lifted into
  * `components`) while refs *inside* the inlined path item are lifted normally.
  */
-function convertPathItemMap(ctx: BundleContext, doc: OasisDocument, mapNode: Node): Record<string, unknown> {
+function convertPathItemMap(
+  ctx: BundleContext,
+  doc: OasisDocument,
+  mapNode: Node,
+  extensionsOpaque: boolean,
+): Record<string, unknown> {
   return withAliasTarget(ctx, doc, mapNode, {}, (resolvedMap) => {
     if (!isMap(resolvedMap)) return convertValue(ctx, doc, resolvedMap, undefined) as Record<string, unknown>;
     const out: Record<string, unknown> = {};
     for (const pair of resolvedMap.items) {
       if (!isNode(pair.value)) continue;
-      setKey(out, keyToString(pair.key), convertPathItem(ctx, doc, pair.value));
+      const key = keyToString(pair.key);
+      // Paths and Callback Objects allow extensions, while Webhooks uses arbitrary entry names.
+      setKey(
+        out,
+        key,
+        extensionsOpaque && key.startsWith("x-")
+          ? convertValue(ctx, doc, pair.value, undefined, true)
+          : convertPathItem(ctx, doc, pair.value),
+      );
     }
     return out;
   });
@@ -511,9 +540,29 @@ function convertCallbacks(ctx: BundleContext, doc: OasisDocument, mapNode: Node)
         // `$ref` at callbacks/<name>: lift the whole Callback Object into components/callbacks.
         return refPair
           ? convertRef(ctx, doc, resolvedValue, refPair, "callbacks")
-          : convertPathItemMap(ctx, doc, resolvedValue);
+          : convertPathItemMap(ctx, doc, resolvedValue, true);
       });
       setKey(out, keyToString(pair.key), converted);
+    }
+    return out;
+  });
+}
+
+/** Convert an Operation's patterned Responses Object, preserving its `x-*` extension payloads. */
+function convertResponses(ctx: BundleContext, doc: OasisDocument, mapNode: Node): Record<string, unknown> {
+  return withAliasTarget(ctx, doc, mapNode, {}, (resolvedMap) => {
+    if (!isMap(resolvedMap)) return convertValue(ctx, doc, resolvedMap, "responses") as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const pair of resolvedMap.items) {
+      if (!isNode(pair.value)) continue;
+      const key = keyToString(pair.key);
+      setKey(
+        out,
+        key,
+        key.startsWith("x-")
+          ? convertValue(ctx, doc, pair.value, "responses", true)
+          : convertValue(ctx, doc, pair.value, "responses"),
+      );
     }
     return out;
   });
@@ -592,6 +641,7 @@ function convertValue(
   hint: string | undefined,
   literal = false,
   objectKind?: OpenApiObjectKind,
+  componentsObject = false,
 ): unknown {
   if (!node) return undefined;
 
@@ -618,7 +668,7 @@ function convertValue(
       return undefined;
     }
     ctx.aliasStack.add(target);
-    const converted = convertValue(ctx, doc, target, hint, literal, objectKind);
+    const converted = convertValue(ctx, doc, target, hint, literal, objectKind, componentsObject);
     ctx.aliasStack.delete(target);
     return converted;
   }
@@ -668,7 +718,10 @@ function convertValue(
       }
       switch (key) {
         case "paths":
-          setKey(out, key, convertPathItemMap(ctx, doc, value));
+          setKey(out, key, convertPathItemMap(ctx, doc, value, true));
+          break;
+        case "webhooks":
+          setKey(out, key, convertPathItemMap(ctx, doc, value, false));
           break;
         case "schema":
         case "items":
@@ -708,7 +761,13 @@ function convertValue(
           else setKey(out, key, mapChildren(ctx, doc, value, "parameters"));
           break;
         case "responses":
-          setKey(out, key, mapChildren(ctx, doc, value, "responses"));
+          setKey(
+            out,
+            key,
+            componentsObject
+              ? mapChildren(ctx, doc, value, "responses")
+              : convertResponses(ctx, doc, value),
+          );
           break;
         case "headers":
           setKey(out, key, mapChildren(ctx, doc, value, "headers"));
@@ -762,7 +821,7 @@ function convertValue(
   }
 
   if (isSeq(node)) {
-    return node.items.filter(isNode).map((item) => convertValue(ctx, doc, item, hint, literal, objectKind));
+    return node.items.filter(isNode).map((item) => convertValue(ctx, doc, item, hint, literal, objectKind, false));
   }
 
   if (isScalar(node)) {
@@ -860,7 +919,7 @@ export function bundle(graph: WorkspaceGraph, options: BundleOptions = {}): Bund
         // was actually visited before deciding what to keep verbatim.
         continue;
       }
-      const converted = convertValue(ctx, entryDoc, value, undefined) as Record<string, unknown>;
+      const converted = convertValue(ctx, entryDoc, value, undefined, false, undefined, true) as Record<string, unknown>;
       for (const section of Object.keys(converted)) {
         assignKeys(ensureSectionObject(ctx, section), converted[section] as Record<string, unknown>);
       }
@@ -872,10 +931,16 @@ export function bundle(graph: WorkspaceGraph, options: BundleOptions = {}): Bund
     // inlined in place (never lifted — 3.0 has no components/pathItems), refs inside them lifted
     // normally, and 3.1 summary/description siblings on a path-item ref preserved.
     if (key === "paths" || key === "webhooks") {
-      setKey(out, key, convertPathItemMap(ctx, entryDoc, value));
+      setKey(out, key, convertPathItemMap(ctx, entryDoc, value, key === "paths"));
       continue;
     }
-    setKey(out, key, convertValue(ctx, entryDoc, value, undefined));
+    setKey(
+      out,
+      key,
+      key.startsWith("x-")
+        ? convertValue(ctx, entryDoc, value, undefined, true)
+        : convertValue(ctx, entryDoc, value, undefined),
+    );
   }
 
   if (dereference && componentsPair && isNode(componentsPair.value)) {
