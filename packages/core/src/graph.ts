@@ -7,11 +7,12 @@ import { nodeAtPointerFrom, resourceBaseBeforePointerTarget } from "./document.t
 import type { FileSystem } from "./filesystem.ts";
 import { type OasisDocument, parseDocument } from "./parse.ts";
 import { rangeFromOffsets, zeroRange } from "./position.ts";
-import { findRefs, parseRefString } from "./ref.ts";
+import { findRefs, parseRefString, resolveRef } from "./ref.ts";
 import type { FoundRef, OpenApiObjectKind } from "./ref.ts";
 import type { Diagnostic, Range } from "./types.ts";
 import { resolveUriReference, stripUriFragment, uriScheme } from "./uri.ts";
 import { detectVersion } from "./version.ts";
+import { resolveAlias } from "./walk.ts";
 
 export interface GraphResource extends SchemaResourceEntry {
   doc: OasisDocument;
@@ -33,9 +34,9 @@ export async function loadWorkspaceGraph(fs: FileSystem, entryPath: string): Pro
   const documents = new Map<string, OasisDocument>();
   const diagnostics: Diagnostic[] = [];
   const references = new Map<string, FoundRef[]>();
+  const referenceOccurrences = new Map<string, FoundRef[]>();
   const resources = new Map<string, GraphResource>();
   const indexed = new Map<string, AnchorIndex>();
-  const visiting = new Set<string>();
   const failed = new Set<string>();
 
   async function loadFile(path: string, viaRefRange?: Range): Promise<OasisDocument | undefined> {
@@ -101,6 +102,12 @@ export async function loadWorkspaceGraph(fs: FileSystem, entryPath: string): Pro
     if (!refs.some((other) => other.value === ref.value && other.range.startOffset === ref.range.startOffset &&
       other.kind === ref.kind && other.targetKind === ref.targetKind && other.baseUri === ref.baseUri)) refs.push(ref);
     references.set(path, refs);
+
+    const occurrences = referenceOccurrences.get(path) ?? [];
+    if (!occurrences.some((other) => other.value === ref.value && other.range.startOffset === ref.range.startOffset &&
+      other.kind === ref.kind && other.targetKind === ref.targetKind && other.baseUri === ref.baseUri &&
+      other.sourceNode === ref.sourceNode)) occurrences.push(ref);
+    referenceOccurrences.set(path, occurrences);
   }
   function targetScope(resource: GraphResource, pointer: string): { node: Node; baseUri: string } | undefined {
     if (pointer === "") return { node: resource.node, baseUri: resource.parentBaseUri };
@@ -125,8 +132,6 @@ export async function loadWorkspaceGraph(fs: FileSystem, entryPath: string): Pro
   async function scanScope(doc: OasisDocument, node: Node, kind: OpenApiObjectKind | undefined, baseUri: string): Promise<void> {
     if (!markScanned(node, kind, baseUri)) return;
     indexDocument(doc, kind === "schema" && detectVersion(doc) === undefined);
-    const ownsVisit = !visiting.has(doc.filePath);
-    if (ownsVisit) visiting.add(doc.filePath);
     for (const ref of findRefs(doc, node, kind, baseUri)) {
       recordRef(doc.filePath, ref);
       const { pointer } = parseRefString(ref.value);
@@ -137,32 +142,17 @@ export async function loadWorkspaceGraph(fs: FileSystem, entryPath: string): Pro
         let targetPath: string;
         try { targetPath = fs.canonicalize(fileURLToPath(resourceUri)); }
         catch { continue; }
-        if (targetPath !== doc.filePath && visiting.has(targetPath)) {
-          diagnostics.push({
-            message: `Circular reference detected: "${doc.filePath}" -> "${targetPath}"`, severity: "warning",
-            code: "no-ref-cycle", source: "core", range: ref.range,
-          });
-          continue;
-        }
         const targetDoc = await loadFile(targetPath, ref.range);
         if (!targetDoc) continue;
         indexDocument(targetDoc, ref.targetKind === "schema");
         resource = resources.get(resourceUri);
       }
       if (!resource) continue;
-      if (resource.doc.filePath !== doc.filePath && visiting.has(resource.doc.filePath)) {
-        diagnostics.push({
-          message: `Circular reference detected: "${doc.filePath}" -> "${resource.doc.filePath}"`, severity: "warning",
-          code: "no-ref-cycle", source: "core", range: ref.range,
-        });
-        continue;
-      }
       const target = targetScope(resource, pointer);
       if (target) {
         await scanScope(resource.doc, target.node, ref.targetKind, target.baseUri);
       }
     }
-    if (ownsVisit) visiting.delete(doc.filePath);
   }
 
   const canonicalEntry = fs.canonicalize(entryPath);
@@ -171,7 +161,85 @@ export async function loadWorkspaceGraph(fs: FileSystem, entryPath: string): Pro
     indexDocument(entryDoc, false);
     await scanScope(entryDoc, entryDoc.yamlDoc.contents, undefined, pathToFileURL(entryDoc.filePath).href);
   }
-  return { entryPath: canonicalEntry, documents, diagnostics, fileSystem: fs, references, resources };
+  const graph = { entryPath: canonicalEntry, documents, diagnostics, fileSystem: fs, references, resources };
+  detectReferenceCycles(graph, referenceOccurrences);
+  return graph;
+}
+
+interface ReferenceEdge {
+  target: ReferenceIdentity;
+  range: Range;
+}
+
+interface ReferenceIdentity {
+  node: Node;
+  resourceUri: string;
+}
+
+/** Detect cycles between resolved reference targets, rather than between files that contain them. */
+function detectReferenceCycles(graph: WorkspaceGraph, references: ReadonlyMap<string, readonly FoundRef[]>): void {
+  const identities = new WeakMap<Node, Map<string, ReferenceIdentity>>();
+  const identityFor = (node: Node, resourceUri: string): ReferenceIdentity => {
+    let byResource = identities.get(node);
+    if (!byResource) {
+      byResource = new Map();
+      identities.set(node, byResource);
+    }
+    let identity = byResource.get(resourceUri);
+    if (!identity) {
+      identity = { node, resourceUri };
+      byResource.set(resourceUri, identity);
+    }
+    return identity;
+  };
+  const edges = new Map<ReferenceIdentity, ReferenceEdge[]>();
+
+  for (const [path, refs] of references) {
+    const doc = graph.documents.get(path);
+    if (!doc) continue;
+    for (const ref of refs) {
+      if (!ref.sourceNode) continue;
+      const result = resolveRef(graph, doc, ref);
+      if (!result.ok) continue;
+      const targetNode = resolveAlias(result.node, result.doc.yamlDoc);
+      if (!targetNode) continue;
+      const source = identityFor(ref.sourceNode, ref.baseUri);
+      const target = identityFor(
+        targetNode,
+        result.resourceUri ?? pathToFileURL(result.doc.filePath).href,
+      );
+      const outgoing = edges.get(source) ?? [];
+      outgoing.push({ target, range: ref.range });
+      edges.set(source, outgoing);
+    }
+  }
+
+  const visiting = new Set<ReferenceIdentity>();
+  const visited = new Set<ReferenceIdentity>();
+
+  function visit(identity: ReferenceIdentity): void {
+    if (visited.has(identity)) return;
+    visiting.add(identity);
+
+    for (const edge of edges.get(identity) ?? []) {
+      if (visiting.has(edge.target)) {
+        graph.diagnostics.push({
+          message: "Circular reference detected in resolved $ref target chain",
+          severity: "warning",
+          code: "no-ref-cycle",
+          source: "core",
+          range: edge.range,
+        });
+      } else {
+        visit(edge.target);
+      }
+    }
+
+    visiting.delete(identity);
+    visited.add(identity);
+  }
+
+  for (const identity of edges.keys()) visit(identity);
 }
 
 export function graphReferences(graph: WorkspaceGraph, doc: OasisDocument): readonly FoundRef[] {
