@@ -26,6 +26,7 @@ export type { FoundRef, OpenApiObjectKind, ReferenceKind, RefParts, ResolvedRef,
 export {
   CONTAINER_KEYS,
   findRefs,
+  foundRefForNode,
   findSubtreeRefs,
   isContainerKey,
   isLiteralDataKey,
@@ -36,6 +37,7 @@ export {
 
 export type { UriReferenceKind } from "./uri.ts";
 export { classifyUriReference, FILESYSTEM_URI_SCHEMES, isExternalUriReference, uriScheme } from "./uri.ts";
+export { resolveUriReference, stripUriFragment } from "./uri.ts";
 
 export type { AnchorEntry, AnchorIndex } from "./anchor.ts";
 export { buildAnchorIndex, resolveAnchor } from "./anchor.ts";

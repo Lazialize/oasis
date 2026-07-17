@@ -1,10 +1,12 @@
 import { isAlias, isMap, isNode, isScalar, isSeq, stringify as yamlStringify } from "yaml";
+import { pathToFileURL } from "node:url";
 import type { Node, Pair, Scalar } from "yaml";
 import {
   COMPONENT_SECTIONS,
   type Diagnostic,
   detectVersion,
   formatPointer,
+  type FoundRef,
   graphReferences,
   isLiteralDataKey,
   isNamedEntryContainer,
@@ -20,6 +22,8 @@ import {
   parseRefString,
   rangeFromOffsets,
   resolveRef,
+  resolveUriReference,
+  stripUriFragment,
   zeroRange,
 } from "@oasis/core";
 import { fileStem, sanitizeName, uniqueName } from "./name.ts";
@@ -105,6 +109,9 @@ interface BundleContext {
   visitedEntryIdentities: Set<string>;
   /** Anchor-target nodes currently being expanded, to break cyclic YAML `*alias` references. */
   aliasStack: Set<Node>;
+  /** Semantic ref occurrences grouped by their source scalar; aliases can contribute several bases. */
+  refOccurrences: Map<Scalar, FoundRef[]>;
+  refOccurrenceCursor: Map<Scalar, number>;
 }
 
 /** Resolve one Alias occurrence for a shape-sensitive conversion while sharing cycle diagnostics. */
@@ -232,11 +239,40 @@ function mapChildren(
 }
 
 /** Resolve `refPair`'s `$ref`, returning the resolution (or undefined + a recorded warning diagnostic). */
+function nextRefOccurrence(ctx: BundleContext, scalar: Scalar): FoundRef | undefined {
+  const refs = ctx.refOccurrences.get(scalar);
+  if (!refs) return undefined;
+  const cursor = ctx.refOccurrenceCursor.get(scalar) ?? 0;
+  const ref = refs[cursor];
+  if (ref) ctx.refOccurrenceCursor.set(scalar, cursor + 1);
+  return ref;
+}
+
 function resolveRefPair(ctx: BundleContext, doc: OasisDocument, refPair: Pair): ReturnType<typeof resolveRef> {
   const scalar = resolvedScalar(doc, refPair.value)!;
   const refValue = scalar.value as string;
   const range = rangeOfScalar(doc, scalar);
-  const result = resolveRef(ctx.graph, doc, refValue, range);
+  const occurrence = nextRefOccurrence(ctx, scalar);
+  const result = resolveRef(ctx.graph, doc, occurrence ?? refValue, range);
+  if (result.ok && occurrence) {
+    const retrievalUri = pathToFileURL(doc.filePath).href;
+    const targetResourceUri = result.resourceUri ?? stripUriFragment(resolveUriReference(occurrence.baseUri, occurrence.value));
+    const targetRetrievalUri = pathToFileURL(result.doc.filePath).href;
+    if (occurrence.baseUri !== retrievalUri || targetResourceUri !== targetRetrievalUri) {
+      const unsupported: ReturnType<typeof resolveRef> = {
+        ok: false,
+        diagnostic: {
+          message: `Schema reference "${refValue}" was preserved because bundling would relocate JSON Schema resource scope "${occurrence.baseUri}"`,
+          severity: "error",
+          code: "unsupported-schema-resource-relocation",
+          source: "bundler",
+          range,
+        },
+      };
+      ctx.diagnostics.push({ ...unsupported.diagnostic, severity: "warning" });
+      return unsupported;
+    }
+  }
   if (!result.ok) {
     ctx.diagnostics.push({ ...result.diagnostic, severity: "warning" });
   }
@@ -497,7 +533,7 @@ function convertCallbacks(ctx: BundleContext, doc: OasisDocument, mapNode: Node)
 function resolveMappingRefTarget(ctx: BundleContext, doc: OasisDocument, value: Scalar, hint: string | undefined): string {
   const refValue = value.value as string;
   const range = rangeOfScalar(doc, value);
-  const result = resolveRef(ctx.graph, doc, refValue, range);
+  const result = resolveRef(ctx.graph, doc, nextRefOccurrence(ctx, value) ?? refValue, range);
   if (!result.ok) {
     ctx.diagnostics.push({ ...result.diagnostic, severity: "warning" });
     return refValue;
@@ -791,7 +827,16 @@ export function bundle(graph: WorkspaceGraph, options: BundleOptions = {}): Bund
     cycleAssignments: new Map(),
     visitedEntryIdentities: new Set(),
     aliasStack: new Set(),
+    refOccurrences: new Map(),
+    refOccurrenceCursor: new Map(),
   };
+  for (const doc of graph.documents.values()) {
+    for (const ref of graphReferences(graph, doc)) {
+      const occurrences = ctx.refOccurrences.get(ref.node) ?? [];
+      occurrences.push(ref);
+      ctx.refOccurrences.set(ref.node, occurrences);
+    }
+  }
 
   const componentsPair = root.items.find((p) => keyToString(p.key) === "components");
   if (componentsPair && isNode(componentsPair.value)) {

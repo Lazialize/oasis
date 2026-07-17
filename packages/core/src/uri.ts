@@ -45,3 +45,20 @@ export function isExternalUriReference(ref: string): boolean {
   const scheme = uriScheme(ref);
   return scheme !== undefined && !FILESYSTEM_URI_SCHEMES.has(scheme);
 }
+
+/** Remove a URI fragment while preserving the canonical resource URI. */
+export function stripUriFragment(uri: string): string {
+  const hash = uri.indexOf("#");
+  return hash === -1 ? uri : uri.slice(0, hash);
+}
+
+/** Resolve a JSON Schema URI-reference against its current canonical base URI. */
+export function resolveUriReference(baseUri: string, ref: string): string {
+  try {
+    return new URL(ref, baseUri).href;
+  } catch {
+    // Relative resolution against an opaque base such as a URN is undefined. Keep it visibly
+    // non-filesystem so callers report/skip it instead of accidentally loading a physical path.
+    return `urn:oasis:unresolvable:${encodeURIComponent(ref)}`;
+  }
+}

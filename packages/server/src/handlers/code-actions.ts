@@ -3,6 +3,7 @@ import type { Node } from "yaml";
 import {
   classifyUriReference,
   detectVersion,
+  foundRefForNode,
   findSubtreeRefs,
   graphReferences,
   formatPointer,
@@ -357,7 +358,7 @@ function isReferencedInAnyGraph(graphs: WorkspaceGraph[], targetFilePath: string
     if (!graph.documents.has(targetFilePath)) continue;
     for (const fileDoc of graph.documents.values()) {
       for (const ref of graphReferences(graph, fileDoc)) {
-        const resolved = resolveRef(graph, fileDoc, ref.value);
+        const resolved = resolveRef(graph, fileDoc, ref);
         if (resolved.ok && resolved.doc.filePath === targetFilePath && resolved.pointer === pointer) return true;
       }
     }
@@ -737,7 +738,9 @@ function buildInlineRef(graph: WorkspaceGraph, entryDoc: OasisDocument, doc: Oas
     : undefined;
   if (!isScalar(refValue) || typeof refValue.value !== "string") return undefined;
 
-  const result = resolveRef(graph, doc, refValue.value);
+  const contextualRef = foundRefForNode(graph, doc, refValue);
+  if (!contextualRef) return undefined;
+  const result = resolveRef(graph, doc, contextualRef);
   if (!result.ok || !result.node.range) return undefined; // unresolved target: not offered
 
   // Cycle check: would inlining loop back into one of the ref's own ancestors? Same-document only

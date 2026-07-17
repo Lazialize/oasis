@@ -13,7 +13,7 @@ export const noUnresolvedRef: Rule = {
   check(ctx) {
     for (const doc of ctx.documents) {
       for (const ref of graphReferences(ctx.graph, doc)) {
-        const result = resolveRef(ctx.graph, doc, ref.value, ref.range);
+        const result = resolveRef(ctx.graph, doc, ref);
         if (!result.ok) ctx.report(result.diagnostic.range, result.diagnostic.message);
       }
     }

@@ -1,10 +1,11 @@
-import { isMap, isNode, isSeq } from "yaml";
+import { isMap, isNode, isScalar, isSeq } from "yaml";
 import type { Node } from "yaml";
 import type { OasisDocument } from "./parse.ts";
 import type { Range } from "./types.ts";
 import { rangeFromOffsets } from "./position.ts";
 import { formatPointer, parsePointer } from "./pointer.ts";
 import { childAt, keyToString } from "./walk.ts";
+import { resolveUriReference, stripUriFragment } from "./uri.ts";
 
 export interface PointerLookupResult {
   node: Node;
@@ -13,10 +14,15 @@ export interface PointerLookupResult {
 
 /** Resolve a JSON Pointer (e.g. "/paths/~1users/get") to the AST node + range at that location. */
 export function nodeAtPointer(doc: OasisDocument, pointer: string): PointerLookupResult | undefined {
-  const segments = parsePointer(pointer);
   const root = doc.yamlDoc.contents;
   if (!isNode(root)) return undefined;
 
+  return nodeAtPointerFrom(doc, root, pointer);
+}
+
+/** Resolve a JSON Pointer relative to an embedded JSON Schema resource root. */
+export function nodeAtPointerFrom(doc: OasisDocument, root: Node, pointer: string): PointerLookupResult | undefined {
+  const segments = parsePointer(pointer);
   let current: Node = root;
   for (const seg of segments) {
     const next = childAt(current, seg, doc.yamlDoc);
@@ -24,6 +30,53 @@ export function nodeAtPointer(doc: OasisDocument, pointer: string): PointerLooku
     current = next;
   }
   return nodeToResult(current, doc);
+}
+
+/**
+ * Recover the canonical base at one concrete JSON Pointer occurrence. Unlike a node-identity map,
+ * this distinguishes the same YAML alias target reached below different `$id` ancestors.
+ */
+export function resourceBaseAtPointer(doc: OasisDocument, root: Node, pointer: string, initialBaseUri: string): string {
+  let current: Node = root;
+  let baseUri = initialBaseUri;
+  for (const segment of parsePointer(pointer)) {
+    const next = childAt(current, segment, doc.yamlDoc);
+    if (!next) break;
+    current = next;
+    if (!isMap(current)) continue;
+    const idPair = current.items.find((pair) => isScalar(pair.key) && pair.key.value === "$id");
+    if (isScalar(idPair?.value) && typeof idPair.value.value === "string") {
+      baseUri = stripUriFragment(resolveUriReference(baseUri, idPair.value.value));
+    }
+  }
+  return baseUri;
+}
+
+/**
+ * Recover the base active immediately before the JSON Pointer target applies its own `$id`.
+ * `initialBaseUri` is the effective base of `root`; ancestor `$id`s below `root` are applied, but
+ * the final target is deliberately excluded so a scoped traversal can process its `$id` once.
+ */
+export function resourceBaseBeforePointerTarget(
+  doc: OasisDocument,
+  root: Node,
+  pointer: string,
+  initialBaseUri: string,
+): string {
+  let current: Node = root;
+  let baseUri = initialBaseUri;
+  const segments = parsePointer(pointer);
+  for (let index = 0; index < segments.length - 1; index++) {
+    const next = childAt(current, segments[index]!, doc.yamlDoc);
+    if (!next) break;
+    current = next;
+    if (!isMap(current)) continue;
+    const idPair = current.items.find((pair) => isScalar(pair.key) && pair.key.value === "$id");
+    if (isScalar(idPair?.value) && typeof idPair.value.value === "string") {
+      baseUri = stripUriFragment(resolveUriReference(baseUri, idPair.value.value));
+    }
+  }
+  return baseUri;
 }
 
 function nodeToResult(node: Node, doc: OasisDocument): PointerLookupResult | undefined {

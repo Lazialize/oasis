@@ -1,133 +1,204 @@
+import { pathToFileURL } from "node:url";
 import { isMap, isNode, isScalar, isSeq } from "yaml";
 import type { Node, Scalar } from "yaml";
-import { isNamedEntryContainer } from "./named-containers.ts";
 import type { OasisDocument } from "./parse.ts";
 import { safeDecodeURIComponent } from "./pointer.ts";
 import { rangeFromOffsets, zeroRange } from "./position.ts";
 import type { Range } from "./types.ts";
+import { resolveUriReference, stripUriFragment } from "./uri.ts";
 import { detectVersion } from "./version.ts";
 import { resolveAlias } from "./walk.ts";
 
-/**
- * A named anchor collected from a 3.1 Schema Object: a `$anchor` or `$dynamicAnchor` keyword. The
- * `node` is the schema object the anchor names (the map the keyword sits in), with its source range
- * preserved so `#anchor` reference resolution stays traceable to a file + line/col.
- */
+export interface SchemaResourceEntry {
+  uri: string;
+  node: Node;
+  range: Range;
+  /** Base active immediately before this resource root applies its own `$id`. */
+  parentBaseUri: string;
+}
 export interface AnchorEntry {
   name: string;
   node: Node;
   range: Range;
-  /** True for `$dynamicAnchor` (indexed like a plain anchor here; runtime `$dynamicRef` semantics are out of scope). */
   dynamic: boolean;
-  /**
-   * The nearest enclosing `$id` scope (the raw `$id` value of the schema resource this anchor
-   * belongs to), or `""` for the document-root resource. Recorded so scope-aware resolution and
-   * collision reporting can be layered on later; lookup today is document-wide (see `resolveAnchor`).
-   */
+  /** Raw nearest `$id`, retained for compatibility. */
   scope: string;
+  resourceUri: string;
 }
-
 export interface AnchorIndex {
-  /** Anchors keyed by name; first definition wins on a duplicate name. */
   byName: Map<string, AnchorEntry>;
+  byResource: Map<string, Map<string, AnchorEntry>>;
+  resources: Map<string, SchemaResourceEntry>;
+  /** Effective resource bases observed for each schema node (aliases may contribute several). */
+  baseUrisByNode: Map<Node, Set<string>>;
   entries: AnchorEntry[];
 }
+export interface AnchorIndexOptions { baseUri?: string; schemaDocument?: boolean }
 
-const anchorIndexCache = new WeakMap<OasisDocument, AnchorIndex>();
+const cacheByDocument = new WeakMap<OasisDocument, Map<string, AnchorIndex>>();
+const SINGLE_SCHEMA_KEYS = new Set([
+  "items", "additionalProperties", "not", "if", "then", "else", "propertyNames", "contains",
+  "unevaluatedItems", "unevaluatedProperties", "contentSchema",
+]);
+const MAP_SCHEMA_KEYS = new Set(["properties", "patternProperties", "$defs", "definitions", "dependentSchemas"]);
+const SEQUENCE_SCHEMA_KEYS = new Set(["allOf", "oneOf", "anyOf", "prefixItems"]);
+const HTTP_METHODS = new Set(["get", "put", "post", "delete", "options", "head", "patch", "trace"]);
 
-/** JSON Schema keywords whose value is literal instance data, so a `$anchor`-shaped string inside is not a keyword. */
-function isLiteralSchemaDataKey(key: string, value: Node): boolean {
-  if (key === "examples") return isSeq(value);
-  return key === "example" || key === "default" || key === "enum" || key === "const";
-}
+type ObjectKind = "root" | "components" | "paths-map" | "webhooks-map" | "path-item" | "operation" |
+  "parameter" | "header" | "request-body" | "response" | "media-type" | "encoding" | "callback" | "schema";
 
 function scalarString(node: unknown): string | undefined {
-  return isScalar(node) && typeof (node as Scalar).value === "string" ? ((node as Scalar).value as string) : undefined;
+  return isScalar(node) && typeof (node as Scalar).value === "string" ? String((node as Scalar).value) : undefined;
 }
 
-/**
- * Build a per-document index of JSON Schema 2020-12 named anchors (`$anchor`, `$dynamicAnchor`) and
- * their enclosing `$id` scopes, for OpenAPI 3.1 documents. Returns an empty index for 3.0 documents
- * and OpenAPI Reference Object contexts, whose references are plain JSON References with no anchors.
- * Cached by document identity (a re-parsed document gets a fresh index), mirroring `findRefs`.
- */
-export function buildAnchorIndex(doc: OasisDocument): AnchorIndex {
-  const cached = anchorIndexCache.get(doc);
+/** Build an index from actual 3.1 Schema Object contexts, never from lookalike OpenAPI/extension data. */
+export function buildAnchorIndex(doc: OasisDocument, options: AnchorIndexOptions = {}): AnchorIndex {
+  const baseUri = stripUriFragment(options.baseUri ?? pathToFileURL(doc.filePath).href);
+  const schemaDocument = options.schemaDocument ?? false;
+  const cacheKey = `${baseUri}\u0000${schemaDocument}`;
+  const docCache = cacheByDocument.get(doc);
+  const cached = docCache?.get(cacheKey);
   if (cached) return cached;
-
-  const index: AnchorIndex = { byName: new Map(), entries: [] };
-  if (detectVersion(doc) !== "3.1") {
-    anchorIndexCache.set(doc, index);
-    return index;
-  }
-
+  const index: AnchorIndex = {
+    byName: new Map(),
+    byResource: new Map(),
+    resources: new Map(),
+    baseUrisByNode: new Map(),
+    entries: [],
+  };
   const root = doc.yamlDoc.contents;
-  const seenByContext = new Map<string, Set<Node>>();
 
   function rangeOf(node: Node): Range {
     return node.range ? rangeFromOffsets(doc.filePath, doc.lineCounter, node.range[0], node.range[1]) : zeroRange(doc.filePath);
   }
-
-  function record(name: string, holder: Node, dynamic: boolean, scope: string): void {
-    const entry: AnchorEntry = { name, node: holder, range: rangeOf(holder), dynamic, scope };
+  function resource(uri: string, node: Node, parentBaseUri: string): void {
+    if (!index.resources.has(uri)) {
+      index.resources.set(uri, { uri, node, range: rangeOf(node), parentBaseUri: stripUriFragment(parentBaseUri) });
+    }
+  }
+  function anchor(name: string, node: Node, dynamic: boolean, scope: string, resourceUri: string): void {
+    const entry: AnchorEntry = { name, node, range: rangeOf(node), dynamic, scope, resourceUri };
     index.entries.push(entry);
     if (!index.byName.has(name)) index.byName.set(name, entry);
+    let scoped = index.byResource.get(resourceUri);
+    if (!scoped) { scoped = new Map(); index.byResource.set(resourceUri, scoped); }
+    if (!scoped.has(name)) scoped.set(name, entry);
   }
 
-  function walk(node: Node, scope: string, literal: boolean, inContainer: boolean): void {
+  const schemaSeen = new Map<string, Set<Node>>();
+  function walkSchema(node: Node, currentBase: string, resourceUri: string, rawScope: string): void {
     const resolved = resolveAlias(node, doc.yamlDoc);
     if (!resolved) return;
-    const context = `${literal}:${inContainer}`;
-    let seen = seenByContext.get(context);
-    if (!seen) {
-      seen = new Set<Node>();
-      seenByContext.set(context, seen);
+    let nodeBase = currentBase;
+    let nodeResource = resourceUri;
+    let nodeScope = rawScope;
+    if (isMap(resolved)) {
+      const id = scalarString(resolved.items.find((pair) => scalarString(pair.key) === "$id")?.value);
+      if (id !== undefined) {
+        nodeBase = resolveUriReference(currentBase, id);
+        nodeResource = stripUriFragment(nodeBase);
+        nodeScope = id;
+        resource(nodeResource, resolved, currentBase);
+      }
     }
+    const bases = index.baseUrisByNode.get(resolved) ?? new Set<string>();
+    bases.add(stripUriFragment(nodeBase));
+    index.baseUrisByNode.set(resolved, bases);
+    const context = `${nodeBase}\u0000${nodeResource}`;
+    let seen = schemaSeen.get(context);
+    if (!seen) { seen = new Set(); schemaSeen.set(context, seen); }
     if (seen.has(resolved)) return;
     seen.add(resolved);
+    if (!isMap(resolved)) return;
 
-    if (isMap(resolved)) {
-      // A schema resource's own `$id` opens a new base scope that its `$anchor`s belong to.
-      const idScope = scalarString(resolved.items.find((p) => scalarString(p.key) === "$id")?.value);
-      const nodeScope = idScope !== undefined ? idScope : scope;
-
-      if (!literal) {
-        for (const pair of resolved.items) {
-          const key = scalarString(pair.key);
-          if (key !== "$anchor" && key !== "$dynamicAnchor") continue;
-          const name = scalarString(pair.value);
-          if (name !== undefined) record(name, resolved, key === "$dynamicAnchor", nodeScope);
-        }
+    for (const pair of resolved.items) {
+      const key = scalarString(pair.key);
+      if ((key === "$anchor" || key === "$dynamicAnchor")) {
+        const name = scalarString(pair.value);
+        if (name !== undefined) anchor(name, resolved, key === "$dynamicAnchor", nodeScope, nodeResource);
       }
+      if (!key || !isNode(pair.value)) continue;
+      if (SINGLE_SCHEMA_KEYS.has(key)) walkSchema(pair.value, nodeBase, nodeResource, nodeScope);
+      else if (MAP_SCHEMA_KEYS.has(key)) {
+        const map = resolveAlias(pair.value, doc.yamlDoc);
+        if (map && isMap(map)) for (const entry of map.items) if (isNode(entry.value)) walkSchema(entry.value, nodeBase, nodeResource, nodeScope);
+      } else if (SEQUENCE_SCHEMA_KEYS.has(key)) {
+        const seq = resolveAlias(pair.value, doc.yamlDoc);
+        if (seq && isSeq(seq)) for (const item of seq.items) if (isNode(item)) walkSchema(item, nodeBase, nodeResource, nodeScope);
+      }
+    }
+  }
 
+  function entryKind(parent: ObjectKind | undefined, key: string): ObjectKind | undefined {
+    if (parent === "root" && key === "paths") return "paths-map";
+    if (parent === "root" && key === "webhooks") return "webhooks-map";
+    if (parent === "components") {
+      if (key === "schemas") return "schema";
+      if (key === "parameters") return "parameter";
+      if (key === "headers") return "header";
+      if (key === "requestBodies") return "request-body";
+      if (key === "responses") return "response";
+      if (key === "pathItems") return "path-item";
+      if (key === "callbacks") return "callback";
+    }
+    if ((parent === "path-item" || parent === "operation") && key === "parameters") return "parameter";
+    if (parent === "operation" && key === "responses") return "response";
+    if (parent === "operation" && key === "callbacks") return "callback";
+    if (parent === "response" && key === "headers") return "header";
+    if (parent === "media-type" && key === "encoding") return "encoding";
+    if (parent === "encoding" && key === "headers") return "header";
+    if (["parameter", "header", "request-body", "response"].includes(parent ?? "") && key === "content") return "media-type";
+    return undefined;
+  }
+  function directKind(parent: ObjectKind | undefined, key: string): ObjectKind | undefined {
+    if (parent === "root" && key === "components") return "components";
+    if (parent === "path-item" && HTTP_METHODS.has(key)) return "operation";
+    if (parent === "operation" && key === "requestBody") return "request-body";
+    if (["parameter", "header", "media-type"].includes(parent ?? "") && key === "schema") return "schema";
+    if (parent === "callback" && !key.startsWith("x-")) return "path-item";
+    return undefined;
+  }
+  const openApiSeen = new Map<string, Set<Node>>();
+  function scanOpenApi(node: Node, kind: ObjectKind | undefined, containerKind?: ObjectKind): void {
+    const resolved = resolveAlias(node, doc.yamlDoc);
+    if (!resolved) return;
+    if (kind === "schema") { walkSchema(resolved, baseUri, baseUri, ""); return; }
+    const context = `${kind}\u0000${containerKind}`;
+    let seen = openApiSeen.get(context);
+    if (!seen) { seen = new Set(); openApiSeen.set(context, seen); }
+    if (seen.has(resolved)) return;
+    seen.add(resolved);
+    if (isMap(resolved)) {
       for (const pair of resolved.items) {
-        if (!isNode(pair.value)) continue;
         const key = scalarString(pair.key);
-        const childLiteral = literal ||
-          (!inContainer && key !== undefined && isLiteralSchemaDataKey(key, pair.value));
-        const childContainer = !literal && !inContainer && key !== undefined &&
-          isNamedEntryContainer(key, pair.value, "3.1");
-        walk(pair.value, nodeScope, childLiteral, childContainer);
+        if (!key || !isNode(pair.value)) continue;
+        if (containerKind === "paths-map" && key.startsWith("x-")) continue;
+        const nextKind = containerKind
+          ? containerKind === "paths-map" || containerKind === "webhooks-map" ? "path-item" : containerKind
+          : directKind(kind, key);
+        const nextContainer = containerKind ? undefined : entryKind(kind, key);
+        scanOpenApi(pair.value, nextKind, nextContainer);
       }
     } else if (isSeq(resolved)) {
       for (const item of resolved.items) {
-        if (isNode(item)) walk(item, scope, literal, false);
+        if (isNode(item)) scanOpenApi(item, containerKind ?? kind);
       }
     }
   }
 
-  if (isNode(root)) walk(root, "", false, false);
-  anchorIndexCache.set(doc, index);
+  if (isNode(root) && (schemaDocument || detectVersion(doc) === "3.1")) {
+    resource(baseUri, root, baseUri);
+    if (schemaDocument) walkSchema(root, baseUri, baseUri, "");
+    else scanOpenApi(root, "root");
+  }
+  const nextCache = docCache ?? new Map<string, AnchorIndex>();
+  nextCache.set(cacheKey, index);
+  if (!docCache) cacheByDocument.set(doc, nextCache);
   return index;
 }
 
-/**
- * Resolve a plain-name fragment (`#anchor`, i.e. the part after `#` that is not a JSON Pointer) to
- * the schema object it names in `doc`. The fragment may be percent-encoded per URI syntax, so it is
- * percent-decoded before lookup. Returns `undefined` when no matching `$anchor`/`$dynamicAnchor`
- * exists (including for 3.0 documents, whose index is always empty).
- */
-export function resolveAnchor(doc: OasisDocument, fragment: string): AnchorEntry | undefined {
+export function resolveAnchor(doc: OasisDocument, fragment: string, resourceUri?: string, index?: AnchorIndex): AnchorEntry | undefined {
   const name = safeDecodeURIComponent(fragment);
-  return buildAnchorIndex(doc).byName.get(name);
+  const anchors = index ?? buildAnchorIndex(doc);
+  return resourceUri ? anchors.byResource.get(stripUriFragment(resourceUri))?.get(name) : anchors.byName.get(name);
 }

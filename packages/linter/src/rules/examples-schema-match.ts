@@ -124,6 +124,19 @@ export const exampleSchemaMatch: Rule = {
     const env: ValidateEnv = { graph: ctx.graph, version: ctx.version };
     const seen = new Set<Node>();
 
+    // Inspect component schema source nodes before `iterateSchemas` follows their `$ref`s. In 3.1
+    // a Schema Object may have meaningful `$ref` siblings (including `example`), and resolving the
+    // component first would otherwise discard the source-side example before validation.
+    for (const doc of ctx.documents) {
+      const root = doc.yamlDoc.contents;
+      const components = isMap(root) ? childAt(root, "components") : undefined;
+      const schemas = components ? childAt(components, "schemas") : undefined;
+      if (!isMap(schemas)) continue;
+      for (const pair of schemas.items) {
+        if (isNode(pair.value)) walkSchemasForSelfExamples(ctx, env, doc, pair.value, seen);
+      }
+    }
+
     // Every schema root (components/schemas plus inline request/response/parameter/header
     // schemas, and 3.1 webhooks): validate nested schema-level `example` keywords. The walker
     // dedupes $ref-shared schemas, and the shared `seen` set keeps the media-type/parameter pass

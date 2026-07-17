@@ -1,13 +1,14 @@
+import { pathToFileURL } from "node:url";
 import { isMap, isNode, isScalar, isSeq } from "yaml";
 import type { Node, Scalar } from "yaml";
 import { resolveAnchor } from "./anchor.ts";
-import { nodeAtPointer } from "./document.ts";
+import { nodeAtPointer, nodeAtPointerFrom, resourceBaseAtPointer } from "./document.ts";
 import { resolveFileReference } from "./filesystem.ts";
 import { resolveAlias } from "./walk.ts";
 import type { OasisDocument } from "./parse.ts";
 import { rangeFromOffsets, zeroRange } from "./position.ts";
 import type { Diagnostic, Range } from "./types.ts";
-import { isExternalUriReference } from "./uri.ts";
+import { isExternalUriReference, resolveUriReference, stripUriFragment } from "./uri.ts";
 import type { WorkspaceGraph } from "./graph.ts";
 import {
   isNamedEntryContainer,
@@ -93,6 +94,20 @@ export interface FoundRef {
   kind: ReferenceKind;
   /** Semantic kind inherited by a referenced target reached from this Reference Object. */
   targetKind?: OpenApiObjectKind;
+  /** Canonical JSON Schema base active at this exact walk occurrence. */
+  baseUri: string;
+}
+
+/**
+ * Find the semantic occurrence represented by a source scalar when its resource base is
+ * unambiguous. A YAML alias can expose the same scalar under several bases; callers must not pick
+ * one arbitrarily in that case, so this returns `undefined`.
+ */
+export function foundRefForNode(graph: WorkspaceGraph, doc: OasisDocument, node: Scalar): FoundRef | undefined {
+  const matches = (graph.references.get(doc.filePath) ?? []).filter((ref) => ref.node === node);
+  if (matches.length === 0) return undefined;
+  const baseUri = matches[0]!.baseUri;
+  return matches.every((ref) => ref.baseUri === baseUri) ? matches[0] : undefined;
 }
 
 /**
@@ -227,10 +242,15 @@ function isAnyValuedField(kind: OpenApiObjectKind | undefined, key: string): boo
  * skips descent-tracked "literal data" subtrees (see `isLiteralDataKey`) so a `$ref`-shaped value
  * used as plain example/default/enum/const data isn't mistaken for a real reference.
  */
-export function findRefs(doc: OasisDocument, scopeNode?: Node, scopeKind?: OpenApiObjectKind): FoundRef[] {
+export function findRefs(
+  doc: OasisDocument,
+  scopeNode?: Node,
+  scopeKind?: OpenApiObjectKind,
+  initialBaseUri = pathToFileURL(doc.filePath).href,
+): FoundRef[] {
   const root = scopeNode ?? doc.yamlDoc.contents;
   if (!isNode(root)) return [];
-  const cacheKey = scopeKind ?? "document";
+  const cacheKey = `${scopeKind ?? "document"}\u0000${initialBaseUri}`;
   const rootCache = findRefsCache.get(root);
   const cached = rootCache?.get(cacheKey);
   if (cached) return cached;
@@ -255,6 +275,7 @@ export function findRefs(doc: OasisDocument, scopeNode?: Node, scopeKind?: OpenA
   // direct `mapping` child of a node reached via `isDiscriminatorObject`.
   function walk(
     node: Node,
+    baseUri: string,
     literal: boolean,
     inContainer: boolean,
     isMappingObject: boolean,
@@ -264,7 +285,14 @@ export function findRefs(doc: OasisDocument, scopeNode?: Node, scopeKind?: OpenA
   ): void {
     const resolved = resolveAlias(node, doc.yamlDoc);
     if (!resolved) return;
-    const contextKey = [literal, inContainer, isMappingObject, isDiscriminatorObject, objectKind, entryKind].join(":");
+    let nodeBaseUri = baseUri;
+    if (!literal && objectKind === "schema" && isMap(resolved)) {
+      const idPair = resolved.items.find((pair) => isScalar(pair.key) && pair.key.value === "$id");
+      if (isScalar(idPair?.value) && typeof idPair.value.value === "string") {
+        nodeBaseUri = resolveUriReference(baseUri, idPair.value.value);
+      }
+    }
+    const contextKey = [literal, inContainer, isMappingObject, isDiscriminatorObject, objectKind, entryKind, nodeBaseUri].join(":");
     let seen = seenByContext.get(contextKey);
     if (!seen) {
       seen = new Set<Node>();
@@ -285,6 +313,7 @@ export function findRefs(doc: OasisDocument, scopeNode?: Node, scopeKind?: OpenA
               node: value,
               kind: "ref",
               targetKind: objectKind,
+              baseUri: stripUriFragment(nodeBaseUri),
               range: range
                 ? rangeFromOffsets(doc.filePath, doc.lineCounter, range[0], range[1])
                 : zeroRange(doc.filePath),
@@ -303,6 +332,7 @@ export function findRefs(doc: OasisDocument, scopeNode?: Node, scopeKind?: OpenA
               node: value,
               kind: "dynamic-ref",
               targetKind: "schema",
+              baseUri: stripUriFragment(nodeBaseUri),
               range: range
                 ? rangeFromOffsets(doc.filePath, doc.lineCounter, range[0], range[1])
                 : zeroRange(doc.filePath),
@@ -321,6 +351,7 @@ export function findRefs(doc: OasisDocument, scopeNode?: Node, scopeKind?: OpenA
                 value: value.value,
                 node: value,
                 kind: "discriminator-mapping",
+                baseUri: stripUriFragment(nodeBaseUri),
                 range: range
                   ? rangeFromOffsets(doc.filePath, doc.lineCounter, range[0], range[1])
                   : zeroRange(doc.filePath),
@@ -362,8 +393,14 @@ export function findRefs(doc: OasisDocument, scopeNode?: Node, scopeKind?: OpenA
           : inContainer
             ? entryKind === "paths-map" || entryKind === "webhooks-map" ? "path-item" : entryKind
             : directObjectKind(objectKind, keyStr, schema31);
+        // Leaving a Schema Object for an OpenAPI-only object (notably `discriminator`) also leaves
+        // JSON Schema `$id` scope. URI-valued OpenAPI fields remain document-relative.
+        const childBaseUri = objectKind === "schema" && childObjectKind !== "schema" && childEntryKind !== "schema"
+          ? initialBaseUri
+          : nodeBaseUri;
         walk(
           contextualValue,
+          childBaseUri,
           childLiteral,
           childContainer,
           childIsMappingObject,
@@ -374,13 +411,13 @@ export function findRefs(doc: OasisDocument, scopeNode?: Node, scopeKind?: OpenA
       }
     } else if (isSeq(resolved)) {
       for (const item of resolved.items) {
-        if (isNode(item)) walk(item, literal, false, false, false, entryKind ?? objectKind);
+        if (isNode(item)) walk(item, nodeBaseUri, literal, false, false, false, entryKind ?? objectKind);
       }
     }
   }
 
   const rootKind = scopeKind ?? (detectVersion(doc) !== undefined ? "root" : undefined);
-  walk(root, false, false, false, false, rootKind);
+  walk(root, initialBaseUri, false, false, false, false, rootKind);
   const cache = rootCache ?? new Map<string, FoundRef[]>();
   cache.set(cacheKey, results);
   if (!rootCache) findRefsCache.set(root, cache);
@@ -402,6 +439,8 @@ export interface ResolvedRef {
   node: Node;
   pointer: string;
   range: Range;
+  /** Canonical JSON Schema resource containing the target, when known. */
+  resourceUri?: string;
 }
 
 export interface UnresolvedRef {
@@ -418,19 +457,70 @@ export type ResolveRefResult = ResolvedRef | UnresolvedRef;
 export function resolveRef(
   graph: WorkspaceGraph,
   fromDoc: OasisDocument,
-  refString: string,
+  ref: string | FoundRef,
   refRange?: Range,
 ): ResolveRefResult {
+  const matchedRef = typeof ref === "string" && refRange
+    ? graph.references.get(fromDoc.filePath)?.find((candidate) =>
+      candidate.value === ref &&
+      candidate.range.startOffset === refRange.startOffset &&
+      candidate.range.endOffset === refRange.endOffset
+    )
+    : undefined;
+  const contextualRef = typeof ref === "string" ? matchedRef : ref;
+  const refString = typeof ref === "string" ? ref : ref.value;
   const { filePart, pointer } = parseRefString(refString);
-  const diagnosticRange = refRange ?? zeroRange(fromDoc.filePath);
+  const diagnosticRange = refRange ?? contextualRef?.range ?? zeroRange(fromDoc.filePath);
+  const baseUri = contextualRef?.baseUri ?? pathToFileURL(fromDoc.filePath).href;
+  const resolvedUri = resolveUriReference(baseUri, refString);
+  const resourceUri = stripUriFragment(resolvedUri);
+  const resource = graph.resources.get(resourceUri);
+
+  if (resource) {
+    if (pointer !== "" && !pointer.startsWith("/")) {
+      const anchor = resolveAnchor(resource.doc, pointer, resource.baseUri, resource.index) ??
+        (!contextualRef ? resolveAnchor(resource.doc, pointer, undefined, resource.index) : undefined);
+      if (anchor) return { ok: true, doc: resource.doc, node: anchor.node, pointer, range: anchor.range, resourceUri: resource.baseUri };
+    } else {
+      const result = pointer === ""
+        ? { node: resource.node, range: resource.range }
+        : nodeAtPointerFrom(resource.doc, resource.node, pointer);
+      if (result) {
+        const targetBase = contextualRef?.targetKind === "schema" && pointer.startsWith("/")
+          ? resourceBaseAtPointer(resource.doc, resource.node, pointer, resource.baseUri)
+          : resource.baseUri;
+        return { ok: true, doc: resource.doc, node: result.node, pointer, range: result.range, resourceUri: targetBase };
+      }
+    }
+  }
 
   // An absolute non-filesystem URI (`https:`, `urn:`, ...) is an external target, not a document in
   // the workspace graph. Report it explicitly instead of routing it through filesystem resolution.
-  if (filePart !== "" && isExternalUriReference(filePart)) {
+  if (isExternalUriReference(resourceUri)) {
     return {
       ok: false,
       diagnostic: {
         message: `Unsupported external reference: "${refString}" targets an external URI scheme not resolved by the workspace`,
+        severity: "error",
+        code: "no-unresolved-ref",
+        source: "core",
+        range: diagnosticRange,
+      },
+    };
+  }
+
+  // A semantic occurrence has already supplied its canonical base. Falling back to `fromDoc` here
+  // would silently resolve a different physical file when the resource-scoped target is missing.
+  if (contextualRef) {
+    const detail = resource
+      ? pointer !== "" && !pointer.startsWith("/")
+        ? `anchor "#${pointer}" not found in "${resourceUri}"`
+        : `pointer "${pointer || "/"}" not found in "${resourceUri}"`
+      : `could not load "${refString}" (resolved to "${resourceUri}")`;
+    return {
+      ok: false,
+      diagnostic: {
+        message: `Unresolved reference: ${detail}`,
         severity: "error",
         code: "no-unresolved-ref",
         source: "core",

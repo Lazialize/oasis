@@ -70,7 +70,7 @@ export function collectComponentReferences(
     // `$ref`-based references (this also covers URI-style discriminator mappings, which `findRefs`
     // surfaces). A reference counts when it resolves to the component root or anywhere beneath it.
     for (const ref of graphReferences(graph, doc)) {
-      const resolved = resolveRef(graph, doc, ref.value);
+      const resolved = resolveRef(graph, doc, ref);
       if (!resolved.ok || resolved.doc.filePath !== target.doc.filePath) continue;
       if (resolved.pointer !== target.pointer && !resolved.pointer.startsWith(nestedPrefix)) continue;
       const nameRange = componentNameSegmentRange(doc, ref.range, target.section, target.name);

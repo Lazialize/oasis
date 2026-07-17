@@ -2,6 +2,7 @@ import { isMap, isNode, isScalar } from "yaml";
 import type { Node } from "yaml";
 import {
   childAt,
+  foundRefForNode,
   isExternalUriReference,
   keyToString,
   looksLikeMappingRef,
@@ -65,7 +66,9 @@ export function resolveMaybeRef(
     // A Reference Object seen twice on this chain means the chain loops back on itself.
     if (visited.has(current.node)) return current;
     visited.add(current.node);
-    const result = resolveRef(graph, current.doc, refValue.value, undefined);
+    const contextualRef = foundRefForNode(graph, current.doc, refValue);
+    if (!contextualRef) return current;
+    const result = resolveRef(graph, current.doc, contextualRef);
     if (!result.ok) return current;
     current = { doc: result.doc, node: resolveAlias(result.node) ?? result.node, pointer: result.pointer };
   }
