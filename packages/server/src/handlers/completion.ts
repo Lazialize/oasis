@@ -135,7 +135,7 @@ export async function getCompletions(ctx: ServerContext, params: CompletionParam
   // Fragment files (e.g. a Path Item file with no top-level `openapi:` key) don't carry their own
   // version; fall back to the owning entry document's version.
   const version = detectVersion(doc) ?? detectVersion(graph.documents.get(graph.entryPath) ?? doc) ?? "3.1";
-  const rootKind = inferRootKind(doc);
+  const rootKind = inferRootKind(doc, graph);
   const syntax: DocumentSyntax = isJsonDocument(doc.filePath) ? "json" : "yaml";
   const offset = offsetAtPosition(doc.lineCounter, params.position);
   const found = nodeAtPosition(doc, offset);
