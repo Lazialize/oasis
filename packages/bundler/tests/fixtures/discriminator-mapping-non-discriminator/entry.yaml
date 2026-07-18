@@ -1,0 +1,12 @@
+openapi: 3.1.0
+info:
+  title: Custom Schema "mapping" keyword outside a Discriminator Object
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Foo:
+      mapping:
+        dog: ./dog.yaml#/Dog
+      allOf:
+        - $ref: ./dog.yaml#/Dog

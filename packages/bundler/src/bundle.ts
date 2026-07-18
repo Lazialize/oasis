@@ -706,6 +706,11 @@ function convertValue(
   literal = false,
   objectKind?: OpenApiObjectKind,
   componentsObject = false,
+  // Set only for the map reached via a `discriminator` key (see the `discriminator` case below):
+  // this is what lets the `mapping` case tell a real Discriminator Object's `mapping` apart from
+  // an unrelated Schema Object property that merely happens to be named "mapping" (e.g. a 3.1
+  // custom vocabulary keyword). Mirrors `isDiscriminatorObject` in `packages/core/src/ref.ts`.
+  isDiscriminatorObject = false,
 ): unknown {
   if (!node) return undefined;
 
@@ -732,7 +737,7 @@ function convertValue(
       return undefined;
     }
     ctx.aliasStack.add(target);
-    const converted = convertValue(ctx, doc, target, hint, literal, objectKind, componentsObject);
+    const converted = convertValue(ctx, doc, target, hint, literal, objectKind, componentsObject, isDiscriminatorObject);
     ctx.aliasStack.delete(target);
     return converted;
   }
@@ -865,11 +870,24 @@ function convertValue(
         case "scopes":
           setKey(out, key, mapChildren(ctx, doc, value, hint ?? "schemas"));
           break;
+        // Marks the child map reached here as a Discriminator Object, so the `mapping` case below
+        // can tell it apart from an unrelated Schema Object property that merely happens to be
+        // named "mapping" (see that case's comment).
+        case "discriminator":
+          setKey(out, key, convertValue(ctx, doc, value, hint, false, objectKind, componentsObject, true));
+          break;
         // `discriminator.mapping` entries are references expressed as plain strings, not `{$ref}`
         // objects (see `convertDiscriminatorMapping`), so they need their own conversion path
-        // instead of `mapChildren`'s generic per-entry `convertValue`.
+        // instead of `mapChildren`'s generic per-entry `convertValue`. Only the direct `mapping`
+        // child of an actual Discriminator Object counts — a 3.1 Schema Object may carry an
+        // arbitrary custom vocabulary property that happens to be named "mapping" too, and that one
+        // must be preserved as plain data, not rewritten (issue #97).
         case "mapping":
-          setKey(out, key, convertDiscriminatorMapping(ctx, doc, value));
+          setKey(
+            out,
+            key,
+            isDiscriminatorObject ? convertDiscriminatorMapping(ctx, doc, value) : convertValue(ctx, doc, value, hint),
+          );
           break;
         default:
           setKey(

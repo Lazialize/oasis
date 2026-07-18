@@ -56,4 +56,23 @@ describe("bundle: discriminator.mapping", () => {
 
     await assertSelfContained(result.output);
   });
+
+  test("a Schema Object's own custom `mapping` keyword (not under `discriminator`) is left untouched", async () => {
+    const graph = await loadFixture("discriminator-mapping-non-discriminator");
+
+    const result = bundle(graph);
+    expect(result.diagnostics).toEqual([]);
+
+    // The genuine `$ref` under `allOf` is still resolved, loaded, and lifted normally.
+    expect(result.output).toContain("#/components/schemas/Dog");
+    expect(result.output).toContain("Dog:");
+
+    // The unrelated Schema Object property named "mapping" must be preserved byte-for-byte
+    // semantically, not rewritten as if it were a `discriminator.mapping` entry (its value still
+    // literally reads "./dog.yaml#/Dog", the untouched source string — unlike the sibling `allOf`
+    // `$ref`, which is correctly resolved and rewritten above).
+    expect(result.output).toContain("dog: ./dog.yaml#/Dog");
+
+    await assertSelfContained(result.output);
+  });
 });
