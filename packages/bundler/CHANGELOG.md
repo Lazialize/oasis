@@ -1,5 +1,29 @@
 # @oasis/bundler
 
+## 0.9.2
+
+### Patch Changes
+
+- [#160](https://github.com/Lazialize/oasis/pull/160) [`7d0b365`](https://github.com/Lazialize/oasis/commit/7d0b36525ff7f07272205931f98c1d33d427048d) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(bundler): rewrite `mapping` values only inside actual Discriminator Objects. The bundler
+  previously rewrote any map reached under a key literally named `mapping`, even when it was an
+  unrelated OpenAPI 3.1 Schema Object property (3.1 Schema Objects may carry arbitrary custom
+  vocabulary keywords). `mapping` is now rewritten as a `discriminator.mapping` reference only when
+  it is the direct child of an actual Discriminator Object (i.e. reached via `Schema.discriminator`),
+  matching the context tracking `packages/core/src/ref.ts` already used for reference discovery. A
+  `mapping` property anywhere else is now left untouched as plain data ([#97](https://github.com/Lazialize/oasis/issues/97)).
+
+- [#165](https://github.com/Lazialize/oasis/pull/165) [`6a84c56`](https://github.com/Lazialize/oasis/commit/6a84c56bcc3990d4b088f33fd0a52a3c50c712de) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(bundler): retain `discriminator.mapping` targets in `--dereference` bundles. In dereference
+  mode, a schema reached only by a `oneOf`/`anyOf` `$ref` was inlined and dropped from
+  `components/*` even when a sibling `discriminator.mapping` entry — an explicit
+  `#/components/schemas/<Name>` pointer or a bare component name like `dog: Dog` — still pointed at
+  it. A mapping value is always a bare string and can't hold inlined content, so the bundle ended up
+  with a dangling mapping target that failed `refs/no-unresolved` and `structure/discriminator` when
+  linted. Every schema that is a discriminator mapping target (pointer-form or bare name) is now kept
+  as a real `components/*` entry regardless of whether dereferencing otherwise visited and inlined it
+  elsewhere ([#88](https://github.com/Lazialize/oasis/issues/88)).
+- Updated dependencies [[`0fd6eef`](https://github.com/Lazialize/oasis/commit/0fd6eefb0e8511d6c076187775a7cd178550ea1e)]:
+  - @oasis/core@0.9.2
+
 ## 0.9.1
 
 ### Patch Changes
