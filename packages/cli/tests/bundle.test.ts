@@ -134,6 +134,61 @@ describe("oasis bundle CLI", () => {
     expect(result.stderr).toContain("failed to parse");
   });
 
+  test.each([
+    ["scalar.yaml", "just-a-scalar\n"],
+    ["sequence.json", '["not", "an", "object"]\n'],
+    ["null.yaml", "null\n"],
+  ])("rejects a non-object entry on stdout (%s)", async (fileName, source) => {
+    const dir = await mkdtemp(join(tmpdir(), "oasis-bundle-non-object-"));
+    const entryPath = join(dir, fileName);
+    try {
+      await Bun.write(entryPath, source);
+      const result = await runCli(["bundle", entryPath]);
+      expect(result.exitCode).toBe(2);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toContain("entry document must be an OpenAPI object");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test.each([
+    ["scalar.json", '"just-a-scalar"\n'],
+    ["sequence.yaml", "- not\n- an\n- object\n"],
+    ["null.json", "null\n"],
+  ])("does not overwrite --out for a non-object entry (%s)", async (fileName, source) => {
+    const dir = await mkdtemp(join(tmpdir(), "oasis-bundle-non-object-"));
+    const entryPath = join(dir, fileName);
+    const outPath = join(dir, "out.yaml");
+    try {
+      await Bun.write(entryPath, source);
+      await Bun.write(outPath, "existing bundle\n");
+      const result = await runCli(["bundle", entryPath, "--out", outPath]);
+      expect(result.exitCode).toBe(2);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toContain("entry document must be an OpenAPI object");
+      expect(await readFile(outPath, "utf-8")).toBe("existing bundle\n");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("does not create --out for a non-object entry", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "oasis-bundle-non-object-"));
+    const entryPath = join(dir, "scalar.yaml");
+    const outPath = join(dir, "out.yaml");
+    try {
+      await Bun.write(entryPath, "just-a-scalar\n");
+      const result = await runCli(["bundle", entryPath, "--out", outPath]);
+      expect(result.exitCode).toBe(2);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toContain("entry document must be an OpenAPI object");
+      expect(await Bun.file(outPath).exists()).toBe(false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test("`--` allows bundling an entry whose name starts with a dash", async () => {
     const dir = await mkdtemp(join(tmpdir(), "oasis-bundle-dash-"));
     const entryPath = join(dir, "-weird.yaml");

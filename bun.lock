@@ -36,6 +36,7 @@
         "@oasis/core": "workspace:*",
         "@oasis/linter": "workspace:*",
         "@oasis/server": "workspace:*",
+        "yaml": "^2.6.1",
       },
     },
     "packages/core": {

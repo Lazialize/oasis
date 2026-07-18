@@ -1,6 +1,7 @@
 import { extname, resolve as pathResolve } from "node:path";
 import { loadWorkspaceGraph, NodeFileSystem } from "@oasis/core";
 import { bundle } from "@oasis/bundler";
+import { isMap } from "yaml";
 import { hasHelpFlag, parseBundleArgs } from "../args.ts";
 
 export interface RunBundleOptions {
@@ -56,6 +57,11 @@ export async function runBundleCommand(args: string[], io: RunBundleOptions): Pr
       io.stderr(`${d.range.filePath}:${d.range.start.line + 1}:${d.range.start.character + 1}  ${d.message}\n`);
     }
     io.stderr("oasis bundle: failed to parse the entry document\n");
+    return 2;
+  }
+
+  if (!isMap(entryDoc.yamlDoc.contents)) {
+    io.stderr("oasis bundle: entry document must be an OpenAPI object\n");
     return 2;
   }
 

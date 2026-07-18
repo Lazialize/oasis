@@ -12,6 +12,7 @@
     "@oasis/bundler": "workspace:*",
     "@oasis/core": "workspace:*",
     "@oasis/linter": "workspace:*",
-    "@oasis/server": "workspace:*"
+    "@oasis/server": "workspace:*",
+    "yaml": "^2.6.1"
   }
 }
