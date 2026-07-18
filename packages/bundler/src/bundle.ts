@@ -48,21 +48,63 @@ export interface BundleResult {
 const COMPONENT_SECTION_SET = new Set<string>(COMPONENT_SECTIONS);
 
 /**
+ * Non-enumerable side table recording the source insertion order of an object's keys. JS engines
+ * enumerate integer-index property names (`"200"`, `"10"`, ...) in ascending numeric order rather
+ * than insertion order, so `Object.keys` alone loses the authored order of status codes and
+ * numeric component names (#100). `setKey` appends here as it builds each map, and `orderedKeys`
+ * reads it back to recover the real source order. The symbol is non-enumerable so it never leaks
+ * into spreads, `Object.keys`, `JSON.stringify`, or the serialized output.
+ */
+const KEY_ORDER = Symbol("oasis.keyOrder");
+
+/**
  * Assign `value` at `key` as an own data property, immune to inherited accessors on
  * `Object.prototype` — most importantly the legacy `__proto__` setter. Every map the bundler
  * builds from untrusted, document-controlled keys (component names, schema property names,
  * literal payload keys, extension payload keys) must go through this instead of `obj[key] = value`:
  * a document that names something `__proto__` is common (it's a valid component name and a valid
  * arbitrary schema property name) and a plain assignment would silently drop the entry while
- * mutating the containing object's prototype instead of adding data.
+ * mutating the containing object's prototype instead of adding data. It also records the key in the
+ * object's `KEY_ORDER` side table on first insertion, so integer-like keys keep their source order.
  */
 function setKey(obj: Record<string, unknown>, key: string, value: unknown): void {
+  const isNew = !Object.prototype.hasOwnProperty.call(obj, key);
   Object.defineProperty(obj, key, { value, writable: true, enumerable: true, configurable: true });
+  if (!isNew) return;
+  const order = (obj as Record<symbol, unknown>)[KEY_ORDER] as string[] | undefined;
+  if (order) order.push(key);
+  else Object.defineProperty(obj, KEY_ORDER, { value: [key], writable: true, enumerable: false, configurable: true });
 }
 
-/** Copy every own enumerable property of `source` onto `target` via `setKey` (a `__proto__`-safe `Object.assign`). */
+/**
+ * The object's own keys in source insertion order, integer-like keys included. Prefers the
+ * `KEY_ORDER` side table `setKey` maintained; any own key missing from it (e.g. added by a spread
+ * or object literal, always a non-integer structural key) is appended in `Object.keys` order.
+ * Falls back to `Object.keys` for objects never touched by `setKey`.
+ */
+function orderedKeys(obj: Record<string, unknown>): string[] {
+  const recorded = (obj as Record<symbol, unknown>)[KEY_ORDER] as string[] | undefined;
+  if (!recorded) return Object.keys(obj);
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const key of recorded) {
+    if (!seen.has(key) && Object.prototype.hasOwnProperty.call(obj, key)) {
+      result.push(key);
+      seen.add(key);
+    }
+  }
+  for (const key of Object.keys(obj)) {
+    if (!seen.has(key)) {
+      result.push(key);
+      seen.add(key);
+    }
+  }
+  return result;
+}
+
+/** Copy every own property of `source` onto `target` via `setKey` (a `__proto__`-safe, order-preserving `Object.assign`). */
 function assignKeys(target: Record<string, unknown>, source: Record<string, unknown>): void {
-  for (const key of Object.keys(source)) setKey(target, key, source[key]);
+  for (const key of orderedKeys(source)) setKey(target, key, source[key]);
 }
 
 function resolvedScalar(doc: OasisDocument, node: unknown): Scalar | undefined {
@@ -485,7 +527,7 @@ function convertRefDereference(ctx: BundleContext, doc: OasisDocument, mapNode: 
 
   const cycleAssigned = ctx.cycleAssignments.get(identityKey);
   if (cycleAssigned) {
-    ensureSectionObject(ctx, cycleAssigned.section)[cycleAssigned.name] = content;
+    setKey(ensureSectionObject(ctx, cycleAssigned.section), cycleAssigned.name, content);
   }
 
   return mergeSiblingsInto(ctx, doc, mapNode, content, hint);
@@ -809,7 +851,7 @@ function convertValue(
         continue;
       }
       if (!literal && isAnyValuedField(objectKind, key)) {
-        out[key] = convertValue(ctx, doc, value, hint, true);
+        setKey(out, key, convertValue(ctx, doc, value, hint, true));
         continue;
       }
       // Once inside literal data, the structural key-hints below (which route real OpenAPI
@@ -1038,7 +1080,7 @@ export function bundle(graph: WorkspaceGraph, options: BundleOptions = {}): Bund
         continue;
       }
       const converted = convertValue(ctx, entryDoc, value, undefined, false, undefined, true) as Record<string, unknown>;
-      for (const section of Object.keys(converted)) {
+      for (const section of orderedKeys(converted)) {
         assignKeys(ensureSectionObject(ctx, section), converted[section] as Record<string, unknown>);
       }
       out.components = ctx.componentsOutput;
@@ -1103,17 +1145,17 @@ interface Substitution {
  */
 function serializeOutput(out: Record<string, unknown>, format: "yaml" | "json"): string {
   let subs: Substitution[];
-  let prepared: Record<string, unknown>;
+  let prepared: unknown;
   for (;;) {
     const state: SubstitutionState = { base: randomTokenBase(), subs: [], collided: false };
-    const result = substitutePreciseNumbers(out, state) as Record<string, unknown>;
+    const result = substitutePreciseNumbers(out, state);
     if (!state.collided) {
       subs = state.subs;
       prepared = result;
       break;
     }
   }
-  let text = format === "json" ? `${JSON.stringify(prepared, null, 2)}\n` : yamlStringify(prepared);
+  let text = format === "json" ? `${stringifyJsonOrdered(prepared, "")}\n` : yamlStringify(prepared);
   for (const { token, source } of subs) {
     // Each token is unique, so a single (first-match) replace targets exactly its own insertion.
     // In JSON the placeholder is a quoted string; strip the quotes so the literal stays a number.
@@ -1129,7 +1171,14 @@ interface SubstitutionState {
   collided: boolean;
 }
 
-/** Deep-copy `value`, replacing every `PreciseNumber` with a unique placeholder token (recorded in `state.subs`). */
+/**
+ * Deep-copy `value` into an order-preserving tree, replacing every `PreciseNumber` with a unique
+ * placeholder token (recorded in `state.subs`). Objects become `Map`s keyed in source order (via
+ * `orderedKeys`) so integer-like keys keep their authored order through serialization (#100): both
+ * `yaml`'s stringifier (natively) and `stringifyJsonOrdered` iterate a `Map` in insertion order,
+ * whereas a plain object would re-sort its integer-index keys numerically. Using `Map` also sidesteps
+ * the legacy `__proto__` setter, so a `__proto__` key stays ordinary data (#99).
+ */
 function substitutePreciseNumbers(value: unknown, state: SubstitutionState): unknown {
   if (value instanceof PreciseNumber) {
     const token = `${state.base}${state.subs.length}${PRECISE_TOKEN_SUFFIX}`;
@@ -1142,21 +1191,46 @@ function substitutePreciseNumbers(value: unknown, state: SubstitutionState): unk
   }
   if (Array.isArray(value)) return value.map((item) => substitutePreciseNumbers(item, state));
   if (value !== null && typeof value === "object") {
-    const copy: Record<string, unknown> = {};
-    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    const source = value as Record<string, unknown>;
+    const copy = new Map<string, unknown>();
+    for (const key of orderedKeys(source)) {
       if (key.includes(state.base)) state.collided = true;
-      // `defineProperty` instead of `copy[key] = ...`: a plain assignment to a `__proto__` key
-      // silently sets the prototype instead of an own property, dropping user data (#99).
-      Object.defineProperty(copy, key, {
-        value: substitutePreciseNumbers(child, state),
-        writable: true,
-        enumerable: true,
-        configurable: true,
-      });
+      copy.set(key, substitutePreciseNumbers(source[key], state));
     }
     return copy;
   }
   return value;
+}
+
+/**
+ * Serialize an order-preserving tree (`Map`/array/scalar) to JSON with 2-space indentation, matching
+ * `JSON.stringify(value, null, 2)` byte-for-byte for the value shapes the bundler produces — except
+ * that `Map` entries emit in insertion order, so integer-like keys keep their source order (#100).
+ * `undefined`/function object members are dropped and `undefined` array elements become `null`, just
+ * as `JSON.stringify` does.
+ */
+function stringifyJsonOrdered(value: unknown, indent: string): string {
+  if (value === null) return "null";
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "null";
+  if (typeof value === "boolean") return String(value);
+  const inner = `${indent}  `;
+  if (Array.isArray(value)) {
+    if (value.length === 0) return "[]";
+    const items = value.map(
+      (item) => `${inner}${stringifyJsonOrdered(item === undefined || typeof item === "function" ? null : item, inner)}`,
+    );
+    return `[\n${items.join(",\n")}\n${indent}]`;
+  }
+  if (value instanceof Map) {
+    const parts: string[] = [];
+    for (const [key, child] of value) {
+      if (child === undefined || typeof child === "function") continue;
+      parts.push(`${inner}${JSON.stringify(key)}: ${stringifyJsonOrdered(child, inner)}`);
+    }
+    return parts.length === 0 ? "{}" : `{\n${parts.join(",\n")}\n${indent}}`;
+  }
+  return "null";
 }
 
 /**
