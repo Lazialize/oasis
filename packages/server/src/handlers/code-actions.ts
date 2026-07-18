@@ -78,6 +78,25 @@ function matchesNodeRange(node: Node, start: number, end: number): boolean {
   return !!node.range && node.range[0] === start && node.range[1] === end;
 }
 
+/** Whether `target` is contained by a flow-style mapping or sequence. Code actions currently
+ * construct block-style edits, so changing any such subtree would corrupt its YAML. */
+function hasFlowStyleAncestor(doc: OasisDocument, target: Node): boolean {
+  const root = doc.yamlDoc.contents;
+  if (!isNode(root) || !target.range) return true;
+
+  return visit(root);
+
+  function visit(node: Node): boolean {
+    if ((isMap(node) || isSeq(node)) && node.flow && node.range && node.range[0] <= target.range![0] && node.range[1] >= target.range![1]) {
+      return true;
+    }
+    if (isMap(node)) {
+      return node.items.some((pair) => (isNode(pair.key) && visit(pair.key)) || (isNode(pair.value) && visit(pair.value)));
+    }
+    return isSeq(node) && node.items.some((item) => isNode(item) && visit(item));
+  }
+}
+
 function indentAt(doc: OasisDocument, offset: number): string {
   return " ".repeat(positionAtOffset(doc.lineCounter, offset).character);
 }
@@ -140,7 +159,7 @@ function buildInsertFirstKeyAction(
   title: string,
   diagnosticIndex: number,
 ): CodeActionResult | undefined {
-  if (!isMap(opNode) || opNode.items.length === 0) return undefined;
+  if (!isMap(opNode) || opNode.items.length === 0 || hasFlowStyleAncestor(doc, opNode)) return undefined;
   const firstItem = opNode.items[0]!;
   if (!isNode(firstItem.key) || !firstItem.key.range) return undefined;
   const indent = indentAt(doc, firstItem.key.range[0]);
@@ -227,7 +246,7 @@ function buildParamFix(
   diag: CodeActionDiagnosticInput,
   index: number,
 ): CodeActionResult | undefined {
-  if (!isMap(targetNode)) return undefined;
+  if (!isMap(targetNode) || hasFlowStyleAncestor(targetDoc, targetNode)) return undefined;
   const match = /path template parameter "\{([^}]+)\}" has no matching "in: path" parameter definition/.exec(diag.message);
   if (!match) return undefined;
   const paramName = match[1]!;
@@ -238,7 +257,7 @@ function buildParamFix(
   const parametersNode = childAt(targetNode, "parameters");
 
   if (parametersNode) {
-    if (!isSeq(parametersNode)) return undefined;
+    if (!isSeq(parametersNode) || (parametersNode.items.length > 0 && hasFlowStyleAncestor(targetDoc, parametersNode))) return undefined;
     if (parametersNode.items.length > 0) {
       const lastItem = parametersNode.items[parametersNode.items.length - 1];
       if (!isNode(lastItem) || !lastItem.range) return undefined;
@@ -401,6 +420,7 @@ function buildRemoveUnusedComponent(
       const value = pair.value;
       if (!isNode(value) || !value.range) continue;
       if (!matchesNodeRange(value, start, end)) continue;
+      if (hasFlowStyleAncestor(doc, value)) return undefined;
 
       const keyNode = pair.key;
       if (!isNode(keyNode) || !keyNode.range) return undefined;
@@ -504,7 +524,7 @@ function buildInsertComponentSchemaEdit(
   sourceDoc: OasisDocument,
   schemaNode: Node,
 ): CodeActionFileEdit | undefined {
-  if (!schemaNode.range) return undefined;
+  if (!schemaNode.range || hasFlowStyleAncestor(sourceDoc, schemaNode)) return undefined;
 
   let rewrites: RefRewrite[] = [];
   if (sourceDoc.filePath !== entryDoc.filePath) {
@@ -518,15 +538,15 @@ function buildInsertComponentSchemaEdit(
   const oldBaseIndent = columnAt(sourceDoc, schemaNode.range[0]);
 
   const root = entryDoc.yamlDoc.contents;
-  if (!isNode(root) || !isMap(root)) return undefined;
+  if (!isNode(root) || !isMap(root) || hasFlowStyleAncestor(entryDoc, root)) return undefined;
   const componentsNode = childAt(root, "components");
 
   if (componentsNode) {
-    if (!isMap(componentsNode)) return undefined;
+    if (!isMap(componentsNode) || hasFlowStyleAncestor(entryDoc, componentsNode)) return undefined;
     const schemasNode = childAt(componentsNode, "schemas");
 
     if (schemasNode) {
-      if (!isMap(schemasNode) || schemasNode.items.length === 0) return undefined; // unsupported edge case
+      if (!isMap(schemasNode) || hasFlowStyleAncestor(entryDoc, schemasNode) || schemasNode.items.length === 0) return undefined; // unsupported edge case
       const firstItem = schemasNode.items[0]!;
       if (!isNode(firstItem.key) || !firstItem.key.range) return undefined;
       const keyIndent = columnAt(entryDoc, firstItem.key.range[0]);
@@ -575,6 +595,7 @@ function buildExtractToComponent(graph: WorkspaceGraph, entryDoc: OasisDocument,
 
   const schemaResult = nodeAtPointer(doc, formatPointer(schemaSegs));
   if (!schemaResult || !isMap(schemaResult.node) || !schemaResult.node.range) return undefined;
+  if (hasFlowStyleAncestor(doc, schemaResult.node)) return undefined;
   if (isRefObject(schemaResult.node)) return undefined;
 
   // Find the enclosing operation (for naming) by looking for an HTTP-method segment on the way up.
@@ -731,7 +752,7 @@ function buildInlineRef(graph: WorkspaceGraph, entryDoc: OasisDocument, doc: Oas
   const found = findRefObjectAtPosition(doc, offset);
   if (!found) return undefined;
   const { node: refNode, pointer } = found;
-  if (!isMap(refNode) || !refNode.range) return undefined;
+  if (!isMap(refNode) || !refNode.range || hasFlowStyleAncestor(doc, refNode)) return undefined;
 
   // 3.1 (JSON Schema) gives siblings of `$ref` meaning; 3.0 ignores them. Only offer the action
   // when inlining can't silently drop sibling keys.
