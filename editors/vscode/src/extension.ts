@@ -8,6 +8,7 @@ import {
   TransportKind,
 } from "vscode-languageclient/node";
 import { createDocumentProviderGuards } from "./provider-guards.ts";
+import { createDocumentSyncGuards } from "./sync-guards.ts";
 
 const CONFIG_FILE_NAME = "oasis.config.jsonc";
 
@@ -154,10 +155,29 @@ async function detectProjectMode(): Promise<boolean> {
   return found.length > 0;
 }
 
-// Tracks which documents we've actually forwarded a didOpen for, so that a document which starts
-// out not looking like OpenAPI (e.g. a brand-new empty YAML file) still gets synced once the user
-// types an `openapi:` key into it, rather than being silently ignored for the rest of its life.
-const syncedDocuments = new Set<string>();
+/**
+ * Tracks which documents are currently synced to the server and serializes every transition
+ * (middleware traffic and reconciliation alike) per document, so a false-to-true or true-to-false
+ * content transition always produces exactly one didOpen/didClose and can't race a project-mode
+ * resync for the same URI (issue #112). See sync-guards.ts for the state machine itself.
+ */
+const documentSyncGuards = createDocumentSyncGuards<vscode.TextDocument, vscode.TextDocumentChangeEvent>({
+  shouldSync,
+  getUri: (document) => document.uri.toString(),
+  sendDidOpen: async (document) => {
+    await client?.sendNotification("textDocument/didOpen", {
+      textDocument: {
+        uri: document.uri.toString(),
+        languageId: document.languageId,
+        version: document.version,
+        text: document.getText(),
+      },
+    });
+  },
+  sendDidClose: async (uri) => {
+    await client?.sendNotification("textDocument/didClose", { textDocument: { uri } });
+  },
+});
 
 /**
  * Reconcile every open document with the current synchronization predicate (`shouldSync`) by
@@ -175,23 +195,7 @@ async function resyncOpenDocuments(): Promise<void> {
   if (!client) return;
   for (const document of vscode.workspace.textDocuments) {
     if (!["yaml", "json", "jsonc"].includes(document.languageId)) continue;
-    const key = document.uri.toString();
-    const wanted = shouldSync(document);
-    const synced = syncedDocuments.has(key);
-    if (wanted && !synced) {
-      syncedDocuments.add(key);
-      await client.sendNotification("textDocument/didOpen", {
-        textDocument: {
-          uri: key,
-          languageId: document.languageId,
-          version: document.version,
-          text: document.getText(),
-        },
-      });
-    } else if (!wanted && synced) {
-      syncedDocuments.delete(key);
-      await client.sendNotification("textDocument/didClose", { textDocument: { uri: key } });
-    }
+    await documentSyncGuards.reconcileDocument(document);
   }
 }
 
@@ -220,37 +224,11 @@ function buildClientOptions(): LanguageClientOptions {
     outputChannel,
     initializationOptions: { configFiles: discoveredConfigFiles },
     middleware: {
-      didOpen: async (document, next) => {
-        if (!shouldSync(document)) return;
-        syncedDocuments.add(document.uri.toString());
-        await next(document);
-      },
-      didChange: async (event, next) => {
-        const key = event.document.uri.toString();
-        if (!shouldSync(event.document)) return;
-        // Document started out not looking like OpenAPI (so didOpen was suppressed) but now does
-        // — sync it in via a synthetic didOpen before forwarding the change.
-        if (!syncedDocuments.has(key)) {
-          syncedDocuments.add(key);
-          await client?.sendNotification("textDocument/didOpen", {
-            textDocument: {
-              uri: event.document.uri.toString(),
-              languageId: event.document.languageId,
-              version: event.document.version,
-              text: event.document.getText(),
-            },
-          });
-        }
-        await next(event);
-      },
-      didClose: async (document, next) => {
-        const key = document.uri.toString();
-        if (!syncedDocuments.has(key)) return;
-        syncedDocuments.delete(key);
-        await next(document);
-      },
+      didOpen: async (document, next) => documentSyncGuards.didOpen(document, next),
+      didChange: async (event, next) => documentSyncGuards.didChange(event, next),
+      didClose: async (document, next) => documentSyncGuards.didClose(document, next),
       didSave: async (document, next) => {
-        if (!syncedDocuments.has(document.uri.toString())) return;
+        if (!documentSyncGuards.isSynced(document.uri.toString())) return;
         await next(document);
       },
       provideCompletionItem: async (document, position, context, token, next) => {
@@ -310,7 +288,7 @@ async function startClient(): Promise<void> {
 }
 
 async function stopClient(): Promise<void> {
-  syncedDocuments.clear();
+  documentSyncGuards.reset();
   if (!client) return;
   const toStop = client;
   client = undefined;
