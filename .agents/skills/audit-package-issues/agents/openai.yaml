@@ -1,0 +1,4 @@
+interface:
+  display_name: "Audit Package Issues"
+  short_description: "Audit packages and publish classified GitHub issues"
+  default_prompt: "Use $audit-package-issues to audit a package and publish each verified finding as a classified GitHub issue."
