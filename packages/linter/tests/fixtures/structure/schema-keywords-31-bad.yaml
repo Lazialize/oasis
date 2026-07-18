@@ -73,3 +73,6 @@ components:
         child:
           $ref: '#/components/schemas/DuplicateTypeArray'
           description: siblings alongside $ref are legal in 3.1
+
+    EmptyTypeArray:
+      type: []

@@ -134,3 +134,7 @@ components:
         child:
           $ref: '#/components/schemas/BadTypeName'
           description: extra sibling keys are ignored in 3.0
+
+    BooleanItems:
+      type: array
+      items: false
