@@ -454,6 +454,18 @@ function checkOneAnyOf(env: ValidateEnv, doc: OasisDocument, schema: Node, examp
   return failures;
 }
 
+/** Whether `node` is a map with a `$ref` key plus at least one sibling keyword. */
+function isRefWithSiblings(node: Node): boolean {
+  if (!isMap(node)) return false;
+  let hasRef = false;
+  let hasSibling = false;
+  for (const pair of node.items) {
+    if (keyToString(pair.key) === "$ref") hasRef = true;
+    else hasSibling = true;
+  }
+  return hasRef && hasSibling;
+}
+
 function checkSchema(
   env: ValidateEnv,
   schemaLoc: SchemaLoc,
@@ -463,10 +475,38 @@ function checkSchema(
   path: string,
   extraKnownProps: Set<string> = new Set(),
 ): ExampleFailure[] {
+  // (3.1) A Schema Object may carry keywords alongside `$ref` (JSON Schema 2020-12). Validate the
+  // example against BOTH the referenced target and the sibling keywords instead of discarding the
+  // siblings by following the `$ref`. In 3.0 the siblings are ignored per spec, so fall through to
+  // the normal resolve-and-check path below.
+  const raw = resolveAlias(schemaLoc.node) ?? schemaLoc.node;
+  if (env.version === "3.1" && isRefWithSiblings(raw)) {
+    const failures: ExampleFailure[] = [];
+    const target = resolveSchema(env, { doc: schemaLoc.doc, node: raw });
+    if (target !== "unresolved") {
+      failures.push(...evaluateSchema(env, target.doc, target.node, exampleDoc, exampleNode, chain, path, extraKnownProps));
+    }
+    // Evaluate the referring node's own sibling keywords without following its `$ref`.
+    failures.push(...evaluateSchema(env, schemaLoc.doc, raw, exampleDoc, exampleNode, chain, path, extraKnownProps));
+    return failures;
+  }
+
   const resolved = resolveSchema(env, schemaLoc);
   if (resolved === "unresolved") return [];
-  const { doc, node: schema } = resolved;
+  return evaluateSchema(env, resolved.doc, resolved.node, exampleDoc, exampleNode, chain, path, extraKnownProps);
+}
 
+/** Evaluate an already-resolved concrete schema `schema` (owned by `doc`) against the example. */
+function evaluateSchema(
+  env: ValidateEnv,
+  doc: OasisDocument,
+  schema: Node,
+  exampleDoc: OasisDocument,
+  exampleNode: Node,
+  chain: Set<Node>,
+  path: string,
+  extraKnownProps: Set<string> = new Set(),
+): ExampleFailure[] {
   if (isScalar(schema)) {
     // JSON Schema boolean schemas: `true` always passes, `false` never does.
     if (schema.value === false) return [{ node: exampleNode, doc: exampleDoc, message: withLoc("no value satisfies a `false` schema", path) }];
