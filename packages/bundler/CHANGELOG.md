@@ -1,5 +1,62 @@
 # @oasis/bundler
 
+## 0.9.1
+
+### Patch Changes
+
+- [#135](https://github.com/Lazialize/oasis/pull/135) [`534839d`](https://github.com/Lazialize/oasis/commit/534839d2ea25b4b1eebf5f508dda346814312875) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(bundler): preserve `__proto__` keys in bundled output instead of silently dropping them.
+  Component names, schema property names, literal payload keys, and extension payload keys are now
+  assigned as own data properties, so a key literally named `__proto__` (a valid OpenAPI component
+  name and a valid arbitrary schema property name) no longer triggers the legacy
+  `Object.prototype.__proto__` setter and disappears from the bundle ([#99](https://github.com/Lazialize/oasis/issues/99)).
+
+- [#147](https://github.com/Lazialize/oasis/pull/147) [`e32667c`](https://github.com/Lazialize/oasis/commit/e32667c5ad5cd0beda604a5068db3a4ab46f3e11) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(bundler): canonicalize resolved target identities before component deduplication. A resolved
+  `$ref` now carries a canonical RFC 6901 pointer within its resource (`ResolvedRef.canonicalPointer`):
+  URI percent-encoding is decoded at the fragment layer and an anchor is mapped to the pointer of the
+  node it names. The bundler keys component deduplication and `--dereference` cycle detection on this
+  canonical identity (resource + canonical pointer) instead of the raw input fragment spelling, so
+  URI-equivalent references — percent-encoding variants like `#/components/schemas/Foo` vs
+  `#/components/schemas/%46oo`, or an anchor vs a JSON Pointer to the same node — lift a single shared
+  component rather than duplicating it (e.g. `Foo` and `Foo_2`). Distinct embedded `$id` resources
+  stay separate ([#95](https://github.com/Lazialize/oasis/issues/95)).
+
+- [#142](https://github.com/Lazialize/oasis/pull/142) [`44c136f`](https://github.com/Lazialize/oasis/commit/44c136fd230b7978d0735f01db1b894ac7cc8d92) Thanks [@Lazialize](https://github.com/Lazialize)! - Share version-aware named-entry container semantics across reference, anchor, and bundle traversal.
+
+- [#148](https://github.com/Lazialize/oasis/pull/148) [`dc8d475`](https://github.com/Lazialize/oasis/commit/dc8d4754968232ae391500ed87c3f0236cc3784e) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(bundler): preserve version- and object-specific `$ref` sibling semantics when dereferencing.
+  `--dereference` no longer shallow-merges every sibling of a `$ref` onto the inlined target, which
+  silently changed document meaning. Sibling handling now branches on the OpenAPI version and whether
+  the `$ref` sits in a Schema Object or a Reference Object position: OpenAPI 3.0 Reference Object (and
+  Schema Object) siblings are ignored per JSON Reference semantics; OpenAPI 3.1 Reference Object
+  siblings allow only `summary`/`description` overrides; and OpenAPI 3.1 Schema Object siblings are
+  preserved as a conjunction via `allOf: [<target>, {<siblings>}]` so conflicting keywords, arrays, and
+  boolean-schema targets are never lost (`x-*` extension annotations attach directly rather than joining
+  the conjunction). Applies to both YAML and JSON output ([#87](https://github.com/Lazialize/oasis/issues/87)).
+
+- [#141](https://github.com/Lazialize/oasis/pull/141) [`65c6479`](https://github.com/Lazialize/oasis/commit/65c64799353d47867dc7fe9a42430f23ebb76d1d) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(core,bundler): keep every value below a Specification Extension opaque during reference and
+  anchor discovery and across root, Paths, Callback, and `$ref` sibling bundling paths ([#91](https://github.com/Lazialize/oasis/issues/91)).
+
+- [#139](https://github.com/Lazialize/oasis/pull/139) [`e47a592`](https://github.com/Lazialize/oasis/commit/e47a592a02c790a9b212fa1b1c06f86197e5b4c9) Thanks [@Lazialize](https://github.com/Lazialize)! - Preserve `$ref`-shaped application data in Example and Link Object fields instead of loading or rewriting it, while retaining semantic reference, named-container, discriminator, Path Item, callback, and component handling through YAML aliases.
+
+- [#140](https://github.com/Lazialize/oasis/pull/140) [`8326582`](https://github.com/Lazialize/oasis/commit/83265828dc4c310a11824744c9d5bebcd919e656) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(bundler): preserve numeric literals beyond JavaScript `Number` precision when bundling ([#98](https://github.com/Lazialize/oasis/issues/98)).
+  Large integers (past `Number.MAX_SAFE_INTEGER`, e.g. int64 values) and high-precision or
+  exponent-form decimals used in `const`/`default`/`example`, bounds, `multipleOf`, and arbitrary
+  extension data are now emitted byte-for-byte from the original source in both YAML and JSON output
+  instead of the rounded value. Values that round-trip exactly (and cosmetic forms like `1.0` or
+  `1e3`) are unchanged, JSON output never throws on internally large values, and source ranges,
+  aliases, and linter numeric checks are unaffected.
+
+- [#144](https://github.com/Lazialize/oasis/pull/144) [`fed1780`](https://github.com/Lazialize/oasis/commit/fed178004410e6d8baf9719079309b687255d678) Thanks [@Lazialize](https://github.com/Lazialize)! - Discover OpenAPI 3.1 Schema `$dynamicRef` dependencies and report dynamic references that cannot yet be made self-contained during bundling. Entry-owned fragment-only dynamic references keep their static fallback and dynamic behavior; relocating dynamic scope from external resources remains explicitly unsupported.
+
+- [#145](https://github.com/Lazialize/oasis/pull/145) [`2b48229`](https://github.com/Lazialize/oasis/commit/2b482291d789695ba7c2b933eca521a800b83fc3) Thanks [@Lazialize](https://github.com/Lazialize)! - Resolve OpenAPI 3.1 schema references and anchors against the nearest canonical `$id` resource, including standalone external Schema Documents and aliased schemas reached under distinct resource scopes.
+
+- [#146](https://github.com/Lazialize/oasis/pull/146) [`ce7df6a`](https://github.com/Lazialize/oasis/commit/ce7df6a0bc11cd550d2259f2bca4e0708908addb) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(core): separate plain RFC 6901 JSON Pointer parsing from `$ref` URI-fragment decoding, so a
+  literal percent-escape-looking key (e.g. `%7Bid%7D`) resolves to itself instead of being conflated
+  with a differently-encoded sibling key. `nodeAtPointer`/`formatPointer` no longer percent-decode or
+  percent-encode; a new `parseFragmentPointer` performs exactly one URI-decoding pass before the RFC
+  6901 walk, used only where a pointer comes from a `$ref` fragment ([#96](https://github.com/Lazialize/oasis/issues/96)).
+- Updated dependencies [[`e32667c`](https://github.com/Lazialize/oasis/commit/e32667c5ad5cd0beda604a5068db3a4ab46f3e11), [`44c136f`](https://github.com/Lazialize/oasis/commit/44c136fd230b7978d0735f01db1b894ac7cc8d92), [`5922117`](https://github.com/Lazialize/oasis/commit/5922117ebf93e1c8221c309c5beb39706e111bb9), [`f06312f`](https://github.com/Lazialize/oasis/commit/f06312fdaa04e7aa45ef59f370e5254879ec183b), [`65c6479`](https://github.com/Lazialize/oasis/commit/65c64799353d47867dc7fe9a42430f23ebb76d1d), [`e47a592`](https://github.com/Lazialize/oasis/commit/e47a592a02c790a9b212fa1b1c06f86197e5b4c9), [`8326582`](https://github.com/Lazialize/oasis/commit/83265828dc4c310a11824744c9d5bebcd919e656), [`4703c5c`](https://github.com/Lazialize/oasis/commit/4703c5c41ce9bae7c3627defcc2285ddd3d907e0), [`fed1780`](https://github.com/Lazialize/oasis/commit/fed178004410e6d8baf9719079309b687255d678), [`cba5e4c`](https://github.com/Lazialize/oasis/commit/cba5e4cf3816c5cef431e86dec7e23ecef9e57ae), [`2b48229`](https://github.com/Lazialize/oasis/commit/2b482291d789695ba7c2b933eca521a800b83fc3), [`ce7df6a`](https://github.com/Lazialize/oasis/commit/ce7df6a0bc11cd550d2259f2bca4e0708908addb)]:
+  - @oasis/core@0.9.1
+
 ## 0.9.0
 
 ### Patch Changes
