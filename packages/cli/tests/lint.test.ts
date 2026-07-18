@@ -255,8 +255,9 @@ describe("oasis lint (multi-entry project awareness, #76)", () => {
 
   test("contextually-distinct diagnostics from a shared file are NOT merged", async () => {
     // The shared Path Item is mounted at /things/{id} by a.yaml and /objects/{id} by b.yaml, with
-    // no matching path parameter. `paths/params-defined` reports at the SAME range in item.yaml for
-    // both, but the messages embed the differing mount path — so they must both survive dedup.
+    // no matching path parameter. `paths/params-defined` attributes each diagnostic to the entry
+    // file that owns its own path-template key (issue #109), not to the shared, resolved item.yaml
+    // — so the two diagnostics naturally live at different files/ranges and both survive dedup.
     const result = await runCli([
       "lint",
       `${root}/distinct-messages/a.yaml`,
@@ -266,13 +267,20 @@ describe("oasis lint (multi-entry project awareness, #76)", () => {
     ]);
     expect(result.exitCode).toBe(1);
     const report = JSON.parse(result.stdout);
-    const paramDiags = report.diagnostics.filter((d: { rule: string }) => d.rule === "paths/params-defined");
+    type ParamDiag = { message: string; file: string; range: unknown };
+    const paramDiags: ParamDiag[] = report.diagnostics.filter((d: { rule: string }) => d.rule === "paths/params-defined");
     expect(paramDiags).toHaveLength(2);
-    const messages = paramDiags.map((d: { message: string }) => d.message).sort();
-    expect(messages[0]).toContain("/objects/{id}");
-    expect(messages[1]).toContain("/things/{id}");
-    // Same range, different messages: the two share an identical location in the shared file.
-    expect(paramDiags[0].range).toEqual(paramDiags[1].range);
-    expect(paramDiags[0].file).toContain("item.yaml");
+    const byMountPath = new Map(paramDiags.map((d) => [d.message.includes("/objects/{id}") ? "objects" : "things", d] as const));
+
+    const objectsDiag = byMountPath.get("objects");
+    expect(objectsDiag?.file).toContain("b.yaml");
+    expect(objectsDiag?.message).toContain("/objects/{id}");
+
+    const thingsDiag = byMountPath.get("things");
+    expect(thingsDiag?.file).toContain("a.yaml");
+    expect(thingsDiag?.message).toContain("/things/{id}");
+
+    // Genuinely distinct locations (different owning files), not a message-only distinction.
+    expect(objectsDiag?.range).not.toEqual(thingsDiag?.range);
   });
 });

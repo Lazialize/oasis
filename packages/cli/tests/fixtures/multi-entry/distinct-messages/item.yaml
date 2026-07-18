@@ -1,7 +1,9 @@
 # A shared Path Item mounted at DIFFERENT path templates by a.yaml (/things/{id}) and b.yaml
 # (/objects/{id}). It declares no `in: path` parameter for `{id}`, so `paths/params-defined`
-# reports at THIS file's (shared) range under each entry — but with a message that embeds the
-# mounting path, so the two diagnostics are contextually distinct and must NOT be merged.
+# reports against each mounting file's OWN "/things/{id}"/"/objects/{id}" key (see issue #109 —
+# the diagnostic is attributed to the entry that owns the path template, not to this shared,
+# resolved Path Item file), so the two diagnostics naturally live at different files/ranges and
+# must NOT be merged.
 get:
   operationId: getItem
   tags: [items]

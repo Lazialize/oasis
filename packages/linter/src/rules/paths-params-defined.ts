@@ -1,6 +1,7 @@
 import { isMap, isNode, isScalar, isSeq } from "yaml";
 import type { Node } from "yaml";
-import type { OasisDocument, WorkspaceGraph } from "@oasis/core";
+import { rangeFromOffsets } from "@oasis/core";
+import type { OasisDocument, Range, WorkspaceGraph } from "@oasis/core";
 import { iteratePathItems, type PathItemInfo } from "../openapi-walk.ts";
 import { childAt, resolveMaybeRef } from "../util.ts";
 import type { Rule } from "../types.ts";
@@ -46,8 +47,25 @@ function collectPathParams(graph: WorkspaceGraph, doc: OasisDocument, parameters
   return result;
 }
 
+/**
+ * Locate the `{name}` placeholder within the path template's key node source text, so a missing-
+ * parameter diagnostic can point at the exact placeholder rather than the whole key. Falls back to
+ * `undefined` if the key node has no range or the placeholder text can't be found verbatim (e.g. an
+ * unusual quoting/escaping); callers fall back to the whole key node in that case.
+ */
+function templatePlaceholderRange(doc: OasisDocument, keyNode: Node, name: string): Range | undefined {
+  const range = keyNode.range;
+  if (!range) return undefined;
+  const raw = doc.text.slice(range[0], range[1]);
+  const needle = `{${name}}`;
+  const idx = raw.indexOf(needle);
+  if (idx === -1) return undefined;
+  const start = range[0] + idx;
+  return rangeFromOffsets(doc.filePath, doc.lineCounter, start, start + needle.length);
+}
+
 function checkOperationOrPathItem(
-  ctx: { report: (loc: { doc: OasisDocument; node: Node }, message: string) => void },
+  ctx: { report: (loc: { doc: OasisDocument; node: Node } | Range, message: string) => void },
   pathItem: PathItemInfo,
   templateParams: string[],
   declared: DeclaredParam[],
@@ -56,10 +74,15 @@ function checkOperationOrPathItem(
   const declaredNames = new Set(declared.map((p) => p.name));
   for (const name of templateParams) {
     if (!declaredNames.has(name)) {
-      ctx.report(
-        { doc: pathItem.doc, node: pathItem.node },
-        `${label}: path template parameter "{${name}}" has no matching "in: path" parameter definition.`,
-      );
+      // The path template key belongs to the entry document that owns `paths`/`webhooks`, which may
+      // differ from `pathItem.doc` (the possibly $ref-resolved path item body). Attribute the
+      // diagnostic to the owning key — ideally its `{name}` placeholder span — so source location,
+      // suppressions, and `lint.overrides` are all evaluated against the file that actually declares
+      // the invalid template, not the resolved Path Item file.
+      const location = pathItem.keyNode
+        ? (templatePlaceholderRange(pathItem.keyDoc, pathItem.keyNode, name) ?? { doc: pathItem.keyDoc, node: pathItem.keyNode })
+        : { doc: pathItem.doc, node: pathItem.node };
+      ctx.report(location, `${label}: path template parameter "{${name}}" has no matching "in: path" parameter definition.`);
     }
   }
 
