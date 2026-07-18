@@ -2,7 +2,7 @@ import { isMap, isNode, isSeq } from "yaml";
 import type { Node, Pair } from "yaml";
 import { resolveAlias } from "@oasis/core";
 import type { OasisDocument, OpenApiVersion, WorkspaceGraph } from "@oasis/core";
-import { childAt, keyToString, resolveMaybeRef } from "./util.ts";
+import { childAt, isRefObject, keyToString, resolveMaybeRef } from "./util.ts";
 
 export const HTTP_METHODS = ["get", "put", "post", "delete", "options", "head", "patch", "trace"] as const;
 export type HttpMethod = (typeof HTTP_METHODS)[number];
@@ -244,6 +244,23 @@ function computeIterateSchemas(
   const results: SchemaSite[] = [];
 
   function addSchema(doc: OasisDocument, node: Node, pointer: string): void {
+    // A Schema Object may carry keywords alongside `$ref`. In OpenAPI 3.1 (JSON Schema 2020-12)
+    // those siblings are meaningful and must be validated; in 3.0 they're ignored per spec but
+    // still worth flagging. Resolving the `$ref` away (below) would discard the referring node and
+    // its siblings, so yield that node itself as its own site *in addition to* its resolved target.
+    // `walkSchemaTree` never follows `$ref`, so the target isn't re-walked from here — it's visited
+    // at its own definition site (deduped by file+pointer). The referring node's own file+pointer
+    // can't collide with any resolved-target key, because a chain that reaches a `$ref` object keeps
+    // resolving through it rather than stopping there.
+    const aliased = resolveAlias(node) ?? node;
+    if (isMap(aliased) && isRefObject(aliased) && aliased.items.some((p) => keyToString(p.key) !== "$ref")) {
+      const refKey = `${doc.filePath}::${pointer}`;
+      if (!seen.has(refKey)) {
+        seen.add(refKey);
+        results.push({ doc, node: aliased, pointer });
+      }
+    }
+
     const resolved = resolveMaybeRef(graph, doc, node, pointer);
     if (!isMap(resolved.node)) return;
     const key = `${resolved.doc.filePath}::${resolved.pointer}`;
@@ -305,7 +322,16 @@ function computeIterateSchemas(
     const components = childAt(root, "components");
     if (!components || !isMap(components)) continue;
 
-    eachComponentEntry(graph, doc, components, "schemas", (d, n, p) => addSchema(d, n, p));
+    // `components/schemas` entries are passed to `addSchema` *raw* (not via `eachComponentEntry`,
+    // which resolves the `$ref` first): a schema entry that is a Reference Object may carry sibling
+    // keywords, and `addSchema` needs the referring node to preserve them (see its comment).
+    const schemasNode = childAt(components, "schemas");
+    if (isMap(schemasNode)) {
+      for (const pair of schemasNode.items) {
+        const name = keyToString(pair.key);
+        if (isNode(pair.value)) addSchema(doc, pair.value, `/components/schemas/${name}`);
+      }
+    }
     eachComponentEntry(graph, doc, components, "parameters", addFromSchemaBearing);
     eachComponentEntry(graph, doc, components, "headers", addFromSchemaBearing);
     eachComponentEntry(graph, doc, components, "requestBodies", (d, n, p) => {
