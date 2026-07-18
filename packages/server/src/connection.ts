@@ -236,10 +236,19 @@ export function startServer(): Connection {
     const after = await loadProjectAtPath(ctx, configPath);
 
     // Clear diagnostics for entries that dropped out of this project (including all of them, if
-    // the project was unloaded entirely) so stale diagnostics don't linger.
+    // the project was unloaded entirely) so stale diagnostics don't linger. Also cancel any
+    // debounce still pending for a dropped entry (issue #113): otherwise a timer scheduled just
+    // before this reload (e.g. a watched-file change) fires later and republishes the removed
+    // entry's now-stale diagnostics right after this clear.
     const afterEntries = new Set(after?.entryPaths ?? []);
-    for (const entryPath of before?.entryPaths ?? []) {
-      if (!afterEntries.has(entryPath)) clearPublishedFor(entryPath);
+    const removedEntries = (before?.entryPaths ?? []).filter((entryPath) => !afterEntries.has(entryPath));
+    for (const entryPath of removedEntries) {
+      const timer = debounceTimers.get(entryPath);
+      if (timer) {
+        clearTimeout(timer);
+        debounceTimers.delete(entryPath);
+      }
+      clearPublishedFor(entryPath);
     }
 
     // Always publish (possibly empty) so a previously-reported missing-entry warning clears once
@@ -252,9 +261,22 @@ export function startServer(): Connection {
       }
     }
 
+    // A removed entry that's still open doesn't just vanish from the client's perspective (issue
+    // #113): route it again from its overlay text, exactly like any other document event, so it
+    // becomes a standalone entry — and gets validated by the loop below — if it's still a root
+    // OpenAPI document, rather than being left cleared and unvalidated until it's next edited or
+    // reopened.
+    for (const entryPath of removedEntries) {
+      const openText = documents.get(toUri(entryPath))?.getText();
+      if (openText === undefined) continue;
+      invalidateGraph(ctx, entryPath);
+      await routeDocument(ctx, entryPath, openText);
+    }
+
     // A config change/create/delete can also change which config governs a standalone
     // (non-project-member) document — including an override-only config (no `entries`) that never
-    // registers as a project at all, so the `after`-driven loop above never touches it.
+    // registers as a project at all, so the `after`-driven loop above never touches it, and now also
+    // any removed entry the loop above just rerouted to standalone.
     // `loadProjectAtPath` already invalidated `ctx.standaloneConfigCache`; re-validate every
     // currently-open standalone document so the new resolution takes effect immediately rather
     // than waiting for an unrelated edit.
