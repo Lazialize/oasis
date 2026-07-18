@@ -132,6 +132,21 @@ jobs:
       - name: Package extension
         run: npm run package
 
+      - name: Verify LICENSE in VSIX
+        run: |
+          vsix=$(find . -name '*.vsix' -print -quit)
+          if [ -z "$vsix" ]; then
+            echo "::error::No .vsix file found"
+            exit 1
+          fi
+          if unzip -l "$vsix" | grep -q 'LICENSE'; then
+            echo "✓ LICENSE file found in VSIX"
+          else
+            echo "::error::LICENSE file not found in VSIX"
+            unzip -l "$vsix"
+            exit 1
+          fi
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
