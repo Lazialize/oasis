@@ -42,6 +42,7 @@ import {
   scanWorkspaceRootsForProjects,
 } from "./project.ts";
 import { createValidationRunner } from "./validation.ts";
+import { createUriPathMapper } from "./uri-path.ts";
 import { createServerContext, findEntriesLastContaining, invalidateGraph } from "./workspace.ts";
 
 const DEBOUNCE_MS = 250;
@@ -51,7 +52,7 @@ const DEBOUNCE_MS = 250;
  * unhandled rejection that kills the whole server process. */
 export function runSafely(connection: Connection, label: string, task: () => Promise<void>): void {
   // `Promise.resolve().then(task)` (rather than calling `task()` directly) so a *synchronous*
-  // throw inside `task` (e.g. `uriToPath` rejecting a malformed URI) becomes a rejection this
+  // throw inside `task` (e.g. `toPath` rejecting a malformed URI) becomes a rejection this
   // function's `.catch` observes too, instead of propagating out of `runSafely` itself.
   Promise.resolve()
     .then(task)
@@ -60,28 +61,26 @@ export function runSafely(connection: Connection, label: string, task: () => Pro
     });
 }
 
-function uriToPath(uri: string): string {
-  return URI.parse(uri).fsPath;
-}
-
-function pathToUri(path: string): string {
-  return URI.file(path).toString();
-}
-
-/** Absolute filesystem roots of every workspace folder the client reported at initialize. */
+/** Absolute filesystem roots of every workspace folder the client reported at initialize. Workspace
+ * folders are `file:` URIs (remote folders are out of scope for on-disk scanning), so a plain
+ * `fsPath` conversion is correct here. */
 function workspaceRootsFromInitialize(params: InitializeParams): string[] {
   if (params.workspaceFolders && params.workspaceFolders.length > 0) {
-    return params.workspaceFolders.map((folder) => uriToPath(folder.uri));
+    return params.workspaceFolders.map((folder) => URI.parse(folder.uri).fsPath);
   }
-  if (params.rootUri) return [uriToPath(params.rootUri)];
+  if (params.rootUri) return [URI.parse(params.rootUri).fsPath];
   return [];
 }
 
-/** Group flat file edits into the LSP `WorkspaceEdit.changes` shape (uri -> TextEdit[]). */
-function groupEditsByUri(edits: { filePath: string; range: Range; newText: string }[]): Record<string, { range: ReturnType<typeof toLspRange>; newText: string }[]> {
+/** Group flat file edits into the LSP `WorkspaceEdit.changes` shape (uri -> TextEdit[]). Paths are
+ * mapped back through `toUri` so edits to an untitled/remote document keep its original URI. */
+function groupEditsByUri(
+  edits: { filePath: string; range: Range; newText: string }[],
+  toUri: (path: string) => string,
+): Record<string, { range: ReturnType<typeof toLspRange>; newText: string }[]> {
   const changes: Record<string, { range: ReturnType<typeof toLspRange>; newText: string }[]> = {};
   for (const edit of edits) {
-    const uri = pathToUri(edit.filePath);
+    const uri = toUri(edit.filePath);
     (changes[uri] ??= []).push({ range: toLspRange(edit.range), newText: edit.newText });
   }
   return changes;
@@ -122,8 +121,13 @@ export function startServer(): Connection {
   const connection = createConnection(process.stdin as never, process.stdout as never);
   const documents = new TextDocuments(TextDocument);
 
+  // Maps between the canonical paths the graph keys documents by and the original open-document
+  // URIs, so `untitled:`/`vscode-remote:` documents keep their identity for overlay lookups and
+  // every published response (issue #115).
+  const { toPath, toUri, forget } = createUriPathMapper();
+
   const fileSystem = new OverlayFileSystem((path) => {
-    const doc = documents.get(pathToUri(path));
+    const doc = documents.get(toUri(path));
     return doc?.getText();
   });
   const ctx = createServerContext(fileSystem);
@@ -136,7 +140,7 @@ export function startServer(): Connection {
   // every publish is the merged, deduplicated union across entries, so a file shared by several
   // entry graphs never has one entry's findings clobber another's.
   const runner = createValidationRunner(ctx, {
-    publish: (filePath, diagnostics) => connection.sendDiagnostics({ uri: pathToUri(filePath), diagnostics }),
+    publish: (filePath, diagnostics) => connection.sendDiagnostics({ uri: toUri(filePath), diagnostics }),
   });
   // The config path a standalone (non-project-member) entry last had a config warning published
   // against, so a later validate() that resolves to no warning (or a different config path) can
@@ -192,7 +196,7 @@ export function startServer(): Connection {
       code: "config",
       range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
     }));
-    connection.sendDiagnostics({ uri: pathToUri(configPath), diagnostics: configDiagnostics });
+    connection.sendDiagnostics({ uri: toUri(configPath), diagnostics: configDiagnostics });
   }
 
   /** Build (or rebuild) every loaded project's entry graphs and publish diagnostics immediately,
@@ -316,7 +320,7 @@ export function startServer(): Connection {
    * disk must never replace unsaved edits — the close handler reconciles with disk later).
    */
   async function handleWatchedFileChange(path: string, changeType: FileChangeType): Promise<void> {
-    if (documents.get(pathToUri(path))) return;
+    if (documents.get(toUri(path))) return;
 
     invalidateGraph(ctx, path);
 
@@ -390,7 +394,7 @@ export function startServer(): Connection {
 
   connection.onDidChangeWatchedFiles((params) => {
     for (const change of params.changes) {
-      const path = uriToPath(change.uri);
+      const path = toPath(change.uri);
       if (isConfigFilePath(path)) {
         runSafely(connection, "reloadProjectAtConfigPath", () => reloadProjectAtConfigPath(path));
       } else {
@@ -400,11 +404,11 @@ export function startServer(): Connection {
   });
 
   documents.onDidOpen((event) => {
-    runSafely(connection, "handleDocumentEvent", () => handleDocumentEvent(uriToPath(event.document.uri), event.document.getText()));
+    runSafely(connection, "handleDocumentEvent", () => handleDocumentEvent(toPath(event.document.uri), event.document.getText()));
   });
 
   documents.onDidChangeContent((event) => {
-    runSafely(connection, "handleDocumentEvent", () => handleDocumentEvent(uriToPath(event.document.uri), event.document.getText()));
+    runSafely(connection, "handleDocumentEvent", () => handleDocumentEvent(toPath(event.document.uri), event.document.getText()));
   });
 
   /** Closing a document discards its in-memory buffer: from now on the overlay FS reads this path
@@ -447,25 +451,31 @@ export function startServer(): Connection {
   }
 
   documents.onDidClose((event) => {
-    runSafely(connection, "handleDocumentClose", () => handleDocumentClose(uriToPath(event.document.uri)));
+    const uri = event.document.uri;
+    runSafely(connection, "handleDocumentClose", async () => {
+      // Close handling still publishes (e.g. clears a standalone entry's diagnostics) through
+      // `toUri`, so drop the URI mapping only after it has fully settled.
+      await handleDocumentClose(toPath(uri));
+      forget(uri);
+    });
   });
 
   connection.onDefinition(async (params) => {
-    const path = uriToPath(params.textDocument.uri);
+    const path = toPath(params.textDocument.uri);
     const result = await getDefinition(ctx, { path, position: params.position });
     if (!result) return null;
-    return { uri: pathToUri(result.targetPath), range: toLspRange(result.range) };
+    return { uri: toUri(result.targetPath), range: toLspRange(result.range) };
   });
 
   connection.onHover(async (params) => {
-    const path = uriToPath(params.textDocument.uri);
+    const path = toPath(params.textDocument.uri);
     const result = await getHover(ctx, { path, position: params.position });
     if (!result) return null;
     return { contents: { kind: "markdown", value: result.contents } };
   });
 
   connection.onCompletion(async (params) => {
-    const path = uriToPath(params.textDocument.uri);
+    const path = toPath(params.textDocument.uri);
     const items = await getCompletions(ctx, { path, position: params.position });
     return items.map(
       (item): LspCompletionItem => ({
@@ -481,7 +491,7 @@ export function startServer(): Connection {
   });
 
   connection.onDocumentSymbol((params) => {
-    const path = uriToPath(params.textDocument.uri);
+    const path = toPath(params.textDocument.uri);
     const open = documents.get(params.textDocument.uri);
     const doc = open ? parseDocument(open.getText(), path) : undefined;
     if (!doc) return [];
@@ -489,31 +499,31 @@ export function startServer(): Connection {
   });
 
   connection.onReferences(async (params) => {
-    const path = uriToPath(params.textDocument.uri);
+    const path = toPath(params.textDocument.uri);
     const results = await getReferences(ctx, {
       path,
       position: params.position,
       includeDeclaration: params.context.includeDeclaration,
     });
-    return results.map((result) => ({ uri: pathToUri(result.filePath), range: toLspRange(result.range) }));
+    return results.map((result) => ({ uri: toUri(result.filePath), range: toLspRange(result.range) }));
   });
 
   connection.onPrepareRename(async (params) => {
-    const path = uriToPath(params.textDocument.uri);
+    const path = toPath(params.textDocument.uri);
     const result = await prepareRename(ctx, { path, position: params.position });
     if (!result) return null;
     return { range: toLspRange(result.range), placeholder: result.placeholder };
   });
 
   connection.onRenameRequest(async (params) => {
-    const path = uriToPath(params.textDocument.uri);
+    const path = toPath(params.textDocument.uri);
     const edits = await renameComponent(ctx, { path, position: params.position, newName: params.newName });
     if (!edits) return null;
-    return { changes: groupEditsByUri(edits) };
+    return { changes: groupEditsByUri(edits, toUri) };
   });
 
   connection.onCodeAction(async (params) => {
-    const path = uriToPath(params.textDocument.uri);
+    const path = toPath(params.textDocument.uri);
     const results = await getCodeActions(ctx, {
       path,
       position: params.range.start,
@@ -529,15 +539,15 @@ export function startServer(): Connection {
         kind: result.kind,
         diagnostics: result.diagnosticIndex !== undefined ? [params.context.diagnostics[result.diagnosticIndex]!] : undefined,
         isPreferred: result.isPreferred,
-        edit: { changes: groupEditsByUri(result.edits) },
+        edit: { changes: groupEditsByUri(result.edits, toUri) },
       }),
     );
   });
 
   connection.onDocumentLinks(async (params) => {
-    const path = uriToPath(params.textDocument.uri);
+    const path = toPath(params.textDocument.uri);
     const links = await getDocumentLinks(ctx, { path });
-    return links.map((link) => ({ range: toLspRange(link.range), target: pathToUri(link.targetPath) }));
+    return links.map((link) => ({ range: toLspRange(link.range), target: toUri(link.targetPath) }));
   });
 
   connection.onWorkspaceSymbol(async (params): Promise<SymbolInformation[]> => {
@@ -547,7 +557,7 @@ export function startServer(): Connection {
         name: result.name,
         kind: WORKSPACE_SYMBOL_KIND_MAP[result.kind],
         containerName: result.containerName,
-        location: { uri: pathToUri(result.filePath), range: toLspRange(result.range) },
+        location: { uri: toUri(result.filePath), range: toLspRange(result.range) },
       }),
     );
   });

@@ -598,4 +598,83 @@ paths:
     );
     expect(resolved.params.diagnostics).toEqual([]);
   }, 20000);
+
+  test("an untitled: document is linted from its open buffer and diagnostics keep the untitled: URI (#115)", async () => {
+    client = new LspClient();
+
+    const initResult = await client.request("initialize", { processId: null, rootUri: null, capabilities: {} });
+    expect(initResult.result?.capabilities).toBeDefined();
+    client.notify("initialized", {});
+
+    // An `untitled:` document has no filesystem path at all: reading it from disk can only ENOENT.
+    // The server must serve its content from the open buffer (overlay) and publish diagnostics back
+    // to the *same* `untitled:` URI, not a synthetic `file:///Untitled-1` reconstruction.
+    const uri = "untitled:Untitled-1";
+    const badText = `openapi: 3.1.0
+info:
+  title: Untitled
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Missing'
+`;
+
+    client.notify("textDocument/didOpen", {
+      textDocument: { uri, languageId: "yaml", version: 1, text: badText },
+    });
+
+    // The publish arrives on the original `untitled:` URI (never on a `file:` reconstruction), and
+    // the content-derived unresolved-$ref diagnostic proves the open buffer -- not disk -- was linted.
+    const publish = await client.waitFor(
+      (msg) => msg.method === "textDocument/publishDiagnostics" && msg.params?.uri === uri,
+      15000,
+    );
+    expect(publish.params.uri).toBe(uri);
+    expect(publish.params.diagnostics.some((d: { code?: string }) => d.code === "refs/no-unresolved")).toBe(true);
+  }, 20000);
+
+  test("a vscode-remote: document keeps its scheme/authority on diagnostics (#115)", async () => {
+    client = new LspClient();
+
+    const initResult = await client.request("initialize", { processId: null, rootUri: null, capabilities: {} });
+    expect(initResult.result?.capabilities).toBeDefined();
+    client.notify("initialized", {});
+
+    // A `vscode-remote://` URI's `fsPath` drops the scheme and authority; publishing to that bare
+    // path would target a wrong (or nonexistent) local document. Identity must be preserved end to end.
+    const uri = "vscode-remote://ssh-remote+myhost/home/user/openapi.yaml";
+    const badText = `openapi: 3.1.0
+info:
+  title: Remote
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Missing'
+`;
+
+    client.notify("textDocument/didOpen", {
+      textDocument: { uri, languageId: "yaml", version: 1, text: badText },
+    });
+
+    const publish = await client.waitFor(
+      (msg) => msg.method === "textDocument/publishDiagnostics" && msg.params?.uri === uri,
+      15000,
+    );
+    expect(publish.params.uri).toBe(uri);
+    expect(publish.params.diagnostics.some((d: { code?: string }) => d.code === "refs/no-unresolved")).toBe(true);
+  }, 20000);
 });
