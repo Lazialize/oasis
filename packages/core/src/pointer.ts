@@ -4,6 +4,25 @@ export function escapePointerSegment(segment: string): string {
   return segment.replace(/~/g, "~0").replace(/\//g, "~1");
 }
 
+/**
+ * Check if a segment contains valid RFC 6901 tilde escapes (only ~0 and ~1 allowed).
+ * Returns true if the segment is valid, false if it contains invalid escapes.
+ */
+function isValidPointerSegment(segment: string): boolean {
+  // Check for invalid tilde sequences:
+  // - Tilde not followed by anything (trailing ~)
+  // - Tilde followed by anything other than 0 or 1
+  for (let i = 0; i < segment.length; i++) {
+    if (segment[i] === "~") {
+      const next = segment[i + 1];
+      if (next !== "0" && next !== "1") {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 export function unescapePointerSegment(segment: string): string {
   return segment.replace(/~1/g, "/").replace(/~0/g, "~");
 }
@@ -27,12 +46,26 @@ export function safeDecodeURIComponent(segment: string): string {
  * This implements RFC 6901 alone: only `~1`/`~0` escaping is undone, with no URI percent-decoding.
  * A pointer that comes from a `$ref` URI fragment carries an *additional* percent-encoding layer on
  * top of this — use `parseFragmentPointer` for that case instead.
+ *
+ * Per RFC 6901, a JSON Pointer is either an empty string or a sequence of reference tokens each
+ * prefixed by `/`. Inside a token, `~` may only occur as `~0` (represents `~`) or `~1` (represents `/`).
+ *
+ * Returns the parsed segments, or `undefined` if the pointer is malformed (e.g., missing leading slash,
+ * invalid tilde escapes).
  */
-export function parsePointer(pointer: string): string[] {
+export function parsePointer(pointer: string): string[] | undefined {
   if (pointer === "") return [];
-  const raw = pointer.startsWith("/") ? pointer.slice(1) : pointer;
+  // RFC 6901: a non-empty pointer must start with "/"
+  if (!pointer.startsWith("/")) return undefined;
+  const raw = pointer.slice(1);
   if (raw === "") return [""];
-  return raw.split("/").map((seg) => unescapePointerSegment(seg));
+
+  const segments = raw.split("/");
+  // Validate all segments have valid tilde escapes before unescaping
+  for (const seg of segments) {
+    if (!isValidPointerSegment(seg)) return undefined;
+  }
+  return segments.map((seg) => unescapePointerSegment(seg));
 }
 
 /**

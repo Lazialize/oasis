@@ -193,8 +193,10 @@ const SCHEMA_MAP = new Set(["properties", "patternProperties", "$defs", "depende
  * `"pathItem"` for a Path Item fragment file whose own document root *is* a path item.
  */
 export function classifyPointer(pointer: string, rootKind: ObjectKind = "root"): ObjectKind | undefined {
+  const segments = parsePointer(pointer);
+  if (segments === undefined) return undefined;
   let state: WalkState = rootKind;
-  for (const seg of parsePointer(pointer)) {
+  for (const seg of segments) {
     state = step(state, seg);
     if (state === "unknown") return undefined;
   }

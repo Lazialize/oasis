@@ -22,7 +22,9 @@ export function nodeAtPointer(doc: OasisDocument, pointer: string): PointerLooku
 
 /** Resolve a JSON Pointer relative to an embedded JSON Schema resource root. */
 export function nodeAtPointerFrom(doc: OasisDocument, root: Node, pointer: string): PointerLookupResult | undefined {
-  return nodeAtSegments(doc, root, parsePointer(pointer));
+  const segments = parsePointer(pointer);
+  if (segments === undefined) return undefined;
+  return nodeAtSegments(doc, root, segments);
 }
 
 /**

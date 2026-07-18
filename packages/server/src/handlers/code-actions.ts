@@ -584,6 +584,7 @@ function buildExtractToComponent(graph: WorkspaceGraph, entryDoc: OasisDocument,
   if (!found) return undefined;
 
   const segments = parsePointer(found.pointer);
+  if (!segments) return undefined;
   let schemaSegs: string[] | undefined;
   for (let i = segments.length; i >= 1; i--) {
     if (segments[i - 1] === "schema") {
@@ -649,7 +650,7 @@ function findRefObjectAtPosition(doc: OasisDocument, offset: number): { node: No
   if (isRefObject(found.node)) return { node: found.node, pointer: found.pointer };
 
   const segments = parsePointer(found.pointer);
-  if (segments[segments.length - 1] !== "$ref") return undefined;
+  if (!segments || segments[segments.length - 1] !== "$ref") return undefined;
   const parentPointer = formatPointer(segments.slice(0, -1));
   const parent = nodeAtPointer(doc, parentPointer);
   if (!parent || !isRefObject(parent.node)) return undefined;
@@ -762,7 +763,7 @@ function buildInlineRef(graph: WorkspaceGraph, entryDoc: OasisDocument, doc: Oas
   // A whole Path Item behind a $ref (a direct entry of `paths`/`webhooks`) is large/structural;
   // not supported for now.
   const segments = parsePointer(pointer);
-  if (segments.length === 2 && (segments[0] === "paths" || segments[0] === "webhooks")) return undefined;
+  if (!segments || (segments.length === 2 && (segments[0] === "paths" || segments[0] === "webhooks"))) return undefined;
 
   const refPair = refNode.items.find((p) => keyToString(p.key) === "$ref");
   const refValue = refPair && isNode(refPair.value)

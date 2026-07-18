@@ -31,7 +31,9 @@ describe("parsePointer / formatPointer (plain RFC 6901, no URI decoding)", () =>
 
   test("round-trips through formatPointer", () => {
     const pointer = "/paths/~1users~1{id}/get/summary";
-    expect(formatPointer(parsePointer(pointer))).toBe(pointer);
+    const segments = parsePointer(pointer);
+    expect(segments).toBeDefined();
+    expect(formatPointer(segments!)).toBe(pointer);
   });
 
   test("formatPointer of no segments is the empty string", () => {
@@ -98,7 +100,9 @@ describe("parseFragmentPointer ($ref URI fragments: one percent-decode, then RFC
   });
 
   test("resolves a fragment pointer to the same segments plain parsePointer would give for the unencoded form", () => {
-    expect(parseFragmentPointer("/pets/%7Bid%7D")).toEqual(parsePointer("/pets/{id}"));
+    const plainSegments = parsePointer("/pets/{id}");
+    expect(plainSegments).toBeDefined();
+    expect(parseFragmentPointer("/pets/%7Bid%7D")).toEqual(plainSegments!);
   });
 
   test("parses the root fragment", () => {
@@ -107,5 +111,65 @@ describe("parseFragmentPointer ($ref URI fragments: one percent-decode, then RFC
 
   test("an encoded '/' (%2F) inside a segment does not become a pointer separator", () => {
     expect(parseFragmentPointer("/a%2Fb/c")).toEqual(["a/b", "c"]);
+  });
+});
+
+describe("parsePointer RFC 6901 validation (plain pointer, no URI decoding)", () => {
+  test("rejects a non-empty pointer without a leading slash", () => {
+    expect(parsePointer("foo")).toBeUndefined();
+    expect(parsePointer("foo/bar")).toBeUndefined();
+    expect(parsePointer("paths")).toBeUndefined();
+  });
+
+  test("rejects malformed tilde escapes (~2, ~3, etc.)", () => {
+    expect(parsePointer("/bad~2escape")).toBeUndefined();
+    expect(parsePointer("/bad~3escape")).toBeUndefined();
+    expect(parsePointer("/path/~5")).toBeUndefined();
+  });
+
+  test("rejects trailing tilde without escape", () => {
+    expect(parsePointer("/trailing~")).toBeUndefined();
+    expect(parsePointer("/a/b~")).toBeUndefined();
+  });
+
+  test("rejects tilde not followed by valid escape code", () => {
+    expect(parsePointer("/bad~a")).toBeUndefined();
+    expect(parsePointer("/bad~ 1")).toBeUndefined();
+    expect(parsePointer("/~x")).toBeUndefined();
+  });
+
+  test("accepts valid empty pointer", () => {
+    expect(parsePointer("")).toEqual([]);
+  });
+
+  test("accepts valid root pointer with single segment", () => {
+    expect(parsePointer("/foo")).toEqual(["foo"]);
+  });
+
+  test("accepts valid escaped slash (~/1)", () => {
+    expect(parsePointer("/paths/~1users")).toEqual(["paths", "/users"]);
+  });
+
+  test("accepts valid escaped tilde (~0)", () => {
+    expect(parsePointer("/a/~0b")).toEqual(["a", "~b"]);
+  });
+
+  test("accepts both escapes in same segment", () => {
+    expect(parsePointer("/a/~0~1b")).toEqual(["a", "~/b"]);
+  });
+
+  test("preserves existing valid round-trip behavior", () => {
+    const pointer = "/paths/~1users~1{id}/get/summary";
+    const segments = parsePointer(pointer);
+    expect(segments).toBeDefined();
+    expect(formatPointer(segments!)).toBe(pointer);
+  });
+
+  test("accepts pointer with multiple valid segments", () => {
+    expect(parsePointer("/components/schemas/Pet")).toEqual(["components", "schemas", "Pet"]);
+  });
+
+  test("accepts empty string segment (double slash)", () => {
+    expect(parsePointer("/a//b")).toEqual(["a", "", "b"]);
   });
 });
