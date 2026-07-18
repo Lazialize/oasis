@@ -350,10 +350,21 @@ describe("structure/schema-nullable", () => {
 
 describe("structure/schema-keywords", () => {
   const only31Keywords = [
+    "$id",
+    "$schema",
+    "$vocabulary",
+    "$anchor",
+    "$dynamicAnchor",
+    "$dynamicRef",
+    "$comment",
     "const",
     "prefixItems",
+    "contains",
+    "minContains",
+    "maxContains",
     "contentMediaType",
     "contentEncoding",
+    "contentSchema",
     "patternProperties",
     "propertyNames",
     "unevaluatedProperties",
@@ -367,6 +378,40 @@ describe("structure/schema-keywords", () => {
     "examples",
   ];
 
+  const omittedOnly31KeywordCases = [
+    ["$id", "https://schemas.example/example"],
+    ["$schema", "https://json-schema.org/draft/2020-12/schema"],
+    ["$vocabulary", "\n        https://schemas.example/vocabulary: true"],
+    ["$anchor", "example"],
+    ["$dynamicAnchor", "node"],
+    ["$dynamicRef", "#node"],
+    ["$comment", "for maintainers"],
+    ["contains", "\n        type: string"],
+    ["minContains", "1"],
+    ["maxContains", "2"],
+    ["contentSchema", "\n        type: string"],
+  ] as const;
+
+  function schemaDocument(version: "3.0.3" | "3.1.0", keyword: string, value: string): string {
+    return `openapi: ${version}
+info:
+  title: T
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Example:
+      ${keyword}: ${value}
+      x-oasis-extension: true
+`;
+  }
+
+  async function lintSchemaDocument(version: "3.0.3" | "3.1.0", keyword: string, value: string) {
+    const fs = new InMemoryFileSystem({ "/virtual/entry.yaml": schemaDocument(version, keyword, value) });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    return lint(graph, resolveConfig(undefined));
+  }
+
   test("flags every 3.1-only keyword when used in an OpenAPI 3.0 document", async () => {
     const diagnostics = await lintFixture("structure/schema-keywords-30-bad.yaml");
     for (const keyword of only31Keywords) {
@@ -376,6 +421,19 @@ describe("structure/schema-keywords", () => {
       expect(d, `expected a diagnostic for "${keyword}"`).toBeDefined();
     }
   });
+
+  for (const [keyword, value] of omittedOnly31KeywordCases) {
+    test(`rejects ${keyword} in 3.0, but accepts it and specification extensions in 3.1`, async () => {
+      const diagnostics30 = await lintSchemaDocument("3.0.3", keyword, value);
+      const keywordDiagnostics30 = diagnostics30.filter(
+        (d) => d.rule === "structure/schema-keywords" && d.message.includes(`"${keyword}"`),
+      );
+      expect(keywordDiagnostics30).toHaveLength(1);
+
+      const diagnostics31 = await lintSchemaDocument("3.1.0", keyword, value);
+      expect(diagnostics31.filter((d) => d.rule === "structure/schema-keywords")).toEqual([]);
+    });
+  }
 
   test("does not flag structure/schema-nullable's territory (nullable, type arrays, type: null)", async () => {
     const diagnostics = await lintFixture("structure/schema-keywords-30-bad.yaml");
