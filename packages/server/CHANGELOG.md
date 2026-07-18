@@ -1,5 +1,39 @@
 # @oasis/server
 
+## 0.9.2
+
+### Patch Changes
+
+- [#169](https://github.com/Lazialize/oasis/pull/169) [`ce2a63c`](https://github.com/Lazialize/oasis/commit/ce2a63c5e0dd047ee5f9628917ea813d96d9e44a) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(server): suppress YAML code actions that would apply block-style edits inside flow-style
+  mappings or sequences ([#120](https://github.com/Lazialize/oasis/issues/120)).
+
+- [#164](https://github.com/Lazialize/oasis/pull/164) [`ac12549`](https://github.com/Lazialize/oasis/commit/ac12549f91c734db574e3a6d940283b23430f8fb) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(server): emit syntax-valid completion edits for JSON/JSONC documents. Completion items were
+  always serialized as YAML, so accepting a key inserted a bare `servers: ` and accepting a `$ref`
+  target inserted a single-quoted `'#/components/schemas/Pet'` — both invalid JSON. Key completions in
+  `.json`/`.jsonc` documents now insert double-quoted, escaped keys (`"servers": `) with a leading
+  comma when a preceding sibling member lacks one, and are only offered where a safe, comma-correct
+  edit is possible (appending a member; contexts that would need a trailing comma after an unwritten
+  value offer no edit). Empty `$ref` values now insert a double-quoted target. YAML behavior is
+  unchanged ([#117](https://github.com/Lazialize/oasis/issues/117)).
+
+- [#167](https://github.com/Lazialize/oasis/pull/167) [`629b3b9`](https://github.com/Lazialize/oasis/commit/629b3b902da2c852db3e696550f8609f3b2ce3dd) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(linter): attach `paths/params-defined` missing-parameter diagnostics to the path template's
+  owning key instead of the resolved Path Item file. When a path template like `/pets/{id}` `$ref`s an
+  external Path Item, the "no matching `in: path` parameter" diagnostic previously reported against the
+  resolved Path Item's file/range — a location that contains neither the template nor `{id}` — which
+  also caused `# oasis-disable-*` suppressions and `lint.overrides` to be evaluated against the wrong
+  file. The diagnostic now attaches to the `/pets/{id}` key in the entry document that declares it,
+  pointing at the `{id}` placeholder's own span where possible. The `server` package's "Add parameter
+  definition" quick fix is updated to match diagnostics at the template key while still editing the
+  path item's actual (possibly different-file) body ([#109](https://github.com/Lazialize/oasis/issues/109)).
+
+- [#170](https://github.com/Lazialize/oasis/pull/170) [`caf4abf`](https://github.com/Lazialize/oasis/commit/caf4abf777570a20754f5f9d9e8ebc69c29a35f6) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(server): infer whole-document OpenAPI fragment kinds from their incoming `$ref` contexts. Root
+  completion and hover now recognize Schema, Path Item, Response, and Parameter Object files even
+  when their contents are empty or lack discriminating keys, while preserving OpenAPI 3.0 versus 3.1
+  Schema Object completions.
+- Updated dependencies [[`78f9f6c`](https://github.com/Lazialize/oasis/commit/78f9f6c1bcf4c14c1023e748c4f78ba245c04fed), [`870bb1e`](https://github.com/Lazialize/oasis/commit/870bb1e26911aff521279bc7e49035f2dcaabb3a), [`2b3ffd3`](https://github.com/Lazialize/oasis/commit/2b3ffd39114a33451058674e2cc583523fa42aea), [`629b3b9`](https://github.com/Lazialize/oasis/commit/629b3b902da2c852db3e696550f8609f3b2ce3dd), [`0f434bd`](https://github.com/Lazialize/oasis/commit/0f434bdc0683950f264d3efed498a6e668f11ffa), [`0fd6eef`](https://github.com/Lazialize/oasis/commit/0fd6eefb0e8511d6c076187775a7cd178550ea1e), [`f9859ba`](https://github.com/Lazialize/oasis/commit/f9859baaadcd38de16130c1fc8acb94637720f94), [`b287d15`](https://github.com/Lazialize/oasis/commit/b287d159395928877035de951398906b1ae904db)]:
+  - @oasis/linter@0.9.2
+  - @oasis/core@0.9.2
+
 ## 0.9.1
 
 ### Patch Changes

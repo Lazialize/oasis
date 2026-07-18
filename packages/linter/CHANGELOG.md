@@ -1,5 +1,62 @@
 # @oasis/linter
 
+## 0.9.2
+
+### Patch Changes
+
+- [#156](https://github.com/Lazialize/oasis/pull/156) [`78f9f6c`](https://github.com/Lazialize/oasis/commit/78f9f6c1bcf4c14c1023e748c4f78ba245c04fed) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(linter): validate `structure/discriminator` `propertyName` through composed and inherited
+  schemas. The rule previously inspected only a branch's direct `properties`/`required` and required a
+  composition keyword on the same Schema as the `discriminator`, producing false positives for valid
+  patterns. It now derives each `oneOf`/`anyOf` branch's _effective_ `properties`/`required` by
+  flattening `allOf` members and following `$ref`s (local, nested, and cross-file, with cycle
+  guarding), and accepts the OpenAPI parent-discriminator pattern — a `discriminator` without
+  `oneOf`/`anyOf` whose Schema itself defines `propertyName` (children reference it via their own
+  `allOf`). Negative controls still fire when the effective Schema genuinely lacks the property or,
+  in OpenAPI 3.0, its `required` entry. Source ranges on diagnostics are unchanged ([#106](https://github.com/Lazialize/oasis/issues/106)).
+
+- [#166](https://github.com/Lazialize/oasis/pull/166) [`870bb1e`](https://github.com/Lazialize/oasis/commit/870bb1e26911aff521279bc7e49035f2dcaabb3a) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(linter): require Link Object `operationRef` targets to resolve to an Operation Object.
+  `structure/links` previously only checked that `operationRef` pointers into `/paths/...` or
+  `/webhooks/...` resolved to _some_ node, and skipped local pointers into other sections (e.g.
+  `#/components/schemas/Pet`) entirely. It now resolves every local `operationRef` and requires the
+  target to actually be an Operation Object (an HTTP-method child of a Path Item under `paths`, or on
+  3.1, `webhooks`); a Schema Object, Path Item Object, missing pointer, or other node kind is reported.
+  External URI targets (`https:`, `urn:`, scheme-relative URLs) cannot be verified locally and remain
+  unchecked, as the spec allows referencing operations in external documents ([#107](https://github.com/Lazialize/oasis/issues/107)).
+
+- [#155](https://github.com/Lazialize/oasis/pull/155) [`2b3ffd3`](https://github.com/Lazialize/oasis/commit/2b3ffd39114a33451058674e2cc583523fa42aea) Thanks [@Lazialize](https://github.com/Lazialize)! - feat(linter): add `tags/no-duplicates` rule to enforce unique tag names in the root `tags` list. The linter now reports duplicate tag declarations with exact source range information pointing to the later occurrences ([#110](https://github.com/Lazialize/oasis/issues/110)).
+
+- [#167](https://github.com/Lazialize/oasis/pull/167) [`629b3b9`](https://github.com/Lazialize/oasis/commit/629b3b902da2c852db3e696550f8609f3b2ce3dd) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(linter): attach `paths/params-defined` missing-parameter diagnostics to the path template's
+  owning key instead of the resolved Path Item file. When a path template like `/pets/{id}` `$ref`s an
+  external Path Item, the "no matching `in: path` parameter" diagnostic previously reported against the
+  resolved Path Item's file/range — a location that contains neither the template nor `{id}` — which
+  also caused `# oasis-disable-*` suppressions and `lint.overrides` to be evaluated against the wrong
+  file. The diagnostic now attaches to the `/pets/{id}` key in the entry document that declares it,
+  pointing at the `{id}` placeholder's own span where possible. The `server` package's "Add parameter
+  definition" quick fix is updated to match diagnostics at the template key while still editing the
+  path item's actual (possibly different-file) body ([#109](https://github.com/Lazialize/oasis/issues/109)).
+
+- [#159](https://github.com/Lazialize/oasis/pull/159) [`0f434bd`](https://github.com/Lazialize/oasis/commit/0f434bdc0683950f264d3efed498a6e668f11ffa) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(linter): allow specification extensions (`x-*` keys) on Path Item Objects. The `structure/http-methods` and `structure/callbacks` rules now correctly permit specification extensions on Path Items, matching the shared object-shape table's `extensions: true` declaration. Unknown non-extension keys remain flagged ([#101](https://github.com/Lazialize/oasis/issues/101)).
+
+- [#162](https://github.com/Lazialize/oasis/pull/162) [`f9859ba`](https://github.com/Lazialize/oasis/commit/f9859baaadcd38de16130c1fc8acb94637720f94) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(linter): align `structure/schema-keywords` with JSON Schema 2020-12 cardinalities in OpenAPI 3.1.
+  The rule previously applied OpenAPI 3.0-style assumptions to 3.1 documents: it rejected valid boolean
+  Schema values for `items` (e.g. `items: false`) and empty `required` arrays, while accepting an
+  invalid empty `type` array. OpenAPI 3.1's Schema Object follows JSON Schema 2020-12, where a Schema
+  may be a boolean, `required` may legally be empty, and the array form of `type` must contain at least
+  one entry. OpenAPI 3.0 behavior (Schema must be an object, `required` must be non-empty) is unchanged
+  ([#102](https://github.com/Lazialize/oasis/issues/102)).
+
+- [#161](https://github.com/Lazialize/oasis/pull/161) [`b287d15`](https://github.com/Lazialize/oasis/commit/b287d159395928877035de951398906b1ae904db) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(linter): preserve Schema Object keywords declared alongside `$ref` when resolving schema roots.
+  `iterateSchemas` previously replaced a `$ref`-bearing schema root (a `components/schemas` entry or an
+  inline request/response/parameter schema) with its resolved target before schema rules ran, silently
+  discarding the referring node and its siblings. In OpenAPI 3.1 (JSON Schema 2020-12) those siblings
+  are meaningful, so `structure/schema-nullable`, `structure/schema-keywords`, and `examples/schema-match`
+  now evaluate them (and still check the referenced target); example validation checks an example
+  against both the target and the applicable siblings. In OpenAPI 3.0 the siblings remain ignored per
+  spec but are now flagged on schema roots too. Diagnostics keep pointing at the owning file/range of
+  the keyword they concern ([#103](https://github.com/Lazialize/oasis/issues/103)).
+- Updated dependencies [[`0fd6eef`](https://github.com/Lazialize/oasis/commit/0fd6eefb0e8511d6c076187775a7cd178550ea1e)]:
+  - @oasis/core@0.9.2
+
 ## 0.9.1
 
 ### Patch Changes

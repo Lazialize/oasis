@@ -1,5 +1,19 @@
 # @oasis/cli
 
+## 0.9.2
+
+### Patch Changes
+
+- [#168](https://github.com/Lazialize/oasis/pull/168) [`8f49a22`](https://github.com/Lazialize/oasis/commit/8f49a221d7fb9ae37b67bbabb7e91c2fa321eb71) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(extension): suppress document-scoped LSP requests for files the VS Code client has not synchronized.
+
+- [#163](https://github.com/Lazialize/oasis/pull/163) [`88a1fe9`](https://github.com/Lazialize/oasis/commit/88a1fe9ebff01c28173aceffaa4ddd8d0ffe8798) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(extension): include MIT license in packaged VSIX artifacts. The VS Code extension VSIX now contains the repository's LICENSE file, resolved at package time by copying it from the repository root. The CI workflow verifies that the packaged VSIX includes the LICENSE ([#82](https://github.com/Lazialize/oasis/issues/82)).
+
+- Updated dependencies [[`78f9f6c`](https://github.com/Lazialize/oasis/commit/78f9f6c1bcf4c14c1023e748c4f78ba245c04fed), [`7d0b365`](https://github.com/Lazialize/oasis/commit/7d0b36525ff7f07272205931f98c1d33d427048d), [`6a84c56`](https://github.com/Lazialize/oasis/commit/6a84c56bcc3990d4b088f33fd0a52a3c50c712de), [`ce2a63c`](https://github.com/Lazialize/oasis/commit/ce2a63c5e0dd047ee5f9628917ea813d96d9e44a), [`ac12549`](https://github.com/Lazialize/oasis/commit/ac12549f91c734db574e3a6d940283b23430f8fb), [`870bb1e`](https://github.com/Lazialize/oasis/commit/870bb1e26911aff521279bc7e49035f2dcaabb3a), [`2b3ffd3`](https://github.com/Lazialize/oasis/commit/2b3ffd39114a33451058674e2cc583523fa42aea), [`629b3b9`](https://github.com/Lazialize/oasis/commit/629b3b902da2c852db3e696550f8609f3b2ce3dd), [`0f434bd`](https://github.com/Lazialize/oasis/commit/0f434bdc0683950f264d3efed498a6e668f11ffa), [`0fd6eef`](https://github.com/Lazialize/oasis/commit/0fd6eefb0e8511d6c076187775a7cd178550ea1e), [`f9859ba`](https://github.com/Lazialize/oasis/commit/f9859baaadcd38de16130c1fc8acb94637720f94), [`b287d15`](https://github.com/Lazialize/oasis/commit/b287d159395928877035de951398906b1ae904db), [`caf4abf`](https://github.com/Lazialize/oasis/commit/caf4abf777570a20754f5f9d9e8ebc69c29a35f6)]:
+  - @oasis/linter@0.9.2
+  - @oasis/bundler@0.9.2
+  - @oasis/server@0.9.2
+  - @oasis/core@0.9.2
+
 ## 0.9.1
 
 ### Patch Changes
