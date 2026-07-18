@@ -17,6 +17,11 @@ function scalarStrings(node: Node | undefined): string[] {
 interface EffectiveSchema {
   properties: Set<string>;
   required: Set<string>;
+  /**
+   * False when any composed member was an unresolvable/external `$ref`: the effective property set
+   * is then incomplete-but-unknowable, so absences must not be reported (unknown ≠ missing).
+   */
+  complete: boolean;
 }
 
 /**
@@ -37,7 +42,11 @@ function collectEffectiveSchema(
   let curNode: Node = node;
   if (isMap(node) && isRefObject(node)) {
     const resolved = resolveMaybeRef(ctx.graph, doc, node, "");
-    if (isRefObject(resolved.node)) return; // unresolved / external $ref: skip
+    if (isRefObject(resolved.node)) {
+      // Unresolved / external $ref: its contribution is unknowable, not empty.
+      acc.complete = false;
+      return;
+    }
     curDoc = resolved.doc;
     curNode = resolved.node;
   }
@@ -67,10 +76,14 @@ function effectiveSchemaHas(
   doc: OasisDocument,
   node: Node,
   propertyName: string,
-): { hasProperty: boolean; hasRequired: boolean } {
-  const acc: EffectiveSchema = { properties: new Set(), required: new Set() };
+): { hasProperty: boolean; hasRequired: boolean; complete: boolean } {
+  const acc: EffectiveSchema = { properties: new Set(), required: new Set(), complete: true };
   collectEffectiveSchema(ctx, doc, node, new Set(), acc);
-  return { hasProperty: acc.properties.has(propertyName), hasRequired: acc.required.has(propertyName) };
+  return {
+    hasProperty: acc.properties.has(propertyName),
+    hasRequired: acc.required.has(propertyName),
+    complete: acc.complete,
+  };
 }
 
 /** Checks a single branch schema (a `oneOf`/`anyOf` member) for the discriminator's `propertyName`. */
@@ -94,7 +107,11 @@ function checkBranch(
   }
   if (!isMap(branchNode)) return;
 
-  const { hasProperty, hasRequired } = effectiveSchemaHas(ctx, branchDoc, branchNode, propertyName);
+  const { hasProperty, hasRequired, complete } = effectiveSchemaHas(ctx, branchDoc, branchNode, propertyName);
+  // An incomplete effective schema (some composed member is an unresolvable/external $ref) means
+  // an absent property or `required` entry is unknowable, not missing — suppress those reports.
+  if (!complete && (!hasProperty || !hasRequired)) return;
+
   if (!hasProperty) {
     ctx.report(
       { doc: branchDoc, node: branchNode },
@@ -168,7 +185,9 @@ function checkDiscriminator(ctx: RuleContext, doc: OasisDocument, schemaNode: No
     // Parent-discriminator pattern: no composition keyword here, but valid when this Schema itself
     // defines the discriminator property (children reference it via their own `allOf`). Report only
     // when the property (or, in 3.0, its `required` entry) is genuinely absent from this Schema.
-    const { hasProperty, hasRequired } = effectiveSchemaHas(ctx, doc, schemaNode, propertyName);
+    const { hasProperty, hasRequired, complete } = effectiveSchemaHas(ctx, doc, schemaNode, propertyName);
+    // Same as branch checks: an incomplete effective schema makes absences unknowable, not missing.
+    if (!complete && (!hasProperty || !hasRequired)) return;
     if (!hasProperty) {
       ctx.report(
         { doc, node: discNode },

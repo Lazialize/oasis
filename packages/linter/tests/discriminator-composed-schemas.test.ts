@@ -222,6 +222,32 @@ components:
     expect(discriminatorDiags(diagnostics)).toEqual([]);
   });
 
+  test("unresolvable ref in a branch's allOf suppresses discriminator diagnostics", async () => {
+    // The branch composes a $ref to a file outside the workspace: its effective property set is
+    // incomplete-but-unknowable, so neither the missing-property nor the 3.0 missing-required
+    // diagnostic may fire (unknown is not missing).
+    const diagnostics = await lintFiles({
+      "/virtual/entry.yaml": `openapi: 3.0.3
+info: { title: T, version: "1" }
+paths: {}
+components:
+  schemas:
+    Cat:
+      allOf:
+        - $ref: './missing-base.yaml#/components/schemas/Base'
+        - type: object
+          properties:
+            meow: { type: boolean }
+    Animal:
+      oneOf:
+        - $ref: '#/components/schemas/Cat'
+      discriminator:
+        propertyName: kind
+`,
+    });
+    expect(discriminatorDiags(diagnostics)).toEqual([]);
+  });
+
   describe("negative controls", () => {
     test("3.1: effective schema truly lacks the discriminator property is reported", async () => {
       const diagnostics = await lintFiles({
