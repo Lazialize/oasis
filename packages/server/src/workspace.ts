@@ -59,6 +59,10 @@ export interface ServerContext {
   projects: Map<string, ProjectState>;
   /** Workspace folder roots reported at initialize; bounds upward config discovery. */
   workspaceRoots: string[];
+  /** Whether project discovery is restricted to `workspaceRoots`. Set for clients that provide
+   * workspace folders (including an empty list), so a document left open after its folder is
+   * removed cannot immediately rediscover and reload that removed folder's project. */
+  restrictProjectDiscoveryToWorkspaceRoots: boolean;
   /**
    * Directories already walked upward with no `oasis.config.jsonc` found (up to their workspace
    * boundary at the time), so repeated `didChange` events on a document outside any project don't
@@ -108,6 +112,7 @@ export function createServerContext(fileSystem: FileSystem): ServerContext {
     graphCache: new Map(),
     projects: new Map(),
     workspaceRoots: [],
+    restrictProjectDiscoveryToWorkspaceRoots: false,
     upwardMissCache: new Set(),
     standaloneConfigCache: new Map(),
     openStandaloneEntries: new Set(),

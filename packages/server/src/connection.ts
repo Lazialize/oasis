@@ -1,4 +1,4 @@
-import { sep } from "node:path";
+import { resolve as pathResolve, sep } from "node:path";
 import {
   createConnection,
   FileChangeType,
@@ -72,6 +72,12 @@ function workspaceRootsFromInitialize(params: InitializeParams): string[] {
   return [];
 }
 
+function isPathAtOrUnder(path: string, root: string): boolean {
+  const resolvedPath = pathResolve(path);
+  const resolvedRoot = pathResolve(root);
+  return resolvedPath === resolvedRoot || resolvedPath.startsWith(resolvedRoot + sep);
+}
+
 /** Group flat file edits into the LSP `WorkspaceEdit.changes` shape (uri -> TextEdit[]). Paths are
  * mapped back through `toUri` so edits to an untitled/remote document keep its original URI. */
 function groupEditsByUri(
@@ -134,6 +140,7 @@ export function startServer(): Connection {
 
   let workspaceRoots: string[] = [];
   let initConfigFiles: unknown;
+  let clientSupportsWorkspaceFolders = false;
 
   const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
   // Per-entry diagnostics bookkeeping (issue #48): diagnostics are stored per `entry -> file` and
@@ -291,7 +298,11 @@ export function startServer(): Connection {
   async function handleDocumentEvent(path: string, text: string): Promise<void> {
     invalidateGraph(ctx, path);
 
+    const wasStandaloneEntry = ctx.openStandaloneEntries.has(path);
     const route = await routeDocument(ctx, path, text);
+    if (wasStandaloneEntry && route.kind === "project-member" && route.entryPath !== path) {
+      clearPublishedFor(path);
+    }
     switch (route.kind) {
       case "config":
         await reloadProjectAtConfigPath(path);
@@ -381,6 +392,59 @@ export function startServer(): Connection {
     }
   }
 
+  /** Reconcile server state with a runtime workspace topology change. Added roots are scanned
+   * directly because existing files are not guaranteed to produce watcher Created events;
+   * projects no longer covered by any workspace root are unloaded and their diagnostics cleared. */
+  async function handleWorkspaceFoldersChanged(event: {
+    added: Array<{ uri: string }>;
+    removed: Array<{ uri: string }>;
+  }): Promise<void> {
+    const addedRoots = event.added.map((folder) => pathResolve(URI.parse(folder.uri).fsPath));
+    const removedRoots = event.removed.map((folder) => pathResolve(URI.parse(folder.uri).fsPath));
+    const removedSet = new Set(removedRoots);
+    workspaceRoots = [
+      ...new Set([...workspaceRoots.map((root) => pathResolve(root)).filter((root) => !removedSet.has(root)), ...addedRoots]),
+    ];
+    ctx.workspaceRoots = workspaceRoots;
+    ctx.upwardMissCache.clear();
+    ctx.standaloneConfigCache.clear();
+
+    const removedEntries = new Set<string>();
+    for (const [configPath, project] of [...ctx.projects]) {
+      const belongedToRemovedRoot = removedRoots.some((root) => isPathAtOrUnder(configPath, root));
+      const stillInWorkspace = workspaceRoots.some((root) => isPathAtOrUnder(configPath, root));
+      if (!belongedToRemovedRoot || stillInWorkspace) continue;
+
+      ctx.projects.delete(configPath);
+      publishConfigWarnings(configPath, []);
+      for (const entryPath of project.entryPaths) removedEntries.add(entryPath);
+    }
+
+    for (const entryPath of removedEntries) {
+      const timer = debounceTimers.get(entryPath);
+      if (timer) {
+        clearTimeout(timer);
+        debounceTimers.delete(entryPath);
+      }
+      clearPublishedFor(entryPath);
+      ctx.lastGraphFiles.delete(entryPath);
+    }
+    if (removedEntries.size > 0) {
+      ctx.graphEpoch++;
+      ctx.graphCache.clear();
+    }
+
+    const addedProjects = await scanWorkspaceRootsForProjects(ctx, addedRoots, false);
+    for (const project of addedProjects) publishConfigWarnings(project.configPath, project.warnings);
+    await publishAllProjects();
+
+    // Topology changes can reroute already-open documents between project-member, standalone, and
+    // ignored. Re-run the same routing used for normal document events against their overlay text.
+    for (const document of documents.all()) {
+      await handleDocumentEvent(toPath(document.uri), document.getText());
+    }
+  }
+
   // Last-resort net: a bug that somehow still slips past the per-site `runSafely` wrapping below
   // (e.g. in a handler added later without it) gets logged rather than crashing the process.
   process.on("unhandledRejection", (reason) => {
@@ -392,6 +456,9 @@ export function startServer(): Connection {
 
   connection.onInitialize((params) => {
     workspaceRoots = workspaceRootsFromInitialize(params);
+    clientSupportsWorkspaceFolders = params.capabilities.workspace?.workspaceFolders === true;
+    ctx.restrictProjectDiscoveryToWorkspaceRoots =
+      clientSupportsWorkspaceFolders || (params.workspaceFolders !== undefined && params.workspaceFolders !== null);
     const options = params.initializationOptions as { configFiles?: unknown } | undefined;
     initConfigFiles = options?.configFiles;
     return {
@@ -406,12 +473,20 @@ export function startServer(): Connection {
         codeActionProvider: { codeActionKinds: ["quickfix", "refactor.extract", "refactor.inline"] },
         documentLinkProvider: {},
         workspaceSymbolProvider: true,
+        workspace: {
+          workspaceFolders: { supported: true, changeNotifications: true },
+        },
       },
     };
   });
 
   connection.onInitialized(() => {
     runSafely(connection, "initializeProjects", initializeProjects);
+    if (clientSupportsWorkspaceFolders) {
+      connection.workspace.onDidChangeWorkspaceFolders((event) => {
+        runSafely(connection, "handleWorkspaceFoldersChanged", () => handleWorkspaceFoldersChanged(event));
+      });
+    }
   });
 
   connection.onDidChangeWatchedFiles((params) => {
