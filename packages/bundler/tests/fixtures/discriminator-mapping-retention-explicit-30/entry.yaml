@@ -1,0 +1,30 @@
+openapi: 3.0.3
+info:
+  title: Discriminator mapping retention (explicit ref, 3.0, mapping before oneOf)
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                discriminator:
+                  propertyName: kind
+                  mapping:
+                    dog: '#/components/schemas/Dog'
+                oneOf:
+                  - $ref: '#/components/schemas/Dog'
+components:
+  schemas:
+    Dog:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum: [dog]
