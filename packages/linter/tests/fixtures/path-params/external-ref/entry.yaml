@@ -1,0 +1,7 @@
+openapi: 3.1.0
+info:
+  title: External Ref Path Params
+  version: "1.0.0"
+paths:
+  /pets/{id}:
+    $ref: './pets.yaml'

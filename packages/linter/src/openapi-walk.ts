@@ -20,6 +20,10 @@ export interface PathItemInfo {
   origin: PathItemOrigin;
   /** The key node for the path template, always in `entryDoc`. */
   keyNode: Node | undefined;
+  /** The document `keyNode` belongs to: always `entryDoc`, paired here so callers never have to
+   *  reach for the outer `entryDoc` separately when attributing a diagnostic to the template key
+   *  (which may live in a different file than the resolved path item body below). */
+  keyDoc: OasisDocument;
   /** The (possibly $ref-resolved) document/node/pointer of the path item body. */
   doc: OasisDocument;
   node: Node;
@@ -77,6 +81,7 @@ function computeIteratePathItems(graph: WorkspaceGraph, entryDoc: OasisDocument,
         template,
         origin,
         keyNode: isNode(pair.key) ? pair.key : undefined,
+        keyDoc: entryDoc,
         doc: resolved.doc,
         node: resolved.node,
         pointer: resolved.pointer,

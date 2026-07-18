@@ -304,7 +304,17 @@ function buildAddPathParam(
   for (const pathItem of iteratePathItems(graph, entryDoc)) {
     if (!isMap(pathItem.node)) continue;
 
-    if (pathItem.doc.filePath === doc.filePath && matchesNodeRange(pathItem.node, start, end)) {
+    // The "missing declared param" diagnostic is attached to the path template's key (see
+    // `paths/params-defined`), ideally to the `{name}` placeholder's own sub-span within it — not
+    // to the (possibly $ref-resolved, possibly different-file) path item body. Match the diag range
+    // against the key node's span, but still build the fix against the path item body, wherever it
+    // actually lives, since that's where the `parameters` list needs to be edited.
+    if (
+      pathItem.keyNode?.range &&
+      pathItem.keyDoc.filePath === doc.filePath &&
+      start >= pathItem.keyNode.range[0] &&
+      end <= pathItem.keyNode.range[1]
+    ) {
       return buildParamFix(graph, pathItem.doc, pathItem.node, pathItem.template, diag, index);
     }
 

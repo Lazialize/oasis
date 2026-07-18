@@ -1,0 +1,14 @@
+get:
+  operationId: getPet
+  tags: [pets]
+  description: ok
+  responses:
+    '200':
+      description: OK
+post:
+  operationId: replacePet
+  tags: [pets]
+  description: ok
+  responses:
+    '200':
+      description: OK
