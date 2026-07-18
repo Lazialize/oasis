@@ -266,6 +266,7 @@ checks and why, version notes, options, and good/bad examples). Compact summary:
 | [`paths/no-duplicates`](docs/rules/paths/no-duplicates.md) | error | Path templates equivalent up to parameter names |
 | [`security/defined`](docs/rules/security/defined.md) | error | `security` scheme names exist in `components/securitySchemes`; oauth2 scopes are declared |
 | [`tags/defined`](docs/rules/tags/defined.md) | off | Operation tags are declared in the root `tags` list |
+| [`tags/no-duplicates`](docs/rules/tags/no-duplicates.md) | error | Tag names in the root `tags` list are unique |
 | [`tags/no-unused`](docs/rules/tags/no-unused.md) | warn | Root `tags` list entries are used by an operation |
 | [`style/naming-convention`](docs/rules/style/naming-convention.md) | off | Configurable casing for ids, component/parameter/property names |
 | [`examples/schema-match`](docs/rules/examples/schema-match.md) | warn | `example`/`examples[].value` conforms to its schema |

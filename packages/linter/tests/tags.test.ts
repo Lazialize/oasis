@@ -73,3 +73,43 @@ webhooks:
     expect(diagnostics.some((d) => d.rule === "tags/no-unused")).toBe(false);
   });
 });
+
+describe("tags/no-duplicates", () => {
+  test("flags duplicate tag names in YAML block style", async () => {
+    const diagnostics = await lintFixture("tags/duplicate-tags-yaml.yaml");
+    const d = diagnostics.find((d) => d.rule === "tags/no-duplicates");
+    expect(d).toBeDefined();
+    expect(d?.severity).toBe("error");
+    expect(d?.message).toContain("pets");
+    expect(d?.range.start.line).toBe(6);
+  });
+
+  test("flags duplicate tag names in JSON style arrays", async () => {
+    const diagnostics = await lintFixture("tags/duplicate-tags-json.yaml");
+    const d = diagnostics.find((d) => d.rule === "tags/no-duplicates");
+    expect(d).toBeDefined();
+    expect(d?.severity).toBe("error");
+    expect(d?.message).toContain("pets");
+    expect(d?.range.start.line).toBe(4);
+  });
+
+  test("flags duplicate unused tags", async () => {
+    const diagnostics = await lintFixture("tags/duplicate-tags-unused.yaml");
+    const d = diagnostics.find((d) => d.rule === "tags/no-duplicates");
+    expect(d).toBeDefined();
+    expect(d?.message).toContain("unused");
+  });
+
+  test("flags duplicates where only one occurrence is used", async () => {
+    const diagnostics = await lintFixture("tags/duplicate-tags-one-used.yaml");
+    const d = diagnostics.find((d) => d.rule === "tags/no-duplicates");
+    expect(d).toBeDefined();
+    expect(d?.message).toContain("pets");
+    expect(d?.range.start.line).toBe(7);
+  });
+
+  test("valid fixture with no duplicate tags passes", async () => {
+    const diagnostics = await lintFixture("valid/openapi.yaml");
+    expect(diagnostics.some((d) => d.rule === "tags/no-duplicates")).toBe(false);
+  });
+});

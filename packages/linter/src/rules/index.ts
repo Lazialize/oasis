@@ -28,6 +28,7 @@ import { structureSecuritySchemes } from "./structure-security-schemes.ts";
 import { structureServerVariables } from "./structure-server-variables.ts";
 import { structureXml } from "./structure-xml.ts";
 import { tagsDefined } from "./tags-defined.ts";
+import { noTagDuplicates } from "./tags-no-duplicates.ts";
 import type { Rule } from "../types.ts";
 
 /** Every built-in rule, in a stable order used for config resolution and documentation. */
@@ -59,6 +60,7 @@ export const rules: Rule[] = [
   noDuplicatePaths,
   securityDefined,
   tagsDefined,
+  noTagDuplicates,
   noUnusedTags,
   namingConvention,
   exampleSchemaMatch,
@@ -73,6 +75,7 @@ export {
   noUnresolvedRef,
   noUnusedComponents,
   noUnusedTags,
+  noTagDuplicates,
   operationDescription,
   operationOperationId,
   operationSuccessResponse,
