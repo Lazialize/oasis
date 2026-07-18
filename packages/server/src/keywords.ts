@@ -1,6 +1,6 @@
 import { isMap } from "yaml";
-import { parsePointer } from "@oasis/core";
-import type { OasisDocument, OpenApiVersion } from "@oasis/core";
+import { nodeAtPosition, parsePointer, parseRefString, resolveRef } from "@oasis/core";
+import type { OasisDocument, OpenApiObjectKind, OpenApiVersion, WorkspaceGraph } from "@oasis/core";
 import { allowedFieldNames } from "@oasis/linter";
 import type { ObjectKind } from "@oasis/linter";
 import { mapKeys } from "./yaml-helpers.ts";
@@ -28,23 +28,85 @@ export const KIND_TO_COMPONENT_SECTION: Partial<Record<ObjectKind, string>> = {
 
 const HTTP_METHODS = ["get", "put", "post", "delete", "options", "head", "patch", "trace"];
 
+const CORE_KIND_TO_OBJECT_KIND: Partial<Record<OpenApiObjectKind, ObjectKind>> = {
+  root: "root",
+  components: "components",
+  "path-item": "pathItem",
+  operation: "operation",
+  parameter: "parameter",
+  header: "header",
+  "request-body": "requestBody",
+  response: "response",
+  "media-type": "mediaType",
+  encoding: "encoding",
+  callback: "callback",
+  example: "example",
+  link: "link",
+  schema: "schema",
+};
+
 /** All keys valid on an object of the given kind, for the given OpenAPI version. */
 export function allowedKeys(kind: ObjectKind, version: OpenApiVersion): string[] {
   return allowedFieldNames(kind, version);
 }
 
 /**
- * Heuristic root object kind for `doc`, for pointer classification: a full OpenAPI document
- * (`"root"`) declares an `openapi` key; a Path Item fragment file (`paths: { /pets: { $ref:
- * './pets.yaml' } }`) doesn't, and its own top-level map contains HTTP method keys directly.
- * Anything else defaults to `"root"`, matching pre-project-mode behavior.
+ * Root object kind for `doc`, for pointer classification. Full OpenAPI documents identify
+ * themselves with `openapi`. For a whole-document fragment, the workspace graph's incoming
+ * `$ref`s carry the semantic kind of their referring containers; all unambiguous whole-document
+ * references must agree before that kind is used. The HTTP-method heuristic remains as a fallback
+ * for standalone Path Item fragments, and unknown documents retain the historical `root` default.
  */
-export function inferRootKind(doc: OasisDocument): ObjectKind {
+export function inferRootKind(doc: OasisDocument, graph?: WorkspaceGraph): ObjectKind {
+  return inferRootKindInternal(doc, graph, new Set());
+}
+
+function inferRootKindInternal(doc: OasisDocument, graph: WorkspaceGraph | undefined, visiting: Set<string>): ObjectKind {
   const root = doc.yamlDoc.contents;
   const keys = mapKeys(isMap(root) ? root : undefined);
   if (keys.includes("openapi")) return "root";
+  if (graph && !visiting.has(doc.filePath)) {
+    visiting.add(doc.filePath);
+    const semanticKind = semanticRootKind(doc, graph, visiting);
+    visiting.delete(doc.filePath);
+    if (semanticKind) return semanticKind;
+  }
   if (keys.some((k) => HTTP_METHODS.includes(k))) return "pathItem";
   return "root";
+}
+
+/** Infer a fragment's root only from references that resolve to the physical document root. */
+function semanticRootKind(doc: OasisDocument, graph: WorkspaceGraph, visiting: Set<string>): ObjectKind | undefined {
+  const candidates = new Set<ObjectKind>();
+  for (const [sourcePath, refs] of graph.references) {
+    const sourceDoc = graph.documents.get(sourcePath);
+    if (!sourceDoc) continue;
+
+    for (const ref of refs) {
+      if (parseRefString(ref.value).pointer !== "") continue;
+      const target = resolveRef(graph, sourceDoc, ref);
+      if (!target.ok || target.doc.filePath !== doc.filePath || target.pointer !== "" || target.node !== doc.yamlDoc.contents) {
+        continue;
+      }
+
+      let kind = ref.targetKind ? CORE_KIND_TO_OBJECT_KIND[ref.targetKind] : undefined;
+      // OpenAPI 3.0 graph traversal does not propagate the 3.1 schema-resource context, so recover
+      // the referring container from the source pointer. This is also the fallback for older or
+      // otherwise context-free graph occurrences.
+      if (!kind && ref.kind === "ref") {
+        const found = nodeAtPosition(sourceDoc, ref.range.startOffset);
+        if (found && (found.pointer === "/$ref" || found.pointer.endsWith("/$ref"))) {
+          const split = found.pointer.lastIndexOf("/");
+          const containerPointer = split <= 0 ? "" : found.pointer.slice(0, split);
+          const sourceRootKind = inferRootKindInternal(sourceDoc, graph, visiting);
+          kind = classifyPointer(containerPointer, sourceRootKind);
+        }
+      }
+      if (kind) candidates.add(kind);
+    }
+  }
+
+  return candidates.size === 1 ? candidates.values().next().value : undefined;
 }
 
 /** Intermediate (non-object-kind) states the pointer walk passes through. */
