@@ -1,5 +1,16 @@
 # @oasis/linter
 
+## 0.9.3
+
+### Patch Changes
+
+- [#188](https://github.com/Lazialize/oasis/pull/188) [`eabf340`](https://github.com/Lazialize/oasis/commit/eabf3402212e78c6998527d3b7bc1c961a8e8ce7) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(linter): reject all supported JSON Schema 2020-12 keywords in OpenAPI 3.0 Schema Objects.
+
+- [#186](https://github.com/Lazialize/oasis/pull/186) [`df64a2d`](https://github.com/Lazialize/oasis/commit/df64a2d18aa03bd3da47842e1a0f3b76ed6e1ec2) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(linter): make duplicate `operationId` diagnostics deterministic when per-file overrides enable or disable the rule for referenced files.
+
+- Updated dependencies [[`01e1073`](https://github.com/Lazialize/oasis/commit/01e10737db05b69d3865662c57b62622190de7f3), [`bc1aa7c`](https://github.com/Lazialize/oasis/commit/bc1aa7c5adcc285da3a024403c2d141e4e8eaf04)]:
+  - @oasis/core@0.9.3
+
 ## 0.9.2
 
 ### Patch Changes

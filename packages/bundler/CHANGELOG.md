@@ -1,5 +1,22 @@
 # @oasis/bundler
 
+## 0.9.3
+
+### Patch Changes
+
+- [#177](https://github.com/Lazialize/oasis/pull/177) [`919542a`](https://github.com/Lazialize/oasis/commit/919542ae31028e687591b10504caaeb095ae8973) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(bundler): preserve source order for integer-like mapping keys. Bundling built plain JS objects,
+  whose integer-index property names (status codes like `"404"`/`"200"`, numeric component/schema
+  names like `"10"`/`"2"`) JS enumerates in ascending numeric order — silently reordering them in the
+  output even though the bundler's contract is to keep authored key order. The bundler now records key
+  insertion order as it builds each map and serializes through an ordered representation (`Map` for
+  YAML plus a small ordered JSON writer), so integer-like keys retain their source order in both YAML
+  and JSON output, deterministically across runs.
+
+- [#190](https://github.com/Lazialize/oasis/pull/190) [`119e121`](https://github.com/Lazialize/oasis/commit/119e1210e52cd0fb991831ad0560deec095c7b16) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(bundler): preserve unknown OpenAPI 3.1 Schema Object keyword payloads as opaque data instead of
+  interpreting OpenAPI-shaped property names inside them as structural fields.
+- Updated dependencies [[`01e1073`](https://github.com/Lazialize/oasis/commit/01e10737db05b69d3865662c57b62622190de7f3), [`bc1aa7c`](https://github.com/Lazialize/oasis/commit/bc1aa7c5adcc285da3a024403c2d141e4e8eaf04)]:
+  - @oasis/core@0.9.3
+
 ## 0.9.2
 
 ### Patch Changes

@@ -1,5 +1,17 @@
 # @oasis/cli
 
+## 0.9.3
+
+### Patch Changes
+
+- [#189](https://github.com/Lazialize/oasis/pull/189) [`28711bf`](https://github.com/Lazialize/oasis/commit/28711bf5a363bfb9ce87b76fb0a7094c8763850c) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(cli): reject bundle entry documents whose root is not an OpenAPI object.
+
+- Updated dependencies [[`eabf340`](https://github.com/Lazialize/oasis/commit/eabf3402212e78c6998527d3b7bc1c961a8e8ce7), [`df64a2d`](https://github.com/Lazialize/oasis/commit/df64a2d18aa03bd3da47842e1a0f3b76ed6e1ec2), [`919542a`](https://github.com/Lazialize/oasis/commit/919542ae31028e687591b10504caaeb095ae8973), [`e044f2d`](https://github.com/Lazialize/oasis/commit/e044f2dbb2864516c7f2be26b778823983b33514), [`01e1073`](https://github.com/Lazialize/oasis/commit/01e10737db05b69d3865662c57b62622190de7f3), [`7c91e87`](https://github.com/Lazialize/oasis/commit/7c91e877765e9e25c5b09c214afdd2e7c7bd7eba), [`119e121`](https://github.com/Lazialize/oasis/commit/119e1210e52cd0fb991831ad0560deec095c7b16), [`bc1aa7c`](https://github.com/Lazialize/oasis/commit/bc1aa7c5adcc285da3a024403c2d141e4e8eaf04), [`2eaaa65`](https://github.com/Lazialize/oasis/commit/2eaaa65ba612e1f3ea47cc6b13d601d58811dbde)]:
+  - @oasis/linter@0.9.3
+  - @oasis/bundler@0.9.3
+  - @oasis/server@0.9.3
+  - @oasis/core@0.9.3
+
 ## 0.9.2
 
 ### Patch Changes
