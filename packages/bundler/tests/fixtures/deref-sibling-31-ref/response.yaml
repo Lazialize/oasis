@@ -1,0 +1,9 @@
+Response:
+  description: target-description
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          name:
+            type: string

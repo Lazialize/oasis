@@ -1,0 +1,28 @@
+openapi: 3.1.0
+info:
+  title: Deref Sibling 3.1 Schema Object
+  version: "1.0.0"
+paths:
+  /a:
+    get:
+      operationId: getA
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: './schema.yaml'
+                type: number
+                enum: [1, 2, 3]
+  /b:
+    get:
+      operationId: getB
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: './bool.yaml'
+                type: string
