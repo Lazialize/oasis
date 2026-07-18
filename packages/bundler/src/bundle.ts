@@ -202,11 +202,28 @@ function withAliasTarget<T>(
   }
 }
 
-type OpenApiObjectKind = "example" | "link";
+type OpenApiObjectKind = "discriminator" | "example" | "link" | "schema";
+
+const SINGLE_SCHEMA_KEYS = new Set([
+  "items",
+  "additionalProperties",
+  "not",
+  "if",
+  "then",
+  "else",
+  "propertyNames",
+  "contains",
+  "unevaluatedItems",
+  "unevaluatedProperties",
+  "contentSchema",
+]);
+const MAP_SCHEMA_KEYS = new Set(["properties", "patternProperties", "$defs", "definitions", "dependentSchemas"]);
+const SEQUENCE_SCHEMA_KEYS = new Set(["allOf", "oneOf", "anyOf", "prefixItems"]);
 
 function objectKindForSection(section: string | undefined): OpenApiObjectKind | undefined {
   if (section === "examples") return "example";
   if (section === "links") return "link";
+  if (section === "schemas") return "schema";
   return undefined;
 }
 
@@ -293,7 +310,11 @@ function mapChildren(
     const out: Record<string, unknown> = {};
     for (const pair of resolvedMap.items) {
       if (!isNode(pair.value)) continue;
-      setKey(out, keyToString(pair.key), convertValue(ctx, doc, pair.value, hint, false, entryKind));
+      setKey(
+        out,
+        keyToString(pair.key),
+        convertValue(ctx, doc, pair.value, hint, false, entryKind ?? objectKindForSection(hint)),
+      );
     }
     return out;
   });
@@ -309,11 +330,48 @@ function convertObjectMember(
 ): unknown {
   const objectKind = objectKindForSection(hint);
   const contextualValue = isAlias(value) ? value.resolve(doc.yamlDoc) ?? value : value;
+  if (isOpenApi31SchemaObject(ctx, doc, objectKind)) {
+    return convertSchemaObjectMember(ctx, doc, key, value, contextualValue, false);
+  }
   const literal =
     key.startsWith("x-") ||
     isLiteralDataKey(key, contextualValue) ||
     isAnyValuedField(objectKind, key);
   return convertValue(ctx, doc, value, hint, literal, objectKind);
+}
+
+function isOpenApi31SchemaObject(
+  ctx: BundleContext,
+  doc: OasisDocument,
+  objectKind: OpenApiObjectKind | undefined,
+): boolean {
+  return objectKind === "schema" && (detectVersion(doc) ?? detectVersion(ctx.entryDoc)) === "3.1";
+}
+
+/** Convert one member whose containing object is an OpenAPI 3.1 Schema Object. */
+function convertSchemaObjectMember(
+  ctx: BundleContext,
+  doc: OasisDocument,
+  key: string,
+  value: Node,
+  contextualValue: Node,
+  componentsObject: boolean,
+): unknown {
+  if (SINGLE_SCHEMA_KEYS.has(key)) {
+    return convertValue(ctx, doc, value, "schemas", false, "schema");
+  }
+  if (MAP_SCHEMA_KEYS.has(key)) {
+    return mapChildren(ctx, doc, value, "schemas", "schema");
+  }
+  if (SEQUENCE_SCHEMA_KEYS.has(key)) {
+    return isSeq(contextualValue)
+      ? contextualValue.items.filter(isNode).map((item) => convertValue(ctx, doc, item, "schemas", false, "schema"))
+      : convertValue(ctx, doc, value, "schemas", false, "schema");
+  }
+  if (key === "discriminator") {
+    return convertValue(ctx, doc, value, "schemas", false, "discriminator", componentsObject, true);
+  }
+  return convertValue(ctx, doc, value, "schemas", true);
 }
 
 /** Resolve `refPair`'s `$ref`, returning the resolution (or undefined + a recorded warning diagnostic). */
@@ -790,6 +848,7 @@ function convertValue(
   isDiscriminatorObject = false,
 ): unknown {
   if (!node) return undefined;
+  const semanticObjectKind = objectKind ?? objectKindForSection(hint);
 
   if (isAlias(node)) {
     const target = node.resolve(doc.yamlDoc);
@@ -814,7 +873,16 @@ function convertValue(
       return undefined;
     }
     ctx.aliasStack.add(target);
-    const converted = convertValue(ctx, doc, target, hint, literal, objectKind, componentsObject, isDiscriminatorObject);
+    const converted = convertValue(
+      ctx,
+      doc,
+      target,
+      hint,
+      literal,
+      semanticObjectKind,
+      componentsObject,
+      isDiscriminatorObject,
+    );
     ctx.aliasStack.delete(target);
     return converted;
   }
@@ -850,7 +918,7 @@ function convertValue(
         setKey(out, key, convertValue(ctx, doc, value, hint, true));
         continue;
       }
-      if (!literal && isAnyValuedField(objectKind, key)) {
+      if (!literal && isAnyValuedField(semanticObjectKind, key)) {
         setKey(out, key, convertValue(ctx, doc, value, hint, true));
         continue;
       }
@@ -860,6 +928,16 @@ function convertValue(
       // generically, keeping the literal flag set for the rest of the subtree.
       if (literal) {
         setKey(out, key, convertValue(ctx, doc, value, hint, true));
+        continue;
+      }
+      // OpenAPI 3.1 Schema Objects inherit JSON Schema 2020-12 vocabulary rules: an unrecognized
+      // keyword is an annotation whose value is opaque to Oasis. Dispatch only the applicators for
+      // which Oasis knows the child is itself a Schema Object. This keeps OpenAPI-shaped custom
+      // keywords such as `paths`, `responses`, or `parameters` from falling into the global switch
+      // below while preserving normal conversion for real OpenAPI containers. OpenAPI 3.0 retains
+      // its existing fixed Schema Object behavior and therefore deliberately bypasses this branch.
+      if (isOpenApi31SchemaObject(ctx, doc, semanticObjectKind)) {
+        setKey(out, key, convertSchemaObjectMember(ctx, doc, key, value, contextualValue, componentsObject));
         continue;
       }
       switch (key) {
@@ -951,7 +1029,7 @@ function convertValue(
         // can tell it apart from an unrelated Schema Object property that merely happens to be
         // named "mapping" (see that case's comment).
         case "discriminator":
-          setKey(out, key, convertValue(ctx, doc, value, hint, false, objectKind, componentsObject, true));
+          setKey(out, key, convertValue(ctx, doc, value, hint, false, "discriminator", componentsObject, true));
           break;
         // `discriminator.mapping` entries are references expressed as plain strings, not `{$ref}`
         // objects (see `convertDiscriminatorMapping`), so they need their own conversion path
@@ -980,7 +1058,9 @@ function convertValue(
   }
 
   if (isSeq(node)) {
-    return node.items.filter(isNode).map((item) => convertValue(ctx, doc, item, hint, literal, objectKind, false));
+    return node.items
+      .filter(isNode)
+      .map((item) => convertValue(ctx, doc, item, hint, literal, semanticObjectKind, false));
   }
 
   if (isScalar(node)) {
