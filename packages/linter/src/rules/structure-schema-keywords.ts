@@ -11,11 +11,22 @@ import type { Rule, RuleContext } from "../types.ts";
  * (3.0-only, flagged on 3.1) and is intentionally not handled here — `structure/schema-nullable`
  * already covers it, along with 3.0 `type` arrays and `type: null`.
  */
-const ONLY_31_KEYWORDS = [
+const SCHEMA_31_ONLY_KEYWORDS = [
+  "$id",
+  "$schema",
+  "$vocabulary",
+  "$anchor",
+  "$dynamicAnchor",
+  "$dynamicRef",
+  "$comment",
   "const",
   "prefixItems",
+  "contains",
+  "minContains",
+  "maxContains",
   "contentMediaType",
   "contentEncoding",
+  "contentSchema",
   "patternProperties",
   "propertyNames",
   "unevaluatedProperties",
@@ -58,7 +69,7 @@ function stringValue(node: Node | undefined): string | undefined {
 
 function checkVersionOnlyKeywords(ctx: RuleContext, doc: OasisDocument, schema: Node): void {
   if (ctx.version !== "3.0") return;
-  for (const key of ONLY_31_KEYWORDS) {
+  for (const key of SCHEMA_31_ONLY_KEYWORDS) {
     const node = childAt(schema, key);
     if (node) {
       ctx.report({ doc, node }, `"${key}" is not supported in OpenAPI 3.0; it's a JSON Schema 2020-12 keyword available in OpenAPI 3.1.`);

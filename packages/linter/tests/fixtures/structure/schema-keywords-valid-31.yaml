@@ -50,3 +50,35 @@ components:
     EmptyRequired:
       type: object
       required: []
+
+    AllOnly31Keywords:
+      $id: https://schemas.example/example
+      $schema: https://json-schema.org/draft/2020-12/schema
+      $vocabulary:
+        https://schemas.example/vocabulary: true
+      $anchor: example
+      $dynamicAnchor: node
+      $dynamicRef: '#node'
+      $comment: for maintainers
+      const: 5
+      prefixItems: []
+      contains:
+        type: string
+      minContains: 1
+      maxContains: 2
+      contentMediaType: application/json
+      contentEncoding: base64
+      contentSchema:
+        type: string
+      patternProperties: {}
+      propertyNames: {}
+      unevaluatedProperties: false
+      unevaluatedItems: false
+      dependentRequired: {}
+      dependentSchemas: {}
+      if: {}
+      then: {}
+      else: {}
+      $defs: {}
+      examples: []
+      x-oasis-extension: true
