@@ -21,10 +21,17 @@ paths:
               operationRef: '#/paths/~1missing/get'
             GoodRef:
               operationRef: '#/paths/~1pets/get'
+            SchemaRef:
+              operationRef: '#/components/schemas/Pet'
+            PathItemRef:
+              operationRef: '#/paths/~1pets'
             UnknownKey:
               operationId: listPets
               notAKey: true
 components:
+  schemas:
+    Pet:
+      type: object
   links:
     ReusableBad:
       operationId: alsoDoesNotExist
