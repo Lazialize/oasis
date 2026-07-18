@@ -8,6 +8,7 @@ import {
   TransportKind,
 } from "vscode-languageclient/node";
 import { createDocumentProviderGuards } from "./provider-guards.ts";
+import { refreshProjectMode } from "./project-mode.ts";
 import { createDocumentSyncGuards } from "./sync-guards.ts";
 
 const CONFIG_FILE_NAME = "oasis.config.jsonc";
@@ -207,6 +208,25 @@ function setProjectMode(active: boolean): void {
   void resyncOpenDocuments();
 }
 
+/** Re-scan the current set of workspace folders and await reconciliation of already-open buffers.
+ * Existing configs in an added folder do not reliably produce file-watcher Created events. */
+async function refreshWorkspaceProjectMode(): Promise<void> {
+  await refreshProjectMode({
+    isActive: () => projectModeActive,
+    detect: detectProjectMode,
+    getConfigFiles: () => discoveredConfigFiles,
+    notifyConfigFilesAdded: async (paths) => {
+      await client?.sendNotification(DidChangeWatchedFilesNotification.type, {
+        changes: paths.map((path) => ({ uri: vscode.Uri.file(path).toString(), type: FileChangeType.Created })),
+      });
+    },
+    setActive: (active) => {
+      projectModeActive = active;
+    },
+    reconcileOpenDocuments: resyncOpenDocuments,
+  });
+}
+
 function buildServerOptions(): ServerOptions {
   const config = vscode.workspace.getConfiguration("oasis");
   const command = config.get<string>("server.path", "oasis");
@@ -386,6 +406,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (event.affectsConfiguration("oasis.server")) {
         void restartClient();
       }
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      void refreshWorkspaceProjectMode();
     }),
   );
 

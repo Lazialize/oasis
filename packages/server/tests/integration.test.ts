@@ -155,6 +155,114 @@ paths:
     expect(publish.params.diagnostics.some((d: { code?: string }) => d.code === "refs/no-unresolved")).toBe(true);
   }, 20000);
 
+  test("adding and removing a workspace folder loads and unloads its projects", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "oasis-lsp-workspace-added-"));
+    const projectDir = join(projectRoot, "nested");
+    mkdirSync(projectDir);
+    const configPath = join(projectDir, "oasis.config.jsonc");
+    const entryPath = join(projectDir, "openapi.yaml");
+    const fragmentPath = join(projectDir, "pets.yaml");
+    const fragmentUri = pathToFileURL(fragmentPath).toString();
+    writeFileSync(configPath, `{ "entries": ["openapi.yaml"] }`);
+    writeFileSync(
+      entryPath,
+      `openapi: 3.1.0
+info:
+  title: Added workspace
+  version: "1.0.0"
+paths:
+  /pets:
+    $ref: './pets.yaml'
+components:
+  schemas:
+    WorkspaceFolderPet:
+      type: object
+`,
+    );
+    writeFileSync(
+      fragmentPath,
+      `get:
+  responses:
+    '200':
+      description: OK
+`,
+    );
+
+    client = new LspClient();
+    const initResult = await client.request("initialize", {
+      processId: null,
+      rootUri: null,
+      workspaceFolders: null,
+      capabilities: { workspace: { workspaceFolders: true } },
+    });
+    expect(initResult.result?.capabilities?.workspace?.workspaceFolders).toEqual({
+      supported: true,
+      changeNotifications: true,
+    });
+    client.notify("initialized", {});
+
+    client.notify("workspace/didChangeWorkspaceFolders", {
+      event: {
+        added: [{ uri: pathToFileURL(projectRoot).toString(), name: "added" }],
+        removed: [],
+      },
+    });
+    // VS Code's topology listener deep-scans the added folder and explicitly forwards configs
+    // that already existed. This may race the standard workspace-folder notification; both paths
+    // are independently safe and the config notification is what eagerly loads nested projects.
+    client.notify("workspace/didChangeWatchedFiles", {
+      changes: [{ uri: pathToFileURL(configPath).toString(), type: 1 /* Created */ }],
+    });
+
+    const addedDiagnostics = await client.waitFor(
+      (msg) =>
+        msg.method === "textDocument/publishDiagnostics" &&
+        msg.params?.uri === fragmentUri &&
+        msg.params.diagnostics.some((d: { code?: string }) => d.code === "operation/operation-id"),
+      15000,
+    );
+    expect(addedDiagnostics.params.diagnostics.some((d: { code?: string }) => d.code === "operation/operation-id")).toBe(true);
+
+    const addedSymbols = await client.request("workspace/symbol", { query: "WorkspaceFolderPet" });
+    expect(addedSymbols.result.map((symbol: { name: string }) => symbol.name)).toContain("WorkspaceFolderPet");
+
+    // Keep a project fragment open across removal. A client that initialized with
+    // workspaceFolders:null must still restrict subsequent discovery after receiving topology
+    // changes, or routing this open fragment would immediately reload the removed nested config.
+    client.notify("textDocument/didOpen", {
+      textDocument: {
+        uri: fragmentUri,
+        languageId: "yaml",
+        version: 1,
+        text: `get:\n  responses:\n    '200':\n      description: OK\n`,
+      },
+    });
+    await client.waitFor(
+      (msg) =>
+        msg.method === "textDocument/publishDiagnostics" &&
+        msg.params?.uri === fragmentUri &&
+        msg.params.diagnostics.some((d: { code?: string }) => d.code === "operation/operation-id"),
+      15000,
+    );
+
+    client.notify("workspace/didChangeWorkspaceFolders", {
+      event: {
+        added: [],
+        removed: [{ uri: pathToFileURL(projectRoot).toString(), name: "added" }],
+      },
+    });
+
+    const removedDiagnostics = await client.waitFor(
+      (msg) => msg.method === "textDocument/publishDiagnostics" && msg.params?.uri === fragmentUri,
+      15000,
+    );
+    expect(removedDiagnostics.params.diagnostics).toEqual([]);
+
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const removedSymbols = await client.request("workspace/symbol", { query: "WorkspaceFolderPet" });
+    expect(removedSymbols.result).toEqual([]);
+  }, 35000);
+
   test("an exception thrown mid-validate is caught and logged, not crashed on, and the server keeps answering requests", async () => {
     client = new LspClient();
 

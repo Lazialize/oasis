@@ -36,7 +36,10 @@ with no `openapi:` key of its own) get full LSP features via the owning entry's 
 with an `openapi:` key still lint as their own standalone entry; everything else is silently
 ignored. The extension also watches `oasis.config.jsonc` for changes and notifies the server via
 `workspace/didChangeWatchedFiles` so edits to (or deletion of) a config reload (or unload) that
-project.
+project. Adding or removing a workspace folder reruns project detection and resynchronizes open
+documents. Newly discovered config paths from that deep scan are forwarded to the running server
+as created files, so nested configs already present in an added folder take effect without an
+actual file-create event.
 
 Detection (`vscode.workspace.findFiles('**/oasis.config.jsonc', ...)`) is a **deep scan**, not
 limited to workspace folder roots, so a config nested in a subdirectory of a larger workspace (e.g.

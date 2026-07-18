@@ -177,16 +177,20 @@ export async function loadProjectAtPath(ctx: ServerContext, rawConfigPath: strin
  * Search each workspace folder root (no deep scan) for `oasis.config.jsonc` and load it as a
  * project if it declares a non-empty `entries` list. This is one of two eager-discovery
  * mechanisms (the other being `initializationOptions.configFiles`, see `loadConfigFilesFromInit`);
- * both dedupe naturally since projects are keyed by resolved config path. Also records
- * `workspaceRoots` on the context so upward discovery (`discoverProjectUpward`) knows where to
- * stop walking.
+ * both dedupe naturally since projects are keyed by resolved config path. By default this also
+ * records `workspaceRoots` on the context so upward discovery (`discoverProjectUpward`) knows
+ * where to stop walking; callers scanning only newly-added roots can retain the complete root set.
  *
  * Returns every non-undefined `ProjectState` `loadProjectAtPath` produced (including synthetic,
  * unregistered ones carrying only a parse-error warning — see `loadProjectAtPath`), so callers can
  * publish config warnings even for configs that never register as a project.
  */
-export async function scanWorkspaceRootsForProjects(ctx: ServerContext, workspaceRoots: string[]): Promise<ProjectState[]> {
-  ctx.workspaceRoots = workspaceRoots;
+export async function scanWorkspaceRootsForProjects(
+  ctx: ServerContext,
+  workspaceRoots: string[],
+  updateWorkspaceRoots = true,
+): Promise<ProjectState[]> {
+  if (updateWorkspaceRoots) ctx.workspaceRoots = workspaceRoots;
   const results: ProjectState[] = [];
   for (const root of workspaceRoots) {
     const state = await loadProjectAtPath(ctx, join(root, CONFIG_FILE_NAME));
@@ -243,6 +247,7 @@ function enclosingWorkspaceRoot(ctx: ServerContext, path: string): string | unde
  */
 export async function discoverProjectUpward(ctx: ServerContext, docPath: string): Promise<boolean> {
   const boundary = enclosingWorkspaceRoot(ctx, docPath);
+  if (!boundary && ctx.restrictProjectDiscoveryToWorkspaceRoots) return false;
   let dir = dirname(pathResolve(docPath));
 
   for (;;) {
