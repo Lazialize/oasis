@@ -15,7 +15,7 @@ export const structureHttpMethods: Rule = {
 
       for (const pair of pathItem.node.items) {
         const key = keyToString(pair.key);
-        if (!ALLOWED_KEYS.has(key) && isNode(pair.key)) {
+        if (!ALLOWED_KEYS.has(key) && !key.startsWith("x-") && isNode(pair.key)) {
           ctx.report(
             { doc: pathItem.doc, node: pair.key },
             `"${key}" is not a valid key under path item "${pathItem.template}" (expected an HTTP method or one of: ${[...PATH_ITEM_NON_METHOD_KEYS].join(", ")}).`,

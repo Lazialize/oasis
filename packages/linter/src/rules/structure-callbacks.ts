@@ -18,7 +18,7 @@ function checkCallbackPathItem(ctx: RuleContext, doc: OasisDocument, node: Node,
 
   for (const pair of node.items) {
     const key = keyToString(pair.key);
-    if (!PATH_ITEM_ALLOWED_KEYS.has(key) && isNode(pair.key)) {
+    if (!PATH_ITEM_ALLOWED_KEYS.has(key) && !key.startsWith("x-") && isNode(pair.key)) {
       ctx.report(
         { doc, node: pair.key },
         `${label} has invalid key "${key}" (expected an HTTP method or one of: ${[...PATH_ITEM_NON_METHOD_KEYS].join(", ")}).`,
