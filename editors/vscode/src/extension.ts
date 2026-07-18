@@ -7,6 +7,7 @@ import {
   type ServerOptions,
   TransportKind,
 } from "vscode-languageclient/node";
+import { createDocumentProviderGuards } from "./provider-guards.ts";
 
 const CONFIG_FILE_NAME = "oasis.config.jsonc";
 
@@ -213,6 +214,7 @@ function buildServerOptions(): ServerOptions {
 }
 
 function buildClientOptions(): LanguageClientOptions {
+  const documentProviderGuards = createDocumentProviderGuards(shouldSync);
   return {
     documentSelector: ["yaml", "json", "jsonc"],
     outputChannel,
@@ -267,6 +269,22 @@ function buildClientOptions(): LanguageClientOptions {
         if (!shouldSync(document)) return undefined;
         return next(document, token);
       },
+      provideReferences: async (document, position, context, token, next) =>
+        documentProviderGuards.provideReferences(document, (currentDocument) =>
+          next(currentDocument, position, context, token),
+        ),
+      prepareRename: async (document, position, token, next) =>
+        documentProviderGuards.prepareRename(document, (currentDocument) => next(currentDocument, position, token)),
+      provideRenameEdits: async (document, position, newName, token, next) =>
+        documentProviderGuards.provideRenameEdits(document, (currentDocument) =>
+          next(currentDocument, position, newName, token),
+        ),
+      provideCodeActions: async (document, range, context, token, next) =>
+        documentProviderGuards.provideCodeActions(document, (currentDocument) =>
+          next(currentDocument, range, context, token),
+        ),
+      provideDocumentLinks: async (document, token, next) =>
+        documentProviderGuards.provideDocumentLinks(document, (currentDocument) => next(currentDocument, token)),
     },
   };
 }
