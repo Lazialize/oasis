@@ -107,6 +107,14 @@ interface BundleContext {
   cycleAssignments: Map<string, { section: string; name: string }>;
   /** Identity keys of entry-document components that were reached via some `$ref` during dereferencing. */
   visitedEntryIdentities: Set<string>;
+  /**
+   * Identity keys of entry-document components that a `discriminator.mapping` value (pointer-form
+   * or bare component name) points at. A mapping value is always a bare string — it can't hold
+   * inlined content the way a sibling `oneOf` `$ref` can — so its target must keep existing as a
+   * real `components/*` entry even if dereferencing inlined every other reference to it and would
+   * otherwise have dropped it as fully visited (issue #88).
+   */
+  mappingRetain: Set<string>;
   /** Anchor-target nodes currently being expanded, to break cyclic YAML `*alias` references. */
   aliasStack: Set<Node>;
   /** Semantic ref occurrences grouped by their source scalar; aliases can contribute several bases. */
@@ -652,7 +660,13 @@ function resolveMappingRefTarget(ctx: BundleContext, doc: OasisDocument, value: 
     return refValue;
   }
 
-  if (result.doc.filePath === ctx.entryDoc.filePath) return `#${result.pointer}`;
+  if (result.doc.filePath === ctx.entryDoc.filePath) {
+    // In `--dereference` mode a same-entry target may otherwise have been (or later be) fully
+    // inlined and dropped as visited (e.g. via a sibling `oneOf` `$ref`); the mapping value is a
+    // bare string that can't hold inlined content, so its target must keep existing (issue #88).
+    if (ctx.dereference) ctx.mappingRetain.add(identityKeyOf(result));
+    return `#${result.pointer}`;
+  }
 
   const identityKey = identityKeyOf(result);
   let assigned = ctx.identityMap.get(identityKey);
@@ -666,6 +680,24 @@ function resolveMappingRefTarget(ctx: BundleContext, doc: OasisDocument, value: 
     setKey(ensureSectionObject(ctx, section), name, content);
   }
   return `#/components/${assigned.section}/${assigned.name}`;
+}
+
+/**
+ * Register retention for a `discriminator.mapping` value that is a *bare component name* (e.g.
+ * `dog: Dog`), which `looksLikeMappingRef` deliberately leaves untouched as plain data (it isn't a
+ * `$ref` to load/rewrite). Per the OpenAPI spec such a name expands to `#/components/schemas/<name>`
+ * resolved from the document that owns the mapping. If that resolves to an entry-document schema, it
+ * must keep existing after dereferencing for the same reason a pointer-form mapping target does
+ * (issue #88); unlike the pointer-form case there is no rewritten output to produce, so this only
+ * records the retention dependency.
+ */
+function registerBareMappingRetention(ctx: BundleContext, doc: OasisDocument, scalar: Scalar): void {
+  if (!ctx.dereference) return;
+  const name = scalar.value as string;
+  const range = rangeOfScalar(doc, scalar);
+  const result = resolveRef(ctx.graph, doc, `#/components/schemas/${name}`, range);
+  if (!result.ok || result.doc.filePath !== ctx.entryDoc.filePath) return;
+  ctx.mappingRetain.add(identityKeyOf(result));
 }
 
 /**
@@ -685,6 +717,9 @@ function convertDiscriminatorMapping(ctx: BundleContext, doc: OasisDocument, map
       if (contextualValue && typeof contextualValue.value === "string" && looksLikeMappingRef(contextualValue.value)) {
         setKey(out, keyToString(pair.key), resolveMappingRefTarget(ctx, doc, contextualValue, "schemas"));
       } else {
+        if (contextualValue && typeof contextualValue.value === "string") {
+          registerBareMappingRetention(ctx, doc, contextualValue);
+        }
         setKey(out, keyToString(pair.key), convertValue(ctx, doc, value, "schemas"));
       }
     }
@@ -967,6 +1002,7 @@ export function bundle(graph: WorkspaceGraph, options: BundleOptions = {}): Bund
     expansionStack: new Set(),
     cycleAssignments: new Map(),
     visitedEntryIdentities: new Set(),
+    mappingRetain: new Set(),
     aliasStack: new Set(),
     refOccurrences: new Map(),
     refOccurrenceCursor: new Map(),
@@ -1148,7 +1184,10 @@ function addUnreferencedEntryComponents(ctx: BundleContext, componentsNode: Node
           const name = keyToString(entryPair.key);
           const pointer = formatPointer(["components", section, name]);
           const key = identityKey(pathToFileURL(ctx.entryDoc.filePath).href, pointer);
-          if (ctx.visitedEntryIdentities.has(key) || ctx.cycleAssignments.has(key)) continue;
+          // A component still needed as a `discriminator.mapping` target must be kept even though
+          // dereferencing otherwise fully inlined and visited it elsewhere (issue #88); a cycle slot
+          // already retains the component under this same name, so skip only that case.
+          if ((ctx.visitedEntryIdentities.has(key) && !ctx.mappingRetain.has(key)) || ctx.cycleAssignments.has(key)) continue;
           toEmit.push({ section, name, value: entryPair.value });
         }
       });
