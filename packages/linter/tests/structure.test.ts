@@ -276,6 +276,51 @@ describe("structure/http-methods", () => {
     expect(d?.range.start.line).toBe(6);
   });
 
+  test("accepts a specification extension (x-*) key on a path item", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": `
+openapi: 3.1.0
+info:
+  title: T
+  version: "1.0.0"
+paths:
+  /pets:
+    x-vendor: anything
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          description: OK
+`,
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    expect(diagnostics.some((d) => d.rule === "structure/http-methods" && d.message.includes("x-vendor"))).toBe(false);
+  });
+
+  test("still flags unknown non-extension keys on a path item", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": `
+openapi: 3.1.0
+info:
+  title: T
+  version: "1.0.0"
+paths:
+  /pets:
+    unknown: value
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          description: OK
+`,
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    const d = diagnostics.find((d) => d.rule === "structure/http-methods" && d.message.includes("unknown"));
+    expect(d).toBeDefined();
+  });
+
   test("valid fixture passes", async () => {
     const diagnostics = await lintFixture("valid/openapi.yaml");
     expect(diagnostics.some((d) => d.rule === "structure/http-methods")).toBe(false);
@@ -985,6 +1030,67 @@ describe("structure/callbacks", () => {
     expect(d).toBeDefined();
   });
 
+  test("accepts a specification extension (x-*) key in a callback path item", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": `
+openapi: 3.1.0
+info:
+  title: T
+  version: "1.0.0"
+paths:
+  /subscribe:
+    post:
+      operationId: subscribe
+      responses:
+        '200':
+          description: OK
+      callbacks:
+        onData:
+          "{$request.body#/callbackUrl}":
+            x-vendor: anything
+            post:
+              operationId: onData
+              responses:
+                '200':
+                  description: OK
+`,
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    expect(diagnostics.some((d) => d.rule === "structure/callbacks" && d.message.includes("x-vendor"))).toBe(false);
+  });
+
+  test("still flags unknown non-extension keys in a callback path item", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": `
+openapi: 3.1.0
+info:
+  title: T
+  version: "1.0.0"
+paths:
+  /subscribe:
+    post:
+      operationId: subscribe
+      responses:
+        '200':
+          description: OK
+      callbacks:
+        onData:
+          "{$request.body#/callbackUrl}":
+            unknown: value
+            post:
+              operationId: onData
+              responses:
+                '200':
+                  description: OK
+`,
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    const d = diagnostics.find((d) => d.rule === "structure/callbacks" && d.message.includes("unknown"));
+    expect(d).toBeDefined();
+  });
+
   test("flags a callback operation missing responses", async () => {
     const diagnostics = await lintFixture("structure/callbacks-bad.yaml");
     const d = diagnostics.find(
@@ -1244,6 +1350,29 @@ webhooks:
     const diagnostics = lint(graph, resolveConfig(undefined));
     const d = diagnostics.find((d) => d.rule === "structure/http-methods" && d.message.includes("fetch"));
     expect(d).toBeDefined();
+  });
+
+  test("accepts a specification extension (x-*) key on a webhook path item", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": `
+openapi: 3.1.0
+info:
+  title: Webhooks
+  version: "1.0.0"
+paths: {}
+webhooks:
+  newPet:
+    x-vendor: anything
+    post:
+      operationId: onNewPet
+      responses:
+        '200':
+          description: OK
+`,
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    expect(diagnostics.some((d) => d.rule === "structure/http-methods" && d.message.includes("x-vendor"))).toBe(false);
   });
 
   test("structure/field-types flags a wrong-typed field on a webhook operation", async () => {
