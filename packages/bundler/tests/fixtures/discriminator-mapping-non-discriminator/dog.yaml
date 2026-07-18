@@ -1,0 +1,5 @@
+Dog:
+  type: object
+  properties:
+    breed:
+      type: string
