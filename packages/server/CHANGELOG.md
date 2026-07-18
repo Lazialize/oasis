@@ -1,5 +1,30 @@
 # @oasis/server
 
+## 0.9.3
+
+### Patch Changes
+
+- [#175](https://github.com/Lazialize/oasis/pull/175) [`e044f2d`](https://github.com/Lazialize/oasis/commit/e044f2dbb2864516c7f2be26b778823983b33514) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(server): reconcile open documents and pending validations when project entries are removed. An
+  entry dropped from `entries` (config edit or a watched-file config change) now has its pending
+  debounced validation cancelled so a stale timer can't republish its diagnostics after the clear, and
+  a still-open removed entry is rerouted from its overlay text and validated as standalone if it's
+  still a root OpenAPI document, instead of being left cleared and unvalidated until it's next edited
+  or reopened.
+
+- [#173](https://github.com/Lazialize/oasis/pull/173) [`7c91e87`](https://github.com/Lazialize/oasis/commit/7c91e877765e9e25c5b09c214afdd2e7c7bd7eba) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(server): preserve document URI identity for `untitled:` and `vscode-remote:` documents. The
+  language server no longer collapses non-`file:` document URIs into a lossy filesystem path — it now
+  maps each such URI to a stable synthetic graph path and back, so the open buffer is read from the
+  overlay (instead of ENOENT-ing on disk) and every diagnostic/response is reported on the original
+  document URI.
+
+- [#187](https://github.com/Lazialize/oasis/pull/187) [`2eaaa65`](https://github.com/Lazialize/oasis/commit/2eaaa65ba612e1f3ea47cc6b13d601d58811dbde) Thanks [@Lazialize](https://github.com/Lazialize)! - Reload LSP projects when workspace folders change. Added roots are scanned and validated, removed
+  roots have their projects, diagnostics, and cached graphs unloaded, and open documents are rerouted
+  against the new workspace topology. The VS Code extension also recomputes project mode and
+  reconciles open-document synchronization after folder additions and removals.
+- Updated dependencies [[`eabf340`](https://github.com/Lazialize/oasis/commit/eabf3402212e78c6998527d3b7bc1c961a8e8ce7), [`df64a2d`](https://github.com/Lazialize/oasis/commit/df64a2d18aa03bd3da47842e1a0f3b76ed6e1ec2), [`01e1073`](https://github.com/Lazialize/oasis/commit/01e10737db05b69d3865662c57b62622190de7f3), [`bc1aa7c`](https://github.com/Lazialize/oasis/commit/bc1aa7c5adcc285da3a024403c2d141e4e8eaf04)]:
+  - @oasis/linter@0.9.3
+  - @oasis/core@0.9.3
+
 ## 0.9.2
 
 ### Patch Changes

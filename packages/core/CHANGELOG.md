@@ -1,5 +1,23 @@
 # @oasis/core
 
+## 0.9.3
+
+### Patch Changes
+
+- [#176](https://github.com/Lazialize/oasis/pull/176) [`01e1073`](https://github.com/Lazialize/oasis/commit/01e10737db05b69d3865662c57b62622190de7f3) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(core): recognize RFC 3986-compliant one-character URI schemes. The `uriScheme`
+  function now correctly accepts valid single-letter schemes like `x:thing`, instead of
+  blanket-rejecting them to avoid Windows drive paths. Windows paths (`C:\path`, `C:/path`)
+  are now explicitly detected by checking for the drive-path pattern (single letter
+  followed by `:` and a path separator) rather than rejecting all one-character schemes,
+  which was too broad and broke custom URI schemes and hierarchical URIs like `z://`.
+
+- [#172](https://github.com/Lazialize/oasis/pull/172) [`bc1aa7c`](https://github.com/Lazialize/oasis/commit/bc1aa7c5adcc285da3a024403c2d141e4e8eaf04) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(core): reject malformed RFC 6901 JSON Pointers in plain-pointer API. `parsePointer` now returns
+  `undefined` for pointers that violate RFC 6901: non-empty pointers without a leading slash, and
+  pointers with invalid tilde escapes (anything other than `~0` and `~1`). `nodeAtPointer` returns
+  `undefined` when given an invalid pointer, instead of silently resolving it as a different valid
+  pointer. URI-fragment tolerance remains a separate policy in `parseFragmentPointer` and does not
+  weaken the plain RFC 6901 validation ([#152](https://github.com/Lazialize/oasis/issues/152)).
+
 ## 0.9.2
 
 ### Patch Changes
