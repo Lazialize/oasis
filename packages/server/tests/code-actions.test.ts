@@ -78,6 +78,21 @@ paths:
     const results = await getCodeActions(ctx, { path: ENTRY_PATH, position, diagnostics: staleDiagnostics });
     expect(results.find((r) => r.title === "Add operationId")).toBeUndefined();
   });
+
+  test("is not offered for a flow-style operation", async () => {
+    const flowText = `openapi: 3.1.0
+info: {title: Test API, version: "1.0.0"}
+paths:
+  /pets:
+    get: {description: D, responses: {"200": {description: OK}}}
+`;
+    const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: flowText }));
+    const diagnostics = (await diagnosticsFor(ctx, ENTRY_PATH)).get(ENTRY_PATH) ?? [];
+    const position = positionOf(flowText, "get:");
+    const results = await getCodeActions(ctx, { path: ENTRY_PATH, position, diagnostics });
+
+    expect(results.find((r) => r.title === "Add operationId")).toBeUndefined();
+  });
 });
 
 describe("Add description", () => {
@@ -1483,5 +1498,156 @@ describe("JSON documents get no relocation code actions (#56)", () => {
     const position = positionOf(TEXT, '"$ref": "#/components/schemas/Pet"');
     const results = await getCodeActions(ctx, { path: ENTRY_PATH, position, diagnostics: [] });
     expect(results).toEqual([]);
+  });
+});
+
+describe("Flow-style YAML code actions (#120)", () => {
+  const ENTRY_PATH = "/repo/openapi.yaml";
+
+  test("suppresses quickfixes for flow-style operations", async () => {
+    const text = `openapi: 3.0.3
+info: {title: Test API, version: "1.0.0"}
+paths:
+  /pets/{petId}:
+    get: {responses: {"200": {description: OK}}}
+`;
+    const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: text }));
+    const diagnostics = (await diagnosticsFor(ctx, ENTRY_PATH)).get(ENTRY_PATH) ?? [];
+    const results = await getCodeActions(ctx, { path: ENTRY_PATH, position: positionOf(text, "get:"), diagnostics });
+
+    expect(diagnostics.map((d) => d.code)).toEqual(expect.arrayContaining(["operation/operation-id", "operation/description", "paths/params-defined"]));
+    expect(results.find((r) => r.title === "Add operationId")).toBeUndefined();
+    expect(results.find((r) => r.title === "Add description")).toBeUndefined();
+  });
+
+  test("suppresses the parameter quickfix for a flow-style parameters sequence", async () => {
+    const text = `openapi: 3.1.0
+info:
+  title: Test API
+  version: "1.0.0"
+paths:
+  /pets/{petId}:
+    parameters: [{name: page, in: query, schema: {type: integer}}]
+    get:
+      operationId: getPet
+      description: Get a pet.
+      responses:
+        '200': {description: OK}
+`;
+    const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: text }));
+    const diagnostics = (await diagnosticsFor(ctx, ENTRY_PATH)).get(ENTRY_PATH) ?? [];
+    const results = await getCodeActions(ctx, { path: ENTRY_PATH, position: positionOf(text, "/pets/{petId}"), diagnostics });
+
+    expect(diagnostics.some((d) => d.code === "paths/params-defined")).toBe(true);
+    expect(results.find((r) => r.title === "Add parameter definition")).toBeUndefined();
+  });
+
+  test("suppresses removal for flow-style components", async () => {
+    const text = `openapi: 3.1.0
+info: {title: Test API, version: "1.0.0"}
+paths: {}
+components: {schemas: {Unused: {type: object}}}
+`;
+    const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: text }));
+    const diagnostics = (await diagnosticsFor(ctx, ENTRY_PATH)).get(ENTRY_PATH) ?? [];
+    const results = await getCodeActions(ctx, { path: ENTRY_PATH, position: positionOf(text, "Unused"), diagnostics });
+
+    expect(diagnostics.some((d) => d.code === "components/no-unused")).toBe(true);
+    expect(results.find((r) => r.title.startsWith("Remove unused component"))).toBeUndefined();
+  });
+
+  test("suppresses extract and inline refactors for flow-style inline schemas", async () => {
+    const text = `openapi: 3.1.0
+info:
+  title: Test API
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      description: List pets.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {type: object, properties: {id: {type: string}}}
+  /owners:
+    get:
+      operationId: listOwners
+      description: List owners.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Pet'}
+components:
+  schemas:
+    Pet:
+      type: object
+`;
+    const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: text }));
+    const extract = await getCodeActions(ctx, { path: ENTRY_PATH, position: positionOf(text, "type: object, properties"), diagnostics: [] });
+    const inline = await getCodeActions(ctx, { path: ENTRY_PATH, position: positionOf(text, "$ref:"), diagnostics: [] });
+
+    expect(extract.find((r) => r.title === "Extract inline schema to components")).toBeUndefined();
+    expect(inline.find((r) => r.title === "Inline reference")).toBeUndefined();
+  });
+
+  test("suppresses extraction when the destination schemas map uses flow style", async () => {
+    const text = `openapi: 3.1.0
+info:
+  title: Test API
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      description: List pets.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+components:
+  schemas: {Existing: {type: string}}
+`;
+    const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: text }));
+    const results = await getCodeActions(ctx, { path: ENTRY_PATH, position: positionOf(text, "type: object"), diagnostics: [] });
+
+    expect(results.find((r) => r.title === "Extract inline schema to components")).toBeUndefined();
+  });
+
+  test("suppresses cross-file extraction when the destination entry root uses flow style", async () => {
+    const root = "/repo";
+    const entryPath = `${root}/openapi.yaml`;
+    const fragmentPath = `${root}/pets.yaml`;
+    const entryText = `{openapi: 3.1.0, info: {title: Test API, version: "1.0.0"}, paths: {/pets: {$ref: './pets.yaml'}}}
+`;
+    const fragmentText = `get:
+  operationId: listPets
+  description: List pets.
+  responses:
+    '200':
+      description: OK
+      content:
+        application/json:
+          schema:
+            type: object
+`;
+    const ctx = createServerContext(
+      new InMemoryFileSystem({
+        [`${root}/oasis.config.jsonc`]: `{ "entries": ["openapi.yaml"] }`,
+        [entryPath]: entryText,
+        [fragmentPath]: fragmentText,
+      }),
+    );
+    await scanWorkspaceRootsForProjects(ctx, [root]);
+    const results = await getCodeActions(ctx, { path: fragmentPath, position: positionOf(fragmentText, "type: object"), diagnostics: [] });
+
+    expect(results.find((r) => r.title === "Extract inline schema to components")).toBeUndefined();
   });
 });
