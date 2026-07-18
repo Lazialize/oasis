@@ -460,26 +460,78 @@ export function resolveRef(
   ref: string | FoundRef,
   refRange?: Range,
 ): ResolveRefResult {
-  const matchedRef = typeof ref === "string" && refRange
-    ? graph.references.get(fromDoc.filePath)?.find((candidate) =>
-      candidate.value === ref &&
-      candidate.range.startOffset === refRange.startOffset &&
-      candidate.range.endOffset === refRange.endOffset
-    )
-    : undefined;
-  const contextualRef = typeof ref === "string" ? matchedRef : ref;
   const refString = typeof ref === "string" ? ref : ref.value;
   const { filePart, pointer } = parseRefString(refString);
-  const diagnosticRange = refRange ?? contextualRef?.range ?? zeroRange(fromDoc.filePath);
-  const baseUri = contextualRef?.baseUri ?? pathToFileURL(fromDoc.filePath).href;
+
+  // A raw string is not itself an occurrence: it has no recorded resource scope of its own. Recover
+  // that scope from matching graph occurrences instead of defaulting to `fromDoc`'s own base, which
+  // would silently let the reference escape an `$id` resource it was discovered under. Aliased
+  // scalars can expose the same value (and, when `refRange` is given, the same source range) under
+  // several resource bases, so a value/range match is not a unique occurrence identity by itself —
+  // when the matching occurrences disagree on `baseUri` the call is genuinely ambiguous and must fail
+  // explicitly rather than silently picking one.
+  let contextualRef: FoundRef | undefined;
+  let ambiguousCandidates: FoundRef[] | undefined;
+  if (typeof ref === "string") {
+    const candidates = (graph.references.get(fromDoc.filePath) ?? []).filter((candidate) =>
+      candidate.value === ref &&
+      (!refRange ||
+        (candidate.range.startOffset === refRange.startOffset && candidate.range.endOffset === refRange.endOffset))
+    );
+    if (candidates.length > 0) {
+      const firstBaseUri = candidates[0]!.baseUri;
+      if (candidates.every((candidate) => candidate.baseUri === firstBaseUri)) {
+        contextualRef = candidates[0];
+      } else {
+        ambiguousCandidates = candidates;
+      }
+    }
+  } else {
+    contextualRef = ref;
+  }
+
+  const diagnosticRange = refRange ?? contextualRef?.range ?? ambiguousCandidates?.[0]?.range ?? zeroRange(fromDoc.filePath);
+
+  if (ambiguousCandidates) {
+    const scopes = [...new Set(ambiguousCandidates.map((candidate) => candidate.baseUri))];
+    return {
+      ok: false,
+      diagnostic: {
+        message: `Ambiguous reference: "${refString}" occurs under multiple resource scopes (${scopes.join(", ")}) and cannot be resolved from a raw string; resolve it using its FoundRef occurrence instead`,
+        severity: "error",
+        code: "no-unresolved-ref",
+        source: "core",
+        range: diagnosticRange,
+      },
+    };
+  }
+
+  const defaultBaseUri = pathToFileURL(fromDoc.filePath).href;
+  // A raw string given without `refRange` (unlike the `FoundRef` path, and unlike a raw string
+  // matched against a specific `refRange`) has always been allowed to fall back to plain
+  // document-relative resolution. Preserve that for occurrences with no explicit resource scope
+  // (an ordinary reference that never crossed an `$id` boundary) — only enforce the stricter
+  // scope-bound behavior once a matching occurrence actually carries a non-default base, since
+  // that's the case where silently escaping the scope would return the wrong target.
+  const isRawStringWithoutRange = typeof ref === "string" && !refRange;
+  const restrictToScope = contextualRef !== undefined &&
+    (!isRawStringWithoutRange || contextualRef.baseUri !== defaultBaseUri);
+
+  const baseUri = contextualRef?.baseUri ?? defaultBaseUri;
   const resolvedUri = resolveUriReference(baseUri, refString);
   const resourceUri = stripUriFragment(resolvedUri);
   const resource = graph.resources.get(resourceUri);
 
   if (resource) {
     if (pointer !== "" && !pointer.startsWith("/")) {
+      // The resource-scoped anchor lookup above only sees anchors registered directly under
+      // `resource`'s own base, not ones nested under a descendant `$id` reached from it. Retrying
+      // unscoped (by name, across every indexed resource) is allowed for any raw string given
+      // without `refRange` — even one whose matched occurrence carries a non-default resource base —
+      // matching the leniency that call shape has always had. `FoundRef` calls and raw strings
+      // matched via `refRange` keep the stricter scoped-only lookup.
       const anchor = resolveAnchor(resource.doc, pointer, resource.baseUri, resource.index) ??
-        (!contextualRef ? resolveAnchor(resource.doc, pointer, undefined, resource.index) : undefined);
+        (!restrictToScope || isRawStringWithoutRange ? resolveAnchor(resource.doc, pointer, undefined, resource.index) : undefined);
       if (anchor) {
         return {
           ok: true,
@@ -521,7 +573,7 @@ export function resolveRef(
 
   // A semantic occurrence has already supplied its canonical base. Falling back to `fromDoc` here
   // would silently resolve a different physical file when the resource-scoped target is missing.
-  if (contextualRef) {
+  if (restrictToScope) {
     const detail = resource
       ? pointer !== "" && !pointer.startsWith("/")
         ? `anchor "#${pointer}" not found in "${resourceUri}"`

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { isMap, isScalar } from "yaml";
 import type { YAMLMap } from "yaml";
 import { NodeFileSystem, InMemoryFileSystem } from "../src/filesystem.ts";
-import { allDiagnostics, loadWorkspaceGraph } from "../src/graph.ts";
+import { allDiagnostics, graphReferences, loadWorkspaceGraph } from "../src/graph.ts";
 import { findRefs, parseRefString, resolveRef } from "../src/ref.ts";
 import { detectVersion } from "../src/version.ts";
 
@@ -610,5 +610,136 @@ describe("failed-load negative cache", () => {
     const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
     const loadFailures = graph.diagnostics.filter((d) => d.message.includes("Failed to load"));
     expect(loadFailures).toHaveLength(1);
+  });
+});
+
+describe("resolveRef preserves resource scope for raw-string calls (issue #149)", () => {
+  test("a raw-string call matches the FoundRef result under a nested absolute $id", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": [
+        "openapi: 3.1.0",
+        "components:",
+        "  schemas:",
+        "    Scoped:",
+        "      $id: https://schemas.example/root",
+        "      $ref: child.yaml",
+        "    Loader:",
+        "      $ref: ./child.yaml",
+        "",
+      ].join("\n"),
+      "/virtual/child.yaml": "type: string\n",
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const entryDoc = graph.documents.get("/virtual/entry.yaml")!;
+
+    const scoped = graphReferences(graph, entryDoc).find((ref) => ref.baseUri === "https://schemas.example/root");
+    expect(scoped).toBeDefined();
+
+    const contextualResult = resolveRef(graph, entryDoc, scoped!);
+    const rawStringResult = resolveRef(graph, entryDoc, "child.yaml");
+
+    // Both must stay inside the `https://schemas.example/root` resource scope and refuse to fall
+    // back to the physically-sibling `/virtual/child.yaml`, which is only reachable through the
+    // unrelated `Loader` reference (`./child.yaml`).
+    expect(contextualResult.ok).toBe(false);
+    expect(rawStringResult.ok).toBe(false);
+    if (contextualResult.ok || rawStringResult.ok) throw new Error("expected both calls to be unresolved");
+    expect(rawStringResult.diagnostic.message).toBe(contextualResult.diagnostic.message);
+    expect(rawStringResult.diagnostic.message).toContain("external");
+  });
+
+  test("does not fall back to an already-loaded same-named physical sibling", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": [
+        "openapi: 3.1.0",
+        "components:",
+        "  schemas:",
+        "    Scoped:",
+        "      $id: https://schemas.example/root",
+        "      $ref: sibling.yaml",
+        "    Physical:",
+        "      $ref: ./sibling.yaml",
+        "",
+      ].join("\n"),
+      "/virtual/sibling.yaml": "type: string\n",
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const entryDoc = graph.documents.get("/virtual/entry.yaml")!;
+
+    // The physical sibling is genuinely loaded into the graph via the `Physical` reference.
+    expect(graph.documents.has("/virtual/sibling.yaml")).toBe(true);
+    const physicalResult = resolveRef(graph, entryDoc, "./sibling.yaml");
+    expect(physicalResult.ok).toBe(true);
+
+    // The scoped reference's raw-string spelling ("sibling.yaml", no leading "./") must not resolve
+    // to that same physical document just because one happens to already be loaded under that name.
+    const scopedResult = resolveRef(graph, entryDoc, "sibling.yaml");
+    expect(scopedResult.ok).toBe(false);
+    if (scopedResult.ok) throw new Error("expected unresolved ref");
+    expect(scopedResult.diagnostic.message).toContain("external");
+  });
+
+  test("an aliased reference scalar shared across resource bases fails as ambiguous", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": [
+        "openapi: 3.1.0",
+        "components:",
+        "  schemas:",
+        "    First:",
+        "      $id: https://schemas.example/first",
+        "      $ref: &shared child.yaml",
+        "    Second:",
+        "      $id: https://schemas.example/second",
+        "      $ref: *shared",
+        "",
+      ].join("\n"),
+      "/virtual/child.yaml": "type: string\n",
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const entryDoc = graph.documents.get("/virtual/entry.yaml")!;
+
+    const occurrences = graphReferences(graph, entryDoc).filter((ref) => ref.value === "child.yaml");
+    expect(occurrences.length).toBeGreaterThan(1);
+    expect(new Set(occurrences.map((ref) => ref.baseUri)).size).toBeGreaterThan(1);
+
+    // Value alone is ambiguous.
+    const byValue = resolveRef(graph, entryDoc, "child.yaml");
+    expect(byValue.ok).toBe(false);
+    if (byValue.ok) throw new Error("expected unresolved ref");
+    expect(byValue.diagnostic.message).toContain("Ambiguous reference");
+
+    // The shared alias also shares its source range, so value+range is not a unique occurrence
+    // identity either: it must still fail explicitly rather than silently picking one scope.
+    const byRange = resolveRef(graph, entryDoc, "child.yaml", occurrences[0]!.range);
+    expect(byRange.ok).toBe(false);
+    if (byRange.ok) throw new Error("expected unresolved ref");
+    expect(byRange.diagnostic.message).toContain("Ambiguous reference");
+  });
+
+  test("ambiguous raw-string context fails explicitly instead of picking the first occurrence", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": [
+        "openapi: 3.1.0",
+        "components:",
+        "  schemas:",
+        "    First:",
+        "      $id: https://schemas.example/first",
+        "      $ref: child.yaml",
+        "    Second:",
+        "      $id: https://schemas.example/second",
+        "      $ref: child.yaml",
+        "",
+      ].join("\n"),
+      "/virtual/child.yaml": "type: string\n",
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const entryDoc = graph.documents.get("/virtual/entry.yaml")!;
+
+    const result = resolveRef(graph, entryDoc, "child.yaml");
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected unresolved ref");
+    expect(result.diagnostic.message).toContain("Ambiguous reference");
+    expect(result.diagnostic.message).toContain("https://schemas.example/first");
+    expect(result.diagnostic.message).toContain("https://schemas.example/second");
   });
 });
