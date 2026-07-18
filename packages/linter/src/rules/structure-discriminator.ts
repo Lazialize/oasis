@@ -13,6 +13,66 @@ function scalarStrings(node: Node | undefined): string[] {
     .map((item) => (isScalar(item) ? (item.value as string) : ""));
 }
 
+/** The `properties` and `required` a Schema effectively contributes, once `allOf` is flattened. */
+interface EffectiveSchema {
+  properties: Set<string>;
+  required: Set<string>;
+}
+
+/**
+ * Accumulate a Schema's effective `properties` and `required` into `acc`, following `$ref`s and
+ * flattening `allOf` members (the only composition keyword whose members are all guaranteed to
+ * apply). `oneOf`/`anyOf` are *not* descended: an alternative can't guarantee a property. Cycles
+ * (`allOf` chains that loop back through `$ref`s) are broken via `visited`, keyed by resolved node
+ * identity, so an unbounded chain terminates.
+ */
+function collectEffectiveSchema(
+  ctx: RuleContext,
+  doc: OasisDocument,
+  node: Node,
+  visited: Set<Node>,
+  acc: EffectiveSchema,
+): void {
+  let curDoc = doc;
+  let curNode: Node = node;
+  if (isMap(node) && isRefObject(node)) {
+    const resolved = resolveMaybeRef(ctx.graph, doc, node, "");
+    if (isRefObject(resolved.node)) return; // unresolved / external $ref: skip
+    curDoc = resolved.doc;
+    curNode = resolved.node;
+  }
+  if (!isMap(curNode) || visited.has(curNode)) return;
+  visited.add(curNode);
+
+  const properties = childAt(curNode, "properties");
+  if (isMap(properties)) {
+    for (const p of properties.items) {
+      const name = keyToString(p.key);
+      if (name) acc.properties.add(name);
+    }
+  }
+  for (const name of scalarStrings(childAt(curNode, "required"))) acc.required.add(name);
+
+  const allOf = childAt(curNode, "allOf");
+  if (isSeq(allOf)) {
+    for (const item of allOf.items) {
+      if (isNode(item)) collectEffectiveSchema(ctx, curDoc, item, visited, acc);
+    }
+  }
+}
+
+/** Whether `propertyName` is present in a Schema's effective properties (and, in 3.0, `required`). */
+function effectiveSchemaHas(
+  ctx: RuleContext,
+  doc: OasisDocument,
+  node: Node,
+  propertyName: string,
+): { hasProperty: boolean; hasRequired: boolean } {
+  const acc: EffectiveSchema = { properties: new Set(), required: new Set() };
+  collectEffectiveSchema(ctx, doc, node, new Set(), acc);
+  return { hasProperty: acc.properties.has(propertyName), hasRequired: acc.required.has(propertyName) };
+}
+
 /** Checks a single branch schema (a `oneOf`/`anyOf` member) for the discriminator's `propertyName`. */
 function checkBranch(
   ctx: RuleContext,
@@ -34,23 +94,19 @@ function checkBranch(
   }
   if (!isMap(branchNode)) return;
 
-  const properties = childAt(branchNode, "properties");
-  const hasProperty = isMap(properties) && properties.items.some((p) => keyToString(p.key) === propertyName);
+  const { hasProperty, hasRequired } = effectiveSchemaHas(ctx, branchDoc, branchNode, propertyName);
   if (!hasProperty) {
     ctx.report(
       { doc: branchDoc, node: branchNode },
-      `${label} discriminator property "${propertyName}" is not defined in "${compositionKey}[${index}]" schema properties.`,
+      `${label} discriminator property "${propertyName}" is not defined in the effective "${compositionKey}[${index}]" schema (including any "allOf"/"$ref" it composes).`,
     );
   }
 
-  if (ctx.version === "3.0") {
-    const requiredNames = scalarStrings(childAt(branchNode, "required"));
-    if (!requiredNames.includes(propertyName)) {
-      ctx.report(
-        { doc: branchDoc, node: branchNode },
-        `${label} discriminator property "${propertyName}" must be listed in "required" of "${compositionKey}[${index}]" schema (OpenAPI 3.0 requires discriminator properties to be required).`,
-      );
-    }
+  if (ctx.version === "3.0" && !hasRequired) {
+    ctx.report(
+      { doc: branchDoc, node: branchNode },
+      `${label} discriminator property "${propertyName}" must be listed in "required" of the effective "${compositionKey}[${index}]" schema (OpenAPI 3.0 requires discriminator properties to be required).`,
+    );
   }
 }
 
@@ -89,17 +145,6 @@ function checkDiscriminator(ctx: RuleContext, doc: OasisDocument, schemaNode: No
   const discNode = childAt(schemaNode, "discriminator");
   if (!discNode) return;
 
-  const oneOf = childAt(schemaNode, "oneOf");
-  const anyOf = childAt(schemaNode, "anyOf");
-  const allOf = childAt(schemaNode, "allOf");
-  const hasComposition = isSeq(oneOf) || isSeq(anyOf) || isSeq(allOf);
-  if (!hasComposition) {
-    ctx.report(
-      { doc, node: discNode },
-      `${label} declares "discriminator" but has none of "oneOf", "anyOf", or "allOf"; discriminator usage is limited to schema composition.`,
-    );
-  }
-
   if (!isMap(discNode)) {
     ctx.report({ doc, node: discNode }, `${label} "discriminator" must be an object.`);
     return;
@@ -115,6 +160,29 @@ function checkDiscriminator(ctx: RuleContext, doc: OasisDocument, schemaNode: No
   const mappingNode = childAt(discNode, "mapping");
   if (mappingNode) checkMapping(ctx, doc, mappingNode, label);
 
+  const oneOf = childAt(schemaNode, "oneOf");
+  const anyOf = childAt(schemaNode, "anyOf");
+  const allOf = childAt(schemaNode, "allOf");
+  const hasComposition = isSeq(oneOf) || isSeq(anyOf) || isSeq(allOf);
+  if (!hasComposition) {
+    // Parent-discriminator pattern: no composition keyword here, but valid when this Schema itself
+    // defines the discriminator property (children reference it via their own `allOf`). Report only
+    // when the property (or, in 3.0, its `required` entry) is genuinely absent from this Schema.
+    const { hasProperty, hasRequired } = effectiveSchemaHas(ctx, doc, schemaNode, propertyName);
+    if (!hasProperty) {
+      ctx.report(
+        { doc, node: discNode },
+        `${label} discriminator property "${propertyName}" is not defined by this schema; a discriminator without "oneOf"/"anyOf" must define "${propertyName}" so child schemas can inherit it via "allOf".`,
+      );
+    } else if (ctx.version === "3.0" && !hasRequired) {
+      ctx.report(
+        { doc, node: discNode },
+        `${label} discriminator property "${propertyName}" must be listed in this schema's "required" (OpenAPI 3.0 requires discriminator properties to be required).`,
+      );
+    }
+    return;
+  }
+
   for (const [seqNode, compositionKey] of [
     [oneOf, "oneOf"],
     [anyOf, "anyOf"],
@@ -129,7 +197,7 @@ function checkDiscriminator(ctx: RuleContext, doc: OasisDocument, schemaNode: No
 export const structureDiscriminator: Rule = {
   name: "structure/discriminator",
   description:
-    'Checks Discriminator Objects on schemas: required "propertyName" (string), "mapping" values resolve to an in-workspace schema (external/URL-ish targets are skipped), a discriminator requires "oneOf"/"anyOf"/"allOf" on the same schema, and (per spec) "propertyName" must be a defined property of each resolvable "oneOf"/"anyOf" branch schema — and, in OpenAPI 3.0, listed in that branch\'s "required".',
+    'Checks Discriminator Objects on schemas: required "propertyName" (string), "mapping" values resolve to an in-workspace schema (external/URL-ish targets are skipped), and (per spec) "propertyName" must be a defined property of each resolvable "oneOf"/"anyOf" branch schema — derived through composed "allOf"/"$ref" chains — and, in OpenAPI 3.0, listed in that branch\'s effective "required". A discriminator without "oneOf"/"anyOf" is accepted as the parent-discriminator pattern when the schema itself defines "propertyName".',
   defaultSeverity: "error",
   check(ctx) {
     const seen = new Set<Node>();

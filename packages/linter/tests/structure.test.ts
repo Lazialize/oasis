@@ -895,10 +895,16 @@ describe("structure/examples", () => {
 });
 
 describe("structure/discriminator", () => {
-  test("flags a discriminator with no oneOf/anyOf/allOf", async () => {
+  test("flags a no-composition parent discriminator missing the 3.0 required entry", async () => {
+    // NoCompositionPet defines `petType` but (in 3.0) never lists it in `required`, so the
+    // parent-discriminator pattern is rejected for the missing required entry rather than for the
+    // absence of a composition keyword.
     const diagnostics = await lintFixture("structure/discriminator-bad.yaml");
     const d = diagnostics.find(
-      (d) => d.rule === "structure/discriminator" && d.message.includes("none of"),
+      (d) =>
+        d.rule === "structure/discriminator" &&
+        d.message.includes('"petType"') &&
+        d.message.includes("required"),
     );
     expect(d).toBeDefined();
   });
