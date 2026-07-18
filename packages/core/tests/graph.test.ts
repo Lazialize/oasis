@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { resolve as pathResolve } from "node:path";
 import { InMemoryFileSystem } from "../src/filesystem.ts";
 import { allDiagnostics, graphReferences, loadWorkspaceGraph } from "../src/graph.ts";
+import { resolveRef } from "../src/ref.ts";
 
 describe("entry path canonicalization (issue #25)", () => {
   test("a relative entry is loaded once, under its canonical path", async () => {
@@ -163,5 +164,46 @@ describe("resolved-target cycle detection (issue #86)", () => {
     // cycle walk retains B -> A and the later A -> A owner occurrence that closes the cycle.
     expect(graphReferences(graph, entry).filter((ref) => ref.value.endsWith("/A"))).toHaveLength(1);
     expect(graph.diagnostics.filter((d) => d.code === "no-ref-cycle")).toHaveLength(1);
+  });
+});
+
+describe("one-character URI scheme refs never touch the FileSystem (issue #151)", () => {
+  /** In-memory FileSystem that records every path passed to readFile. */
+  class RecordingFileSystem extends InMemoryFileSystem {
+    readonly readFileCalls: string[] = [];
+
+    override readFile(path: string): string {
+      this.readFileCalls.push(path);
+      return super.readFile(path);
+    }
+  }
+
+  test("a $ref of x:thing is never routed to FileSystem.readFile and resolves as external", async () => {
+    const fs = new RecordingFileSystem({
+      "/virtual/entry.yaml": [
+        "openapi: 3.0.3",
+        "info: { title: t, version: '1' }",
+        "paths: {}",
+        "components:",
+        "  schemas:",
+        "    Ext: { $ref: 'x:thing' }",
+      ].join("\n"),
+    });
+
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+
+    // Only the entry document is ever read; `x:thing` must never reach readFile
+    // (neither raw nor as a resolved sibling path like /virtual/x:thing).
+    expect(fs.readFileCalls).toEqual(["/virtual/entry.yaml"]);
+    expect(graph.documents.size).toBe(1);
+
+    // Resolving the ref reports it as an unsupported external URI, not a missing file.
+    const entryDoc = graph.documents.get("/virtual/entry.yaml")!;
+    const result = resolveRef(graph, entryDoc, "x:thing");
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected unresolved external ref");
+    expect(result.diagnostic.code).toBe("no-unresolved-ref");
+    expect(result.diagnostic.message).toContain("external");
+    expect(fs.readFileCalls).toEqual(["/virtual/entry.yaml"]);
   });
 });
