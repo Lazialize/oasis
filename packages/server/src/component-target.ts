@@ -194,7 +194,7 @@ export function resolveComponentTarget(graph: WorkspaceGraph, doc: OasisDocument
   // into map *values*, so it stops one level short (at "/components/<section>"). Check the
   // section map's keys directly for one whose own range covers the offset.
   const segments = parsePointer(found.pointer);
-  if (segments.length === 2 && segments[0] === "components") {
+  if (segments && segments.length === 2 && segments[0] === "components") {
     const hit = keyAtOffset(found.node, offset);
     if (hit) {
       const section = segments[1]!;

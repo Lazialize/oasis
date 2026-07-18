@@ -98,3 +98,39 @@ describe("nodeAtPointer is a plain RFC 6901 pointer API (no URI percent-decoding
     expect(byPointer?.range).toEqual(found!.range);
   });
 });
+
+describe("nodeAtPointer rejects malformed RFC 6901 pointers (issue #152)", () => {
+  const filePath = `${fixturesDir}/pointer-rejection.yaml`;
+  const doc = parseDocument("foo: bar\n", filePath);
+
+  test("returns undefined for a pointer without leading slash", () => {
+    expect(nodeAtPointer(doc, "foo")).toBeUndefined();
+  });
+
+  test("returns undefined for a pointer with malformed tilde escape (~2)", () => {
+    expect(nodeAtPointer(doc, "/bad~2escape")).toBeUndefined();
+  });
+
+  test("returns undefined for a pointer with trailing tilde", () => {
+    expect(nodeAtPointer(doc, "/trailing~")).toBeUndefined();
+  });
+
+  test("returns undefined for a pointer with tilde not followed by 0 or 1", () => {
+    expect(nodeAtPointer(doc, "/bad~x")).toBeUndefined();
+  });
+
+  test("returns a result for valid pointer to existing node", () => {
+    const result = nodeAtPointer(doc, "/foo");
+    expect(result).toBeDefined();
+    expect(isScalar(result?.node) && result?.node.value).toBe("bar");
+  });
+
+  test("returns undefined for valid pointer to non-existent node", () => {
+    expect(nodeAtPointer(doc, "/baz")).toBeUndefined();
+  });
+
+  test("returns a result for valid root pointer", () => {
+    const result = nodeAtPointer(doc, "");
+    expect(result).toBeDefined();
+  });
+});
