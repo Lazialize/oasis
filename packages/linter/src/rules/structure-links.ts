@@ -1,6 +1,6 @@
 import { isMap, isNode, isScalar } from "yaml";
 import type { Node } from "yaml";
-import { resolveRef } from "@oasis/core";
+import { isExternalUriReference, resolveRef } from "@oasis/core";
 import type { OasisDocument } from "@oasis/core";
 import { iterateOperations } from "../openapi-walk.ts";
 import { childAt, keyToString, resolveMaybeRef, visitResolvedUnique } from "../util.ts";
@@ -72,7 +72,32 @@ function collectOperationIds(ctx: RuleContext): Set<string> {
   return ids;
 }
 
-function checkLinkObject(ctx: RuleContext, doc: OasisDocument, node: Node, label: string, operationIds: Set<string>): void {
+/**
+ * The AST node of every Operation Object in the workspace (paths, and on 3.1, webhooks), at its
+ * final (post-$ref) location. Used to verify that a Link Object's `operationRef` resolves to an
+ * actual Operation Object, not merely to *some* node. Node identity (rather than a `pointer`
+ * string) is the comparison key: `iterateOperations`' `pointer` field embeds the raw path template
+ * unescaped (so e.g. "/pets" becomes the ill-formed JSON Pointer segment "/paths//pets/get"), which
+ * doesn't line up with the properly RFC 6901-escaped pointer `resolveRef` returns for the same
+ * target ("/paths/~1pets/get"); the underlying AST node objects, however, are the same instance
+ * either way.
+ */
+function collectOperationNodes(ctx: RuleContext): Set<Node> {
+  const nodes = new Set<Node>();
+  for (const op of iterateOperations(ctx.graph, ctx.entryDoc, ctx.version)) {
+    nodes.add(op.node);
+  }
+  return nodes;
+}
+
+function checkLinkObject(
+  ctx: RuleContext,
+  doc: OasisDocument,
+  node: Node,
+  label: string,
+  operationIds: Set<string>,
+  operationNodes: Set<Node>,
+): void {
   if (!isMap(node)) {
     ctx.report({ doc, node }, `${label} must be an object.`);
     return;
@@ -116,15 +141,18 @@ function checkLinkObject(ctx: RuleContext, doc: OasisDocument, node: Node, label
       ctx.report({ doc, node: operationRefNode }, `${label} "operationRef" must be a string.`);
     } else {
       const value = operationRefNode.value;
-      const hashIdx = value.indexOf("#");
-      const pointer = hashIdx === -1 ? "" : value.slice(hashIdx + 1);
-      // Only resolve local pointers into `paths`/`webhooks`; anything else (external URLs, refs
-      // into other sections) is left unchecked here.
-      if (pointer.startsWith("/paths/") || pointer.startsWith("/webhooks/")) {
-        const result = resolveRef(ctx.graph, doc, value);
-        if (!result.ok) {
-          ctx.report({ doc, node: operationRefNode }, `${label} "operationRef" "${value}" does not resolve in the workspace.`);
-        }
+      // An operationRef targeting an external URI (`https:`, `urn:`, …) or a scheme-relative URL
+      // (`//host/…`) points outside the workspace and cannot be verified locally; the spec allows
+      // such references, so leave them unchecked (same classification `classifyMappingValue` uses).
+      if (isExternalUriReference(value) || value.startsWith("//")) return;
+      const result = resolveRef(ctx.graph, doc, value);
+      if (!result.ok) {
+        ctx.report({ doc, node: operationRefNode }, `${label} "operationRef" "${value}" does not resolve in the workspace.`);
+      } else if (!operationNodes.has(result.node)) {
+        ctx.report(
+          { doc, node: operationRefNode },
+          `${label} "operationRef" "${value}" must resolve to an Operation Object.`,
+        );
       }
     }
   }
@@ -133,14 +161,15 @@ function checkLinkObject(ctx: RuleContext, doc: OasisDocument, node: Node, label
 export const structureLinks: Rule = {
   name: "structure/links",
   description:
-    'Checks Link Objects (Response Object "links" and "components/links"): exactly one of "operationRef"/"operationId" is set, "operationId" matches an operationId in the workspace, a local "#/paths/..." (or 3.1 "#/webhooks/...") "operationRef" resolves in-graph, and only known keys are used.',
+    'Checks Link Objects (Response Object "links" and "components/links"): exactly one of "operationRef"/"operationId" is set, "operationId" matches an operationId in the workspace, "operationRef" resolves in-graph to an Operation Object (an HTTP-method child of a Path Item under "paths" or, on 3.1, "webhooks"), and only known keys are used.',
   defaultSeverity: "error",
   check(ctx) {
     const operationIds = collectOperationIds(ctx);
+    const operationNodes = collectOperationNodes(ctx);
     const seen = new Set<string>();
 
     const visit = (doc: OasisDocument, node: Node, pointer: string, label: string): void => {
-      visitResolvedUnique(ctx.graph, seen, doc, node, pointer, (d, n) => checkLinkObject(ctx, d, n, label, operationIds));
+      visitResolvedUnique(ctx.graph, seen, doc, node, pointer, (d, n) => checkLinkObject(ctx, d, n, label, operationIds, operationNodes));
     };
 
     for (const doc of ctx.documents) {

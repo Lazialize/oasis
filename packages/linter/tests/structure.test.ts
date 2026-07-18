@@ -1184,6 +1184,162 @@ describe("structure/links", () => {
     expect(d).toBeUndefined();
   });
 
+  test("flags an operationRef that resolves to a Schema Object, not an Operation Object", async () => {
+    const diagnostics = await lintFixture("structure/links-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/links" && d.message.includes("SchemaRef") && d.message.includes("must resolve to an Operation Object"),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags an operationRef that resolves to a Path Item Object, not an Operation Object", async () => {
+    const diagnostics = await lintFixture("structure/links-bad.yaml");
+    const d = diagnostics.find(
+      (d) => d.rule === "structure/links" && d.message.includes("PathItemRef") && d.message.includes("must resolve to an Operation Object"),
+    );
+    expect(d).toBeDefined();
+  });
+
+  test("flags an operationRef into a local pointer outside paths/webhooks (previously skipped entirely)", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": `
+openapi: 3.1.0
+info: { title: T, version: "1" }
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          description: OK
+          links:
+            Wrong:
+              operationRef: '#/components/schemas/Pet'
+components:
+  schemas:
+    Pet: { type: object }
+`,
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    const d = diagnostics.find((d) => d.rule === "structure/links" && d.message.includes("Wrong"));
+    expect(d).toBeDefined();
+    expect(d?.message).toContain("must resolve to an Operation Object");
+  });
+
+  test("flags an operationRef with an HTTP-method-looking key outside paths/webhooks", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": `
+openapi: 3.1.0
+info: { title: T, version: "1" }
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          description: OK
+          links:
+            Wrong:
+              operationRef: '#/components/schemas/Container/properties/get'
+components:
+  schemas:
+    Container:
+      type: object
+      properties:
+        get: { type: string }
+`,
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    const d = diagnostics.find((d) => d.rule === "structure/links" && d.message.includes("Wrong"));
+    expect(d).toBeDefined();
+    expect(d?.message).toContain("must resolve to an Operation Object");
+  });
+
+  test("does not flag a URL operationRef that cannot be verified locally", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": `
+openapi: 3.1.0
+info: { title: T, version: "1" }
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          description: OK
+          links:
+            External:
+              operationRef: 'https://example.com/openapi.yaml#/paths/~1pets/get'
+`,
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    const d = diagnostics.find((d) => d.rule === "structure/links" && d.message.includes("External"));
+    expect(d).toBeUndefined();
+  });
+
+  test("3.1: a webhook operationRef resolves to an Operation Object", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": `
+openapi: 3.1.0
+info: { title: T, version: "1" }
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          description: OK
+          links:
+            ToWebhook:
+              operationRef: '#/webhooks/petCreated/post'
+webhooks:
+  petCreated:
+    post:
+      operationId: petCreated
+      responses:
+        '200':
+          description: OK
+`,
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    const d = diagnostics.find((d) => d.rule === "structure/links" && d.message.includes("ToWebhook"));
+    expect(d).toBeUndefined();
+  });
+
+  test("3.0: a `#/webhooks/...` operationRef does not resolve (webhooks is not a 3.0 root key)", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": `
+openapi: 3.0.3
+info: { title: T, version: "1" }
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          description: OK
+          links:
+            ToWebhook:
+              operationRef: '#/webhooks/petCreated/post'
+webhooks:
+  petCreated:
+    post:
+      operationId: petCreated
+      responses:
+        '200':
+          description: OK
+`,
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    const d = diagnostics.find((d) => d.rule === "structure/links" && d.message.includes("ToWebhook"));
+    expect(d).toBeDefined();
+  });
+
   test("flags an unknown key", async () => {
     const diagnostics = await lintFixture("structure/links-bad.yaml");
     const d = diagnostics.find(
