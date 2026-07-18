@@ -52,6 +52,8 @@ export interface RuleContext {
    * that don't need per-file granularity, can ignore it.
    */
   optionsFor(filePath: string): unknown;
+  /** Whether this rule is enabled for a file after applying matching `lint.overrides`. */
+  isEnabledFor(filePath: string): boolean;
   /** Record a lint diagnostic at the given location. */
   report(location: ReportLocation, message: string, opts?: ReportOptions): void;
 }

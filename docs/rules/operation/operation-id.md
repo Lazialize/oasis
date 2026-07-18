@@ -2,6 +2,8 @@
 
 Requires every operation to declare a non-empty `operationId`, and requires every `operationId` to be unique across the whole workspace (all documents reachable from the entry file, not just the current one). This matters because client and server code generators use `operationId` as the method/function name for each operation — a missing id forces generators to fall back to auto-generated, unstable names, and a duplicate id causes a collision (two operations mapping to the same generated method, silently overwriting one of them, or a generator hard error).
 
+For a duplicate group, source locations are ordered by file path and position before diagnostics are selected. When all occurrences are enabled, the first one is the deterministic witness and every remaining occurrence is reported. When per-file `lint.overrides` disable one or more occurrences, the first disabled occurrence is the witness and every enabled occurrence is reported. All duplicate operations participate in the uniqueness comparison, including those for which the rule is disabled.
+
 **Default severity:** `error`
 
 ## Version notes

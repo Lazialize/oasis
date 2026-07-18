@@ -113,6 +113,9 @@ export function lint(
       optionsFor(filePath) {
         return effectiveRuleConfig(config, rule.name, filePath, configDir).options;
       },
+      isEnabledFor(filePath) {
+        return effectiveRuleConfig(config, rule.name, filePath, configDir).severity !== "off";
+      },
       report(location, message, opts) {
         const range = resolveLocation(location);
         if (!range) return;
