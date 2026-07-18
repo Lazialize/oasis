@@ -13,8 +13,9 @@
     "outDir": "out",
     "rootDir": "src",
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "types": ["node", "vscode"]
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "dist", "out"]
+  "exclude": ["node_modules", "dist", "out", "src/**/*.test.ts"]
 }
