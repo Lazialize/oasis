@@ -526,11 +526,10 @@ export function resolveRef(
     if (pointer !== "" && !pointer.startsWith("/")) {
       // The resource-scoped anchor lookup above only sees anchors registered directly under
       // `resource`'s own base, not ones nested under a descendant `$id` reached from it. Retrying
-      // unscoped (by name, across every indexed resource) is only safe when there is no risk of
-      // silently escaping a scope this call is bound to — i.e. a raw string given without
-      // `refRange`, matching the leniency that call shape has always had. `FoundRef`/`refRange`
-      // calls, and raw strings pinned to an explicit non-default resource base, keep the stricter
-      // scoped-only lookup.
+      // unscoped (by name, across every indexed resource) is allowed for any raw string given
+      // without `refRange` — even one whose matched occurrence carries a non-default resource base —
+      // matching the leniency that call shape has always had. `FoundRef` calls and raw strings
+      // matched via `refRange` keep the stricter scoped-only lookup.
       const anchor = resolveAnchor(resource.doc, pointer, resource.baseUri, resource.index) ??
         (!restrictToScope || isRawStringWithoutRange ? resolveAnchor(resource.doc, pointer, undefined, resource.index) : undefined);
       if (anchor) {
