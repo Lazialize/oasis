@@ -13,12 +13,28 @@ export const FILESYSTEM_URI_SCHEMES = new Set<string>(["file"]);
 /**
  * The scheme of a URI-reference, lowercased, or `undefined` when the reference has no scheme (a
  * relative or fragment-only reference). Per RFC 3986 a scheme is `ALPHA *( ALPHA / DIGIT / "+" /
- * "-" / "." )` followed by `:`. A single-letter "scheme" is deliberately rejected so a Windows
- * drive path (`C:\shared\pet.yaml`) is treated as a relative filesystem path, not a `c:` URI.
+ * "-" / "." )` followed by `:`.
+ *
+ * Windows drive paths (`C:\shared\pet.yaml`, `C:/shared/pet.yaml`) are treated as relative
+ * filesystem paths, not as URIs with a single-letter scheme. This is done explicitly by checking
+ * for the drive-path pattern (single letter followed by `:` and a path separator) rather than
+ * blanket-rejecting all one-character schemes, which would break RFC 3986-compliant custom schemes
+ * like `x:thing` or hierarchical URIs like `z://path`.
  */
 export function uriScheme(ref: string): string | undefined {
-  const match = /^([a-zA-Z][a-zA-Z0-9+.-]+):/.exec(ref);
-  return match ? match[1]!.toLowerCase() : undefined;
+  const match = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(ref);
+  if (!match) return undefined;
+
+  const scheme = match[1]!.toLowerCase();
+
+  // Windows drive path: single-letter scheme followed by \ or single /
+  // Examples: C:\path or C:/path (treated as filesystem paths, not URIs).
+  // Distinguish from hierarchical URIs: z:// has / at both [2] and [3].
+  if (scheme.length === 1 && (ref[2] === "\\" || (ref[2] === "/" && ref[3] !== "/"))) {
+    return undefined;
+  }
+
+  return scheme;
 }
 
 export type UriReferenceKind = "fragment" | "relative" | "absolute";
