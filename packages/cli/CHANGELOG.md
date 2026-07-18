@@ -1,5 +1,38 @@
 # @oasis/cli
 
+## 0.9.1
+
+### Patch Changes
+
+- [#131](https://github.com/Lazialize/oasis/pull/131) [`eb20eb6`](https://github.com/Lazialize/oasis/commit/eb20eb6f151894c173b13e7798cc5d6af214c62a) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(cli): `oasis init` now detects every supported OpenAPI root form — uppercase extensions,
+  UTF-8 BOMs, YAML flow mappings, document markers, and quoted keys — by reusing the shared
+  root-aware detection instead of an ad-hoc regex, while still rejecting nested `openapi` keys ([#80](https://github.com/Lazialize/oasis/issues/80)).
+
+- [#133](https://github.com/Lazialize/oasis/pull/133) [`1373876`](https://github.com/Lazialize/oasis/commit/1373876e3148d497e067b19091fe6ec0217e0711) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(cli): make multi-entry `oasis lint` project-aware — sibling entry graphs now contribute
+  `externalDocuments` so shared components used only by another entry aren't flagged unused, and
+  exact-duplicate diagnostics from a shared file are merged instead of doubled ([#76](https://github.com/Lazialize/oasis/issues/76)).
+
+- [#132](https://github.com/Lazialize/oasis/pull/132) [`c5ed40f`](https://github.com/Lazialize/oasis/commit/c5ed40f4b9d436955c7ef42b25d42901d258a09f) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(cli): `oasis lsp` now validates its arguments — `-h`/`--help` prints command help and exits 0
+  without starting the server, any other argument is rejected with exit code 2, and the bare command
+  keeps its stdio behavior ([#81](https://github.com/Lazialize/oasis/issues/81)).
+
+- [#128](https://github.com/Lazialize/oasis/pull/128) [`d6e04f5`](https://github.com/Lazialize/oasis/commit/d6e04f581428bcbfa01f700169055f44e9ed42d9) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(cli): classify rendered paths by real parent segments — in-tree names beginning with `..`
+  (e.g. `..generated`) are kept repo-relative, and an absolute `path.relative` result (Windows
+  cross-drive) is correctly treated as outside `cwd` ([#77](https://github.com/Lazialize/oasis/issues/77)).
+
+- [#129](https://github.com/Lazialize/oasis/pull/129) [`f7c0dbe`](https://github.com/Lazialize/oasis/commit/f7c0dbe6ea4fa1a55fdf033cc5a107c293e351d8) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(cli): reject empty values in the `--flag=` syntax (e.g. `--config=`, `--out=`, `-o=`,
+  `--format=`) so they fail with a usage error like the separated form, instead of being silently
+  treated as no-config / stdout ([#79](https://github.com/Lazialize/oasis/issues/79)).
+
+- [#127](https://github.com/Lazialize/oasis/pull/127) [`dbc63dd`](https://github.com/Lazialize/oasis/commit/dbc63dda385281d07eff0aaff3e1c8d3f92501e8) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(cli): percent-encode repository-relative SARIF artifact URIs per RFC 3986 — spaces, `#`, `%`,
+  and non-ASCII characters in filenames are now encoded (path separators preserved), so a valid
+  filename like `spec#draft.yaml` is no longer parsed as a URI fragment ([#78](https://github.com/Lazialize/oasis/issues/78)).
+- Updated dependencies [[`534839d`](https://github.com/Lazialize/oasis/commit/534839d2ea25b4b1eebf5f508dda346814312875), [`e32667c`](https://github.com/Lazialize/oasis/commit/e32667c5ad5cd0beda604a5068db3a4ab46f3e11), [`44c136f`](https://github.com/Lazialize/oasis/commit/44c136fd230b7978d0735f01db1b894ac7cc8d92), [`5922117`](https://github.com/Lazialize/oasis/commit/5922117ebf93e1c8221c309c5beb39706e111bb9), [`dc8d475`](https://github.com/Lazialize/oasis/commit/dc8d4754968232ae391500ed87c3f0236cc3784e), [`f06312f`](https://github.com/Lazialize/oasis/commit/f06312fdaa04e7aa45ef59f370e5254879ec183b), [`fc76aa5`](https://github.com/Lazialize/oasis/commit/fc76aa5d5db62ab87048d5600793c90cb255b913), [`65c6479`](https://github.com/Lazialize/oasis/commit/65c64799353d47867dc7fe9a42430f23ebb76d1d), [`1373876`](https://github.com/Lazialize/oasis/commit/1373876e3148d497e067b19091fe6ec0217e0711), [`e47a592`](https://github.com/Lazialize/oasis/commit/e47a592a02c790a9b212fa1b1c06f86197e5b4c9), [`8326582`](https://github.com/Lazialize/oasis/commit/83265828dc4c310a11824744c9d5bebcd919e656), [`4703c5c`](https://github.com/Lazialize/oasis/commit/4703c5c41ce9bae7c3627defcc2285ddd3d907e0), [`fed1780`](https://github.com/Lazialize/oasis/commit/fed178004410e6d8baf9719079309b687255d678), [`cba5e4c`](https://github.com/Lazialize/oasis/commit/cba5e4cf3816c5cef431e86dec7e23ecef9e57ae), [`2b48229`](https://github.com/Lazialize/oasis/commit/2b482291d789695ba7c2b933eca521a800b83fc3), [`ce7df6a`](https://github.com/Lazialize/oasis/commit/ce7df6a0bc11cd550d2259f2bca4e0708908addb)]:
+  - @oasis/bundler@0.9.1
+  - @oasis/core@0.9.1
+  - @oasis/server@0.9.1
+  - @oasis/linter@0.9.1
+
 ## 0.9.0
 
 ### Patch Changes
