@@ -1,16 +1,35 @@
-# Oasis
+# OASIS
 
-An OpenAPI 3.0 / 3.1 toolkit: **linter**, **multi-file bundler**, and **language server**, with a VS Code extension built on top.
+**OpenAPI Specification Integrated Suite**
 
-- Position-preserving parser — every diagnostic points at an exact file/line/column, even across `$ref`'d files
-- Works with YAML and JSON documents
-- Multi-file workspaces: split schemas, parameters, responses — and whole path definitions — into separate files and `$ref` them
+OASIS is an integrated toolkit for working with OpenAPI 3.0 and 3.1 documents. It brings linting,
+multi-file bundling, and language-server features together behind a single `oasis` command, with a
+companion VS Code extension for editor integration.
 
-## Requirements
+## Features
 
-[Bun](https://bun.sh) ≥ 1.0 to build from source. The compiled `oasis` binary has no runtime dependency on Bun or Node.
+- **Precise linting** — diagnostics retain the exact file, line, and column, including across
+  referenced files.
+- **Multi-file bundling** — combine split schemas, parameters, responses, and path definitions into
+  a single YAML or JSON document, with optional dereferencing.
+- **Editor intelligence** — diagnostics, completion, hover, navigation, symbols, references, and
+  rename support through the Language Server Protocol (LSP).
+- **Workspace awareness** — follow `$ref`s throughout multi-file projects and attribute results to
+  the file where each issue originates.
+- **OpenAPI 3.0 and 3.1** — version-aware behavior for both YAML and JSON documents.
 
-## Install
+| Command | Purpose |
+| --- | --- |
+| `oasis init` | Create a project configuration and detect OpenAPI entry documents |
+| `oasis lint` | Validate one document or every configured project entry |
+| `oasis bundle` | Produce a self-contained document from a multi-file API definition |
+| `oasis lsp` | Start the language server for editor clients |
+
+[Installation](#installation) · [Quick start](#quick-start) · [Commands](#commands) ·
+[Configuration](#configuration) · [Rule reference](docs/rules/README.md) ·
+[VS Code extension](#vs-code-extension) · [Development](#development)
+
+## Installation
 
 ### Homebrew (macOS/Linux)
 
@@ -38,6 +57,9 @@ The release workflow also publishes the VS Code extension to the
 
 ### Build from source
 
+Building requires [Bun](https://bun.sh) 1.0 or later. The compiled `oasis` binary has no runtime
+dependency on Bun or Node.
+
 ```sh
 bun install
 bun run build:bin       # -> dist/oasis
@@ -56,15 +78,17 @@ bunx oasis <command>
 Building from source is also the simplest way to point an editor at a working `oasis lsp` — see
 [VS Code extension](#vs-code-extension) below for `oasis.server.path`.
 
-## Quickstart
+## Quick start
 
 ```sh
-oasis init                                # scaffold oasis.config.jsonc in the current directory
-oasis lint openapi.yaml                   # lint one document
-oasis lint                                # lint every entry in oasis.config.jsonc
-oasis bundle openapi.yaml -o dist/openapi.yaml   # flatten a multi-file document into one
-oasis lsp                                 # start the language server on stdio (normally launched by an editor)
+oasis init                                      # create oasis.config.jsonc
+oasis lint openapi.yaml                         # lint one document
+oasis lint                                      # lint every configured entry
+oasis bundle openapi.yaml -o dist/openapi.yaml  # bundle a multi-file document
+oasis lsp                                       # start the language server on stdio
 ```
+
+## Commands
 
 ### `oasis init`
 
