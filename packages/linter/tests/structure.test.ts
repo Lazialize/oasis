@@ -564,6 +564,28 @@ describe("structure/schema-keywords", () => {
     expect(d).toBeDefined();
   });
 
+  test("flags an empty type array in OpenAPI 3.1 (must contain at least one type)", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-31-bad.yaml");
+    const d = diagnostics.find((d) => d.rule === "structure/schema-keywords" && d.message.includes('"type"') && d.message.includes("at least one"));
+    expect(d).toBeDefined();
+  });
+
+  test("does not flag items: false (boolean schema) in OpenAPI 3.1", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-valid-31.yaml");
+    expect(diagnostics.some((d) => d.rule === "structure/schema-keywords" && d.message.includes("items"))).toBe(false);
+  });
+
+  test("does not flag an empty required array in OpenAPI 3.1 (JSON Schema 2020-12 permits it)", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-valid-31.yaml");
+    expect(diagnostics.some((d) => d.rule === "structure/schema-keywords" && d.message.includes("required"))).toBe(false);
+  });
+
+  test("flags items: false (boolean schema) in OpenAPI 3.0 (booleans not allowed)", async () => {
+    const diagnostics = await lintFixture("structure/schema-keywords-30-bad.yaml");
+    const d = diagnostics.find((d) => d.rule === "structure/schema-keywords" && d.message.includes('"items" must be a schema object'));
+    expect(d).toBeDefined();
+  });
+
   test("flags minItems > maxItems", async () => {
     const diagnostics = await lintFixture("structure/schema-keywords-31-bad.yaml");
     const d = diagnostics.find((d) => d.rule === "structure/schema-keywords" && d.message.includes('"minItems" (5) is greater than "maxItems" (2)'));

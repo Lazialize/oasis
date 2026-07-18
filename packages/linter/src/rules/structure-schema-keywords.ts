@@ -103,6 +103,10 @@ function checkType(ctx: RuleContext, doc: OasisDocument, schema: Node): void {
       return;
     }
     if (isSeq(typeNode)) {
+      if (typeNode.items.length === 0) {
+        ctx.report({ doc, node: typeNode }, '"type" array must contain at least one type (JSON Schema 2020-12 requires a non-empty array).');
+        return;
+      }
       const seenValues = new Set<string>();
       for (const item of typeNode.items) {
         if (!isNode(item) || !isScalar(item) || typeof item.value !== "string") {
@@ -218,8 +222,16 @@ function checkPattern(ctx: RuleContext, doc: OasisDocument, schema: Node): void 
 function checkRequired(ctx: RuleContext, doc: OasisDocument, schema: Node): void {
   const node = childAt(schema, "required");
   if (!node) return;
-  if (!isSeq(node) || node.items.length === 0) {
-    ctx.report({ doc, node }, '"required" must be a non-empty array of strings.');
+  if (!isSeq(node)) {
+    ctx.report({ doc, node }, '"required" must be an array of strings.');
+    return;
+  }
+  // OpenAPI 3.0's Schema Object requires "required" to have at least one element; JSON Schema
+  // 2020-12 (OpenAPI 3.1) permits an empty array (it's simply vacuously satisfied).
+  if (node.items.length === 0) {
+    if (ctx.version === "3.0") {
+      ctx.report({ doc, node }, '"required" must be a non-empty array of strings in OpenAPI 3.0.');
+    }
     return;
   }
   const seen = new Set<string>();
@@ -255,6 +267,9 @@ function checkItems(ctx: RuleContext, doc: OasisDocument, schema: Node): void {
     );
     return;
   }
+  // In OpenAPI 3.1 (JSON Schema 2020-12) a Schema may be a boolean (`true`/`false`) as well as an
+  // object; OpenAPI 3.0's Schema Object has no boolean form.
+  if (ctx.version === "3.1" && isBooleanScalar(node)) return;
   if (!isMap(node)) {
     ctx.report({ doc, node }, '"items" must be a schema object.');
   }

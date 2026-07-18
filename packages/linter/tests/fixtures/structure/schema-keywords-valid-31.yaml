@@ -42,3 +42,11 @@ components:
     Tag:
       type: string
       pattern: '^[a-z]+$'
+
+    BooleanItems:
+      type: array
+      items: false
+
+    EmptyRequired:
+      type: object
+      required: []
