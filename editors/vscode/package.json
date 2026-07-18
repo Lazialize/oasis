@@ -67,7 +67,7 @@
     "build": "node esbuild.config.mjs",
     "watch": "node esbuild.config.mjs --watch",
     "typecheck": "tsc --noEmit",
-    "package": "npm run build && vsce package --no-dependencies"
+    "package": "npm run build && cp ../../LICENSE . && vsce package --no-dependencies"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
