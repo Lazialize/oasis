@@ -677,4 +677,128 @@ paths:
     expect(publish.params.uri).toBe(uri);
     expect(publish.params.diagnostics.some((d: { code?: string }) => d.code === "refs/no-unresolved")).toBe(true);
   }, 20000);
+
+  test("removing an open entry from project config reroutes it as standalone and re-validates it (#113)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "oasis-lsp-remove-entry-open-"));
+    const configPath = join(dir, "oasis.config.jsonc");
+    const entryPath = join(dir, "api.yaml");
+    const configUri = pathToFileURL(configPath).toString();
+    const entryUri = pathToFileURL(entryPath).toString();
+
+    writeFileSync(configPath, `{ "entries": ["api.yaml"] }`);
+    const entryText = `openapi: 3.1.0
+info:
+  title: Entry
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      tags: [pets]
+      description: List pets.
+      responses:
+        '200':
+          description: OK
+`; // missing operationId -> operation/operation-id (error)
+    writeFileSync(entryPath, entryText);
+
+    client = new LspClient();
+    const initResult = await client.request("initialize", {
+      processId: null,
+      rootUri: pathToFileURL(dir).toString(),
+      capabilities: {},
+    });
+    expect(initResult.result?.capabilities).toBeDefined();
+    client.notify("initialized", {});
+
+    const hasOperationIdFinding = (msg: any): boolean =>
+      msg.method === "textDocument/publishDiagnostics" &&
+      msg.params?.uri === entryUri &&
+      msg.params.diagnostics.some((d: { code?: string }) => d.code === "operation/operation-id");
+
+    // Project mode publishes eagerly at startup: the entry has the missing-operationId finding.
+    await client.waitFor(hasOperationIdFinding, 15000);
+
+    // Open the entry (still a project member) so it has a live overlay buffer.
+    client.notify("textDocument/didOpen", {
+      textDocument: { uri: entryUri, languageId: "yaml", version: 1, text: entryText },
+    });
+    await client.waitFor(hasOperationIdFinding, 15000);
+
+    // Open the config buffer and drop all entries: the project unloads and the entry's diagnostics
+    // clear -- but the entry document is still open. Before the fix, it stayed unvalidated as a
+    // standalone entry until edited or reopened.
+    client.notify("textDocument/didOpen", {
+      textDocument: { uri: configUri, languageId: "jsonc", version: 1, text: `{ "entries": [] }` },
+    });
+    await client.waitFor(
+      (msg) => msg.method === "textDocument/publishDiagnostics" && msg.params?.uri === entryUri && msg.params.diagnostics.length === 0,
+      15000,
+    );
+
+    // The still-open root OpenAPI document must be rerouted and validated as standalone: the same
+    // missing-operationId finding reappears without any further edit or reopen.
+    await client.waitFor(hasOperationIdFinding, 15000);
+  }, 20000);
+
+  test("a watched change followed by removing the entry from config before the debounce fires never resurrects diagnostics (#113)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "oasis-lsp-remove-entry-watched-"));
+    const configPath = join(dir, "oasis.config.jsonc");
+    const entryPath = join(dir, "a.yaml");
+    const configUri = pathToFileURL(configPath).toString();
+    const entryUri = pathToFileURL(entryPath).toString();
+
+    writeFileSync(configPath, `{ "entries": ["a.yaml"] }`);
+    const goodText = `openapi: 3.1.0
+info:
+  title: Entry
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      tags: [pets]
+      description: List pets.
+      responses:
+        '200':
+          description: OK
+`;
+    const badText = goodText.replace("      operationId: listPets\n", ""); // -> operation/operation-id (error)
+    writeFileSync(entryPath, goodText);
+
+    client = new LspClient();
+    await client.request("initialize", { processId: null, rootUri: pathToFileURL(dir).toString(), capabilities: {} });
+    client.notify("initialized", {});
+
+    const hasOperationIdFinding = (msg: any): boolean =>
+      msg.method === "textDocument/publishDiagnostics" &&
+      msg.params?.uri === entryUri &&
+      msg.params.diagnostics.some((d: { code?: string }) => d.code === "operation/operation-id");
+
+    // Project mode publishes eagerly at startup: the on-disk entry is clean.
+    const initial = await client.waitFor(
+      (msg) => msg.method === "textDocument/publishDiagnostics" && msg.params?.uri === entryUri,
+      15000,
+    );
+    expect(initial.params.diagnostics).toEqual([]);
+
+    // Simulate an external change (git checkout / codegen) that introduces a finding, then -- before
+    // the 250ms debounce for that change fires -- remove the entry from config on disk and notify
+    // that too. The pending validate for the removed entry must never resurrect its diagnostics.
+    writeFileSync(entryPath, badText);
+    client.notify("workspace/didChangeWatchedFiles", { changes: [{ uri: entryUri, type: 2 /* Changed */ }] });
+
+    writeFileSync(configPath, `{ "entries": [] }`);
+    client.notify("workspace/didChangeWatchedFiles", { changes: [{ uri: configUri, type: 2 /* Changed */ }] });
+
+    // The removal's own clear-publish must land (diagnostics empty) rather than the finding.
+    const cleared = await client.waitFor(
+      (msg) => msg.method === "textDocument/publishDiagnostics" && msg.params?.uri === entryUri,
+      15000,
+    );
+    expect(cleared.params.diagnostics).toEqual([]);
+
+    // Give the (cancelled) 250ms debounce timer's original deadline plenty of room to have fired,
+    // then confirm the finding never resurrects: no further publish for this URI carries it.
+    await expect(client.waitFor(hasOperationIdFinding, 600)).rejects.toThrow();
+  }, 20000);
 });
