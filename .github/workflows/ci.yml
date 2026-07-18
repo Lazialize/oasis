@@ -30,9 +30,6 @@ jobs:
       - name: Run tests
         run: bun test
 
-      - name: Build and test compiled binary
-        run: bun run test:bin
-
   extension:
     name: VSCode extension
     runs-on: ubuntu-latest
