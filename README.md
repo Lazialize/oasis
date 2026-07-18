@@ -42,7 +42,7 @@ The release workflow also publishes the VS Code extension to the
 bun install
 bun run build:bin       # -> dist/oasis
 ./dist/oasis <command>
-bun run test:bin        # exercise the compiled binary (lint/bundle/lsp)
+bun run test:bin        # run the compiled-binary suite in isolation (lint/bundle/lsp)
 ```
 
 Or run straight from source without compiling:
@@ -413,7 +413,7 @@ Design notes and the reasoning behind the architecture live in [DESIGN.md](DESIG
 bun test            # all package tests
 bunx tsc --noEmit   # typecheck (packages only; the extension has its own tsconfig)
 bun run build:bin   # compile the self-contained dist/oasis binary
-bun run test:bin    # exercise the compiled binary (lint/bundle/lsp), rebuilding it if missing
+bun run test:bin    # run the compiled-binary suite in isolation (lint/bundle/lsp); always rebuilds it
 bun run bench       # benchmark lint/bundle on synthetic multi-MB/multi-file specs
 ```
 
