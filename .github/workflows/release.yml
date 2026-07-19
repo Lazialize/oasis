@@ -228,7 +228,7 @@ jobs:
             echo "::error::No .vsix file found in the downloaded artifact"
             exit 1
           fi
-          npx --yes @vscode/vsce@2 publish --packagePath "$vsix"
+          npx --yes @vscode/vsce@3 publish --packagePath "$vsix"
 
   update-homebrew-tap:
     name: Update Homebrew tap
