@@ -381,6 +381,13 @@ export function startServer(): Connection {
       for (const project of ctx.projects.values()) {
         for (const entryPath of project.entryPaths) affected.add(entryPath);
       }
+      // A created file can also satisfy unresolved refs in open standalone entries, which never
+      // made it into `lastGraphFiles` in the first place. Revalidate all open standalone entries
+      // so any unresolved diagnostic that's satisfied by the new file gets cleared.
+      for (const entryPath of ctx.openStandaloneEntries) {
+        invalidateGraph(ctx, entryPath);
+        affected.add(entryPath);
+      }
     } else if (changeType === FileChangeType.Deleted && projectEntries.includes(path)) {
       // A deleted entry file shrinks project membership (declared entries get a warning, glob
       // matches drop out); reload so stale entries don't keep getting linted.

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -704,6 +704,79 @@ paths:
         !msg.params.diagnostics.some((d: { code?: string }) => d.code === "refs/no-unresolved"),
       15000,
     );
+    expect(resolved.params.diagnostics).toEqual([]);
+  }, 20000);
+
+  test("creating a previously-missing $ref target for a standalone entry revalidates it (#114)", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "oasis-lsp-standalone-created-")));
+    mkdirSync(join(dir, "parts"), { recursive: true });
+    const entryPath = join(dir, "api.yaml");
+    const entryUri = pathToFileURL(entryPath).toString();
+    const fragmentPath = join(dir, "parts", "pet.yaml");
+
+    // No oasis.config.jsonc anywhere: the entry is standalone (not project-managed).
+    // It has an unresolved $ref to a file that does not exist yet.
+    writeFileSync(
+      entryPath,
+      `openapi: 3.1.0
+info:
+  title: Entry
+  version: "1.0.0"
+paths:
+  /pets:
+    $ref: './parts/pet.yaml'
+`,
+    );
+    // parts/pet.yaml does NOT exist yet: the entry has an unresolved $ref.
+
+    client = new LspClient();
+    await client.request("initialize", { processId: null, rootUri: pathToFileURL(dir).toString(), capabilities: {} });
+    client.notify("initialized", {});
+
+    // Open the standalone entry and observe the unresolved $ref diagnostic.
+    client.notify("textDocument/didOpen", {
+      textDocument: {
+        uri: entryUri,
+        languageId: "yaml",
+        version: 1,
+        text: readFileSync(entryPath, "utf-8"),
+      },
+    });
+
+    await client.waitFor(
+      (msg) =>
+        msg.method === "textDocument/publishDiagnostics" &&
+        msg.params?.uri === entryUri &&
+        msg.params.diagnostics.some((d: { code?: string }) => d.code === "refs/no-unresolved"),
+      15000,
+    );
+
+    // Creating the missing file (e.g. codegen output) must revalidate the standalone entry even
+    // though it was never part of any previously-loaded graph's membership, since unresolved refs
+    // never make it into lastGraphFiles.
+    writeFileSync(
+      fragmentPath,
+      `get:
+  operationId: listPets
+  tags: [pets]
+  description: List pets.
+  responses:
+    '200':
+      description: OK
+`,
+    );
+    client.notify("workspace/didChangeWatchedFiles", {
+      changes: [{ uri: pathToFileURL(fragmentPath).toString(), type: 1 /* Created */ }],
+    });
+
+    const resolved = await client.waitFor(
+      (msg) =>
+        msg.method === "textDocument/publishDiagnostics" &&
+        msg.params?.uri === entryUri,
+      15000,
+    );
+    // After creating the fragment, the refs/no-unresolved diagnostic should be gone.
+    expect(resolved.params.diagnostics.some((d: { code?: string }) => d.code === "refs/no-unresolved")).toBe(false);
     expect(resolved.params.diagnostics).toEqual([]);
   }, 20000);
 
