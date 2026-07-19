@@ -14,7 +14,8 @@ import { rangeFromOffsets, zeroRange } from "./position.ts";
 import type { Diagnostic, Range } from "./types.ts";
 import { isExternalUriReference, resolveUriReference, stripUriFragment } from "./uri.ts";
 import type { WorkspaceGraph } from "./graph.ts";
-import { detectVersion } from "./version.ts";
+import { detectVersion, documentBaseUri, hasJsonSchema202012 } from "./version.ts";
+import type { OpenApiVersion } from "./version.ts";
 
 export interface RefParts {
   /** File portion of the ref, "" for a same-document ref. */
@@ -53,7 +54,7 @@ export function looksLikeMappingRef(value: string): boolean {
   return !/^[a-zA-Z0-9._-]+$/.test(value);
 }
 
-export type ReferenceKind = "ref" | "dynamic-ref" | "discriminator-mapping";
+export type ReferenceKind = "ref" | "dynamic-ref" | "discriminator-mapping" | "security-scheme";
 
 export interface FoundRef {
   value: string;
@@ -104,8 +105,23 @@ const INHERITED_31_KINDS = new Set<OpenApiObjectKind>([
   "media-type",
   "encoding",
   "callback",
+  "security-scheme",
   "schema",
 ]);
+
+function declaredSecuritySchemeNames(doc: OasisDocument): Set<string> {
+  const names = new Set<string>();
+  const root = doc.yamlDoc.contents;
+  if (!isMap(root)) return names;
+  const components = root.items.find((pair) => isScalar(pair.key) && pair.key.value === "components")?.value;
+  if (!isMap(components)) return names;
+  const schemes = components.items.find((pair) => isScalar(pair.key) && pair.key.value === "securitySchemes")?.value;
+  if (!isMap(schemes)) return names;
+  for (const pair of schemes.items) {
+    if (isScalar(pair.key)) names.add(String(pair.key.value));
+  }
+  return names;
+}
 
 /**
  * Classify a named-entry container occurrence for `findRefs`. The kind→kind edges live in the shared
@@ -127,7 +143,7 @@ function namedEntryKind(
 }
 
 function isAnyValuedField(kind: OpenApiObjectKind | undefined, key: string): boolean {
-  return (kind === "example" && key === "value") ||
+  return (kind === "example" && (key === "value" || key === "dataValue")) ||
     (kind === "link" && (key === "parameters" || key === "requestBody"));
 }
 
@@ -142,20 +158,23 @@ export function findRefs(
   doc: OasisDocument,
   scopeNode?: Node,
   scopeKind?: OpenApiObjectKind,
-  initialBaseUri = pathToFileURL(doc.filePath).href,
+  initialBaseUri = documentBaseUri(doc, pathToFileURL(doc.filePath).href),
+  inheritedVersion?: OpenApiVersion,
+  inheritedSecuritySchemeNames?: ReadonlySet<string>,
 ): FoundRef[] {
   const root = scopeNode ?? doc.yamlDoc.contents;
   if (!isNode(root)) return [];
-  const cacheKey = `${scopeKind ?? "document"}\u0000${initialBaseUri}`;
+  const version = detectVersion(doc) ?? inheritedVersion;
+  const securitySchemeNames = inheritedSecuritySchemeNames ?? declaredSecuritySchemeNames(doc);
+  const cacheKey = `${scopeKind ?? "document"}\u0000${initialBaseUri}\u0000${version ?? "unknown"}\u0000${[...securitySchemeNames].sort().join("\u0001")}`;
   const rootCache = findRefsCache.get(root);
   const cached = rootCache?.get(cacheKey);
   if (cached) return cached;
 
   const results: FoundRef[] = [];
-  const version = detectVersion(doc);
   // A standalone target has no `openapi` field. It inherits 2020-12 schema-bearing semantics only
   // when the graph reaches it from a known 3.1 OpenAPI object scope.
-  const schema31 = (scopeKind !== undefined && INHERITED_31_KINDS.has(scopeKind)) || version === "3.1";
+  const schema31 = (scopeKind !== undefined && INHERITED_31_KINDS.has(scopeKind)) || hasJsonSchema202012(version);
   // A shared alias target may be reached with different semantic meanings. Keep a seen-set per
   // complete traversal context so one use as literal Example data cannot suppress another use as
   // a genuine Link or schema reference (and vice versa).
@@ -267,6 +286,37 @@ export function findRefs(
                   ? rangeFromOffsets(doc.filePath, doc.lineCounter, range[0], range[1])
                   : zeroRange(doc.filePath),
               });
+            }
+          }
+        }
+        // OpenAPI 3.2 also allows a Security Requirement key to be a URI reference to a Security
+        // Scheme Object. Component-name lookup takes precedence, so only keys not declared by the
+        // entry document are recorded as URI references.
+        if (version === "3.2" && (objectKind === "root" || objectKind === "operation")) {
+          const securityPair = resolved.items.find((pair) => isScalar(pair.key) && pair.key.value === "security");
+          const securityNode = isNode(securityPair?.value)
+            ? resolveAlias(securityPair.value, doc.yamlDoc) ?? securityPair.value
+            : undefined;
+          if (isSeq(securityNode)) {
+            for (const item of securityNode.items) {
+              const requirement = isNode(item) ? resolveAlias(item, doc.yamlDoc) ?? item : undefined;
+              if (!isMap(requirement)) continue;
+              for (const pair of requirement.items) {
+                const key = isNode(pair.key) ? resolveAlias(pair.key, doc.yamlDoc) ?? pair.key : undefined;
+                if (!isScalar(key) || typeof key.value !== "string" || securitySchemeNames.has(key.value)) continue;
+                const range = key.range;
+                results.push({
+                  value: key.value,
+                  node: key,
+                  sourceNode: requirement,
+                  kind: "security-scheme",
+                  targetKind: "security-scheme",
+                  baseUri: stripUriFragment(nodeBaseUri),
+                  range: range
+                    ? rangeFromOffsets(doc.filePath, doc.lineCounter, range[0], range[1])
+                    : zeroRange(doc.filePath),
+                });
+              }
             }
           }
         }
@@ -432,7 +482,7 @@ export function resolveRef(
     };
   }
 
-  const defaultBaseUri = pathToFileURL(fromDoc.filePath).href;
+  const defaultBaseUri = documentBaseUri(fromDoc, pathToFileURL(fromDoc.filePath).href);
   // A raw string given without `refRange` (unlike the `FoundRef` path, and unlike a raw string
   // matched against a specific `refRange`) has always been allowed to fall back to plain
   // document-relative resolution. Preserve that for occurrences with no explicit resource scope

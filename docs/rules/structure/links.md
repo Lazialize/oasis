@@ -6,7 +6,7 @@ This rule checks every Link Object — under a Response Object's `links` and und
 
 ## Version notes
 
-`operationRef` targets under `#/webhooks/...` are only valid Operation Objects on OpenAPI 3.1 documents, since `webhooks` is a 3.1-only top-level section; on 3.0 documents a `#/webhooks/...` pointer, even one that resolves to a node in the document, is rejected for not being an Operation Object. All other checks (mutually-exclusive `operationRef`/`operationId`, `operationId` matching, allowed keys) apply identically to both versions.
+`operationRef` targets under `#/webhooks/...` are valid Operation Objects on OpenAPI 3.1/3.2 documents; on 3.0 they are rejected. OpenAPI 3.2 operation lookup also recognizes `query` and entries under `additionalOperations`.
 
 ## Options
 

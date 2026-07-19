@@ -5,6 +5,7 @@ import {
   COMPONENT_SECTIONS,
   type Diagnostic,
   detectVersion,
+  documentBaseUri,
   formatPointer,
   type FoundRef,
   graphReferences,
@@ -202,7 +203,7 @@ function withAliasTarget<T>(
   }
 }
 
-type OpenApiObjectKind = "discriminator" | "example" | "link" | "schema";
+type OpenApiObjectKind = "discriminator" | "encoding" | "example" | "link" | "media-type" | "operation" | "schema";
 
 const SINGLE_SCHEMA_KEYS = new Set([
   "items",
@@ -224,11 +225,12 @@ function objectKindForSection(section: string | undefined): OpenApiObjectKind | 
   if (section === "examples") return "example";
   if (section === "links") return "link";
   if (section === "schemas") return "schema";
+  if (section === "mediaTypes") return "media-type";
   return undefined;
 }
 
 function isAnyValuedField(kind: OpenApiObjectKind | undefined, key: string): boolean {
-  return (kind === "example" && key === "value") ||
+  return (kind === "example" && (key === "value" || key === "dataValue")) ||
     (kind === "link" && (key === "parameters" || key === "requestBody"));
 }
 
@@ -302,7 +304,7 @@ function mapChildren(
   ctx: BundleContext,
   doc: OasisDocument,
   mapNode: Node,
-  hint: string,
+  hint: string | undefined,
   entryKind?: OpenApiObjectKind,
 ): Record<string, unknown> {
   return withAliasTarget(ctx, doc, mapNode, {}, (resolvedMap) => {
@@ -330,7 +332,7 @@ function convertObjectMember(
 ): unknown {
   const objectKind = objectKindForSection(hint);
   const contextualValue = isAlias(value) ? value.resolve(doc.yamlDoc) ?? value : value;
-  if (isOpenApi31SchemaObject(ctx, doc, objectKind)) {
+  if (isJsonSchema202012Object(ctx, doc, objectKind)) {
     return convertSchemaObjectMember(ctx, doc, key, value, contextualValue, false);
   }
   const literal =
@@ -340,15 +342,16 @@ function convertObjectMember(
   return convertValue(ctx, doc, value, hint, literal, objectKind);
 }
 
-function isOpenApi31SchemaObject(
+function isJsonSchema202012Object(
   ctx: BundleContext,
   doc: OasisDocument,
   objectKind: OpenApiObjectKind | undefined,
 ): boolean {
-  return objectKind === "schema" && (detectVersion(doc) ?? detectVersion(ctx.entryDoc)) === "3.1";
+  const version = detectVersion(doc) ?? detectVersion(ctx.entryDoc);
+  return objectKind === "schema" && version !== undefined && version !== "3.0";
 }
 
-/** Convert one member whose containing object is an OpenAPI 3.1 Schema Object. */
+/** Convert one member whose containing object is an OpenAPI 3.1/3.2 Schema Object. */
 function convertSchemaObjectMember(
   ctx: BundleContext,
   doc: OasisDocument,
@@ -394,7 +397,9 @@ function resolveRefPair(ctx: BundleContext, doc: OasisDocument, refPair: Pair): 
     const retrievalUri = pathToFileURL(doc.filePath).href;
     const targetResourceUri = result.resourceUri ?? stripUriFragment(resolveUriReference(occurrence.baseUri, occurrence.value));
     const targetRetrievalUri = pathToFileURL(result.doc.filePath).href;
-    if (occurrence.baseUri !== retrievalUri || targetResourceUri !== targetRetrievalUri) {
+    const targetDocumentBaseUri = documentBaseUri(result.doc, targetRetrievalUri);
+    if ((occurrence.baseUri !== retrievalUri && occurrence.baseUri !== documentBaseUri(doc, retrievalUri)) ||
+      (targetResourceUri !== targetRetrievalUri && targetResourceUri !== targetDocumentBaseUri)) {
       const unsupported: ReturnType<typeof resolveRef> = {
         ok: false,
         diagnostic: {
@@ -507,7 +512,7 @@ function mergeSiblingsInto(ctx: BundleContext, doc: OasisDocument, mapNode: Node
   const version = detectVersion(doc) ?? detectVersion(ctx.entryDoc);
 
   if (hint === "schemas") {
-    if (version !== "3.1") return content; // 3.0 Schema Object: JSON Reference — siblings ignored.
+    if (version === "3.0") return content; // 3.0 Schema Object: JSON Reference — siblings ignored.
 
     // Real JSON Schema keyword siblings are conjunctive: preserve them via `allOf` so a conflicting
     // keyword can't overwrite the target (and so a boolean-schema target survives). `x-*` siblings
@@ -540,7 +545,7 @@ function mergeSiblingsInto(ctx: BundleContext, doc: OasisDocument, mapNode: Node
   }
 
   // Reference Object: 3.1 allows `summary`/`description` overrides; 3.0 allows none.
-  if (version !== "3.1") return content;
+  if (version === "3.0") return content;
   const base: Record<string, unknown> =
     typeof content === "object" && content !== null && !Array.isArray(content) ? { ...(content as Record<string, unknown>) } : {};
   let overridden = false;
@@ -930,13 +935,13 @@ function convertValue(
         setKey(out, key, convertValue(ctx, doc, value, hint, true));
         continue;
       }
-      // OpenAPI 3.1 Schema Objects inherit JSON Schema 2020-12 vocabulary rules: an unrecognized
+      // OpenAPI 3.1/3.2 Schema Objects inherit JSON Schema 2020-12 vocabulary rules: an unrecognized
       // keyword is an annotation whose value is opaque to Oasis. Dispatch only the applicators for
       // which Oasis knows the child is itself a Schema Object. This keeps OpenAPI-shaped custom
       // keywords such as `paths`, `responses`, or `parameters` from falling into the global switch
       // below while preserving normal conversion for real OpenAPI containers. OpenAPI 3.0 retains
       // its existing fixed Schema Object behavior and therefore deliberately bypasses this branch.
-      if (isOpenApi31SchemaObject(ctx, doc, semanticObjectKind)) {
+      if (isJsonSchema202012Object(ctx, doc, semanticObjectKind)) {
         setKey(out, key, convertSchemaObjectMember(ctx, doc, key, value, contextualValue, componentsObject));
         continue;
       }
@@ -948,6 +953,7 @@ function convertValue(
           setKey(out, key, convertPathItemMap(ctx, doc, value, false));
           break;
         case "schema":
+        case "itemSchema":
         case "items":
         case "additionalProperties":
         case "not":
@@ -1005,8 +1011,22 @@ function convertValue(
         case "callbacks":
           setKey(out, key, convertCallbacks(ctx, doc, value));
           break;
+        case "content": {
+          const version = detectVersion(doc) ?? detectVersion(ctx.entryDoc);
+          setKey(
+            out,
+            key,
+            version === "3.2"
+              ? mapChildren(ctx, doc, value, "mediaTypes", "media-type")
+              : mapChildren(ctx, doc, value, hint ?? "schemas"),
+          );
+          break;
+        }
         case "securitySchemes":
           setKey(out, key, mapChildren(ctx, doc, value, "securitySchemes"));
+          break;
+        case "mediaTypes":
+          setKey(out, key, mapChildren(ctx, doc, value, "mediaTypes", "media-type"));
           break;
         // 3.1-only `components/pathItems`: a map of name -> (Path Item Object | Reference Object).
         // Unlike a path-item `$ref` under `paths` (inlined in place — 3.0 has no pathItems section),
@@ -1024,6 +1044,9 @@ function convertValue(
         case "encoding":
         case "scopes":
           setKey(out, key, mapChildren(ctx, doc, value, hint ?? "schemas"));
+          break;
+        case "additionalOperations":
+          setKey(out, key, mapChildren(ctx, doc, value, undefined, "operation"));
           break;
         // Marks the child map reached here as a Discriminator Object, so the `mapping` case below
         // can tell it apart from an unrelated Schema Object property that merely happens to be

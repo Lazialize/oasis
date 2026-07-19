@@ -8,7 +8,7 @@ const SCHEME_TYPES_30 = new Set(["apiKey", "http", "oauth2", "openIdConnect"]);
 const SCHEME_TYPES_31 = new Set([...SCHEME_TYPES_30, "mutualTLS"]);
 const API_KEY_LOCATIONS = new Set(["query", "header", "cookie"]);
 
-const FLOW_TYPES = ["implicit", "password", "clientCredentials", "authorizationCode"] as const;
+const FLOW_TYPES = ["implicit", "password", "clientCredentials", "authorizationCode", "deviceAuthorization"] as const;
 type FlowType = (typeof FLOW_TYPES)[number];
 
 /** Required fields of each OAuth Flow Object, beyond the always-required "scopes". */
@@ -17,6 +17,7 @@ const FLOW_URL_FIELDS: Record<FlowType, string[]> = {
   password: ["tokenUrl"],
   clientCredentials: ["tokenUrl"],
   authorizationCode: ["authorizationUrl", "tokenUrl"],
+  deviceAuthorization: ["deviceAuthorizationUrl", "tokenUrl"],
 };
 
 function isNonEmptyString(node: Node | undefined): boolean {
@@ -48,7 +49,7 @@ function checkSecurityScheme(ctx: RuleContext, doc: OasisDocument, node: Node, l
     return;
   }
 
-  const validTypes = ctx.version === "3.1" ? SCHEME_TYPES_31 : SCHEME_TYPES_30;
+  const validTypes = ctx.version === "3.0" ? SCHEME_TYPES_30 : SCHEME_TYPES_31;
   const typeNode = childAt(node, "type");
   if (!typeNode || !isScalar(typeNode) || typeof typeNode.value !== "string") {
     ctx.report({ doc, node }, `${label} is missing required field "type".`);
@@ -62,6 +63,19 @@ function checkSecurityScheme(ctx: RuleContext, doc: OasisDocument, node: Node, l
       `${label} has unrecognized "type" value "${type}"; expected one of: ${[...validTypes].join(", ")}.`,
     );
     return;
+  }
+
+  const deprecatedNode = childAt(node, "deprecated");
+  if (deprecatedNode && (ctx.version !== "3.2" || !isScalar(deprecatedNode) || typeof deprecatedNode.value !== "boolean")) {
+    ctx.report({ doc, node: deprecatedNode }, ctx.version === "3.2"
+      ? `${label} "deprecated" must be a boolean.`
+      : `${label} field "deprecated" is only valid in OpenAPI 3.2.`);
+  }
+  const metadataNode = childAt(node, "oauth2MetadataUrl");
+  if (metadataNode && (ctx.version !== "3.2" || type !== "oauth2" || !isNonEmptyString(metadataNode))) {
+    ctx.report({ doc, node: metadataNode }, ctx.version !== "3.2"
+      ? `${label} field "oauth2MetadataUrl" is only valid in OpenAPI 3.2.`
+      : `${label} "oauth2MetadataUrl" must be a non-empty string on an oauth2 scheme.`);
   }
 
   switch (type) {
@@ -87,11 +101,16 @@ function checkSecurityScheme(ctx: RuleContext, doc: OasisDocument, node: Node, l
         ctx.report({ doc, node }, `${label} (oauth2) is missing required field "flows" (object).`);
         break;
       }
-      const presentFlows = FLOW_TYPES.filter((flowType) => !!childAt(flowsNode, flowType));
+      const supportedFlows = ctx.version === "3.2" ? FLOW_TYPES : FLOW_TYPES.filter((flow) => flow !== "deviceAuthorization");
+      const deviceNode = childAt(flowsNode, "deviceAuthorization");
+      if (deviceNode && ctx.version !== "3.2") {
+        ctx.report({ doc, node: deviceNode }, `${label} flow "deviceAuthorization" is only valid in OpenAPI 3.2.`);
+      }
+      const presentFlows = supportedFlows.filter((flowType) => !!childAt(flowsNode, flowType));
       if (presentFlows.length === 0) {
         ctx.report(
           { doc, node: flowsNode },
-          `${label} (oauth2) "flows" must define at least one of: ${FLOW_TYPES.join(", ")}.`,
+          `${label} (oauth2) "flows" must define at least one of: ${supportedFlows.join(", ")}.`,
         );
       }
       for (const flowType of presentFlows) {
@@ -107,7 +126,7 @@ function checkSecurityScheme(ctx: RuleContext, doc: OasisDocument, node: Node, l
       break;
     }
     case "mutualTLS":
-      // 3.1 only (already gated by validTypes above); no extra required fields beyond "type".
+      // 3.1+ only (already gated by validTypes above); no extra required fields beyond "type".
       break;
   }
 }
@@ -115,7 +134,7 @@ function checkSecurityScheme(ctx: RuleContext, doc: OasisDocument, node: Node, l
 export const structureSecuritySchemes: Rule = {
   name: "structure/security-schemes",
   description:
-    'Checks Security Scheme Objects under "components/securitySchemes": a recognized "type" (apiKey/http/oauth2/openIdConnect, plus 3.1 "mutualTLS"), and each type\'s required fields.',
+    'Checks Security Scheme Objects under "components/securitySchemes": a recognized "type" (apiKey/http/oauth2/openIdConnect, plus 3.1+ "mutualTLS"), and each type\'s required fields.',
   defaultSeverity: "error",
   check(ctx) {
     const seen = new Set<string>();

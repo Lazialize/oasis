@@ -1,4 +1,4 @@
-import { isMap, isNode, isScalar } from "yaml";
+import { isMap, isNode, isScalar, isSeq } from "yaml";
 import type { Node } from "yaml";
 import type { OasisDocument } from "@oasis/core";
 import { iterateMediaTypes } from "../openapi-walk.ts";
@@ -47,6 +47,40 @@ function checkEncodingEntry(ctx: RuleContext, doc: OasisDocument, name: string, 
       ctx.report({ doc, node: fieldNode }, `${label} encoding "${name}" "${field}" must be a boolean.`);
     }
   }
+
+  checkNestedEncodings(ctx, doc, node, `${label} encoding "${name}"`);
+}
+
+function checkNestedEncodings(ctx: RuleContext, doc: OasisDocument, node: Node, label: string, includeEncodingEntries = true): void {
+  if (!isMap(node)) return;
+  const encoding = childAt(node, "encoding");
+  const prefixEncoding = childAt(node, "prefixEncoding");
+  const itemEncoding = childAt(node, "itemEncoding");
+
+  for (const [field, value] of [["encoding", encoding], ["prefixEncoding", prefixEncoding], ["itemEncoding", itemEncoding]] as const) {
+    const nestedEncodingField = field === "encoding" && includeEncodingEntries;
+    if (value && ctx.version !== "3.2" && (field !== "encoding" || nestedEncodingField)) {
+      ctx.report({ doc, node: value }, `${label} field "${field}" is only valid in OpenAPI 3.2.`);
+    }
+  }
+  if (encoding && (prefixEncoding || itemEncoding)) {
+    ctx.report({ doc, node }, `${label} must not combine "encoding" with "prefixEncoding" or "itemEncoding".`);
+  }
+  if (includeEncodingEntries && encoding && isMap(encoding)) {
+    for (const pair of encoding.items) {
+      if (isNode(pair.value)) checkEncodingEntry(ctx, doc, keyToString(pair.key), pair.value, label);
+    }
+  }
+  if (prefixEncoding) {
+    if (!isSeq(prefixEncoding)) {
+      ctx.report({ doc, node: prefixEncoding }, `${label} "prefixEncoding" must be an array.`);
+    } else {
+      prefixEncoding.items.forEach((item, index) => {
+        if (isNode(item)) checkEncodingEntry(ctx, doc, String(index), item, `${label}.prefixEncoding`);
+      });
+    }
+  }
+  if (itemEncoding) checkEncodingEntry(ctx, doc, "itemEncoding", itemEncoding, label);
 }
 
 export const structureEncoding: Rule = {
@@ -56,6 +90,13 @@ export const structureEncoding: Rule = {
   defaultSeverity: "error",
   check(ctx) {
     for (const site of iterateMediaTypes(ctx.graph, ctx.entryDoc, ctx.documents, ctx.version)) {
+      const itemSchema = childAt(site.node, "itemSchema");
+      if (itemSchema && ctx.version !== "3.2") {
+        ctx.report({ doc: site.doc, node: itemSchema }, `"${site.pointer}" field "itemSchema" is only valid in OpenAPI 3.2.`);
+      } else if (itemSchema && !isMap(itemSchema) && !(isScalar(itemSchema) && typeof itemSchema.value === "boolean")) {
+        ctx.report({ doc: site.doc, node: itemSchema }, `"${site.pointer}.itemSchema" must be a Schema Object or boolean schema.`);
+      }
+      checkNestedEncodings(ctx, site.doc, site.node, `"${site.pointer}"`, false);
       const encoding = childAt(site.node, "encoding");
       if (!encoding || !isMap(encoding)) continue;
 

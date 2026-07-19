@@ -1,7 +1,7 @@
 # Built-in rules
 
 Every rule Oasis ships with, grouped by namespace. `Rule` links to a reference page with a full
-description, version notes (where 3.0 and 3.1 behavior differs), options (if any), and examples.
+description, version notes (where 3.0, 3.1, and 3.2 behavior differs), options (if any), and examples.
 `Default` is the severity applied when a rule isn't mentioned in `lint.rules` — see the
 [Configuration](../../README.md#configuration) section of the README for how to override it.
 
@@ -13,11 +13,11 @@ can't be configured or suppressed, and has no page here.
 
 | Rule | Default | Summary |
 | --- | --- | --- |
-| [`structure/required-fields`](structure/required-fields.md) | error | `openapi`, `info.title`, `info.version`, `paths` (or 3.1 `webhooks`/`components`) are present |
-| [`structure/openapi-version`](structure/openapi-version.md) | error | `openapi` is a valid `3.0.x` / `3.1.x` string |
+| [`structure/required-fields`](structure/required-fields.md) | error | `openapi`, `info.title`, `info.version`, `paths` (or 3.1/3.2 `webhooks`/`components`) are present |
+| [`structure/openapi-version`](structure/openapi-version.md) | error | `openapi` is a valid `3.0.x` / `3.1.x` / `3.2.x` string |
 | [`structure/field-types`](structure/field-types.md) | error | Common objects (paths, operations, parameters, responses, components…) have the right shapes |
 | [`structure/http-methods`](structure/http-methods.md) | error | Only valid HTTP verbs / metadata keys appear under a path item |
-| [`structure/schema-nullable`](structure/schema-nullable.md) | error | 3.0: no `type` arrays / `null` type; 3.1: no `nullable` — in every schema, including inline ones |
+| [`structure/schema-nullable`](structure/schema-nullable.md) | error | 3.0: no `type` arrays / `null` type; 3.1/3.2: no `nullable` — in every schema, including inline ones |
 | [`structure/schema-keywords`](structure/schema-keywords.md) | error | Schema Object keywords match the document's dialect, value types, internal consistency, and `$ref` sibling-key rules |
 | [`structure/security-schemes`](structure/security-schemes.md) | error | `components/securitySchemes` entries have a recognized `type` and that type's required fields |
 | [`structure/server-variables`](structure/server-variables.md) | error | Server Object `variables` agree with `{var}` placeholders in `url`; `enum`/`default` shape |

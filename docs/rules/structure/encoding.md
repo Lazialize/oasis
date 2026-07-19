@@ -1,12 +1,12 @@
 # `structure/encoding`
 
-This rule checks Encoding Object entries under a Media Type Object's `encoding` map (e.g. for `multipart/form-data` request bodies). When the media type's `schema` resolves — within the workspace graph — to an inline object schema with a literal `properties` map, each encoding key must match one of those property names (encoding entries for composed schemas, free-form objects, or unresolvable refs are skipped rather than guessed at, since the property set can't be determined statically). For each entry, `contentType` and `style` (one of `form`/`spaceDelimited`/`pipeDelimited`/`deepObject`) must be strings with recognized values, and `explode`/`allowReserved` must be booleans. An encoding entry that references a property the schema doesn't have does nothing (silently ignored by consumers) and usually indicates a typo or a schema that changed without updating the encoding map alongside it.
+This rule checks Encoding Object entries under a Media Type Object's `encoding` map (e.g. for `multipart/form-data` request bodies). When the media type's `schema` resolves — within the workspace graph — to an inline object schema with a literal `properties` map, each encoding key must match one of those property names (encoding entries for composed schemas, free-form objects, or unresolvable refs are skipped rather than guessed at, since the property set can't be determined statically). For each entry, `contentType` and `style` must be recognized strings, and `explode`/`allowReserved` must be booleans. OpenAPI 3.2's `itemSchema`, `prefixEncoding`, `itemEncoding`, and nested `encoding` structures are walked recursively and checked for their required mutual exclusions.
 
 **Default severity:** `error`
 
 ## Version notes
 
-No version-specific behavior — this rule applies identically to OpenAPI 3.0 and 3.1 documents.
+OpenAPI 3.0 and 3.1 support the original schema/encoding map model. OpenAPI 3.2 additionally supports stream/sequential media descriptions through `itemSchema`, `prefixEncoding`, `itemEncoding`, and nested Encoding Objects; these fields are rejected on earlier versions.
 
 ## Options
 

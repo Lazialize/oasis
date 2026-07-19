@@ -5,7 +5,6 @@ import { HTTP_METHODS, PATH_ITEM_NON_METHOD_KEYS, iterateOperations } from "../o
 import { childAt, hasAnyResponseEntry, keyToString, resolveMaybeRef, visitResolvedUnique } from "../util.ts";
 import type { Rule, RuleContext } from "../types.ts";
 
-const PATH_ITEM_ALLOWED_KEYS = new Set<string>([...HTTP_METHODS, ...PATH_ITEM_NON_METHOD_KEYS]);
 const RUNTIME_EXPRESSION = /\{\$[^{}]*\}/;
 const URL_LIKE = /^([a-zA-Z][a-zA-Z0-9+.-]*:\/\/|\/)/;
 
@@ -16,9 +15,13 @@ function checkCallbackPathItem(ctx: RuleContext, doc: OasisDocument, node: Node,
     return;
   }
 
+  const allowedKeys = new Set<string>([
+    ...HTTP_METHODS.filter((method) => method !== "query" || ctx.version === "3.2"),
+    ...[...PATH_ITEM_NON_METHOD_KEYS].filter((key) => key !== "additionalOperations" || ctx.version === "3.2"),
+  ]);
   for (const pair of node.items) {
     const key = keyToString(pair.key);
-    if (!PATH_ITEM_ALLOWED_KEYS.has(key) && !key.startsWith("x-") && isNode(pair.key)) {
+    if (!allowedKeys.has(key) && !key.startsWith("x-") && isNode(pair.key)) {
       ctx.report(
         { doc, node: pair.key },
         `${label} has invalid key "${key}" (expected an HTTP method or one of: ${[...PATH_ITEM_NON_METHOD_KEYS].join(", ")}).`,
@@ -27,6 +30,7 @@ function checkCallbackPathItem(ctx: RuleContext, doc: OasisDocument, node: Node,
   }
 
   for (const method of HTTP_METHODS) {
+    if (method === "query" && ctx.version !== "3.2") continue;
     const opNode = childAt(node, method);
     if (!opNode) continue;
     const resolved = resolveMaybeRef(ctx.graph, doc, opNode, "");
@@ -45,6 +49,19 @@ function checkCallbackPathItem(ctx: RuleContext, doc: OasisDocument, node: Node,
         { doc: resolved.doc, node: responsesNode },
         `${label}.${method}.responses must contain at least one response code, "default", or an extension ("x-*") field.`,
       );
+    }
+  }
+  if (ctx.version === "3.2") {
+    const additional = childAt(node, "additionalOperations");
+    if (isMap(additional)) {
+      for (const pair of additional.items) {
+        const method = keyToString(pair.key);
+        if (!isNode(pair.value)) continue;
+        const resolved = resolveMaybeRef(ctx.graph, doc, pair.value, "");
+        if (!isMap(resolved.node)) {
+          ctx.report({ doc: resolved.doc, node: resolved.node }, `${label}.additionalOperations.${method} must be an object.`);
+        }
+      }
     }
   }
 }

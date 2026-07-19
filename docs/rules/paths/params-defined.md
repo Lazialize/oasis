@@ -6,7 +6,7 @@ Requires every `{param}` placeholder in a path template to have a matching `in: 
 
 ## Version notes
 
-This rule walks path items with `iteratePathItems(ctx.graph, ctx.entryDoc)` — called **without** a `version` argument, so it only ever visits the root `paths` map, never the 3.1-only `webhooks` map. This is intentional: webhook map keys are arbitrary names (e.g. `newPet`, `"{weird}"`), not URL path templates, so `{param}`-placeholder/parameter matching doesn't apply to them. This is confirmed by `packages/linter/tests/webhooks.test.ts` ("3.1 webhooks: path-shaped rules do NOT apply" / `paths/params-defined ignores webhook keys`). Aside from webhooks being out of scope entirely, there is no other 3.0-vs-3.1 behavior difference.
+This rule only visits the root `paths` map, never the 3.1/3.2 `webhooks` map. Webhook keys are arbitrary names, not URL path templates, so `{param}` placeholder matching does not apply. Other behavior is version-independent.
 
 ## Options
 

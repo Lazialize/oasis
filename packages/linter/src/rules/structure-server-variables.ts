@@ -68,6 +68,15 @@ function checkServerObject(ctx: RuleContext, doc: OasisDocument, node: Node, lab
     urlValue = urlNode.value;
   }
 
+  const nameNode = childAt(node, "name");
+  if (nameNode) {
+    if (ctx.version !== "3.2") {
+      ctx.report({ doc, node: nameNode }, `${label} field "name" is only valid in OpenAPI 3.2.`);
+    } else if (!isScalar(nameNode) || typeof nameNode.value !== "string") {
+      ctx.report({ doc, node: nameNode }, `${label} "name" must be a string.`);
+    }
+  }
+
   const variablesNode = childAt(node, "variables");
   const declared = new Map<string, Node>();
   if (variablesNode) {

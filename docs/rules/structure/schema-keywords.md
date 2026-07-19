@@ -10,7 +10,7 @@ This rule validates the keywords used inside every schema in the document (walke
 - **`pattern`**: must be a string that's a valid regular expression.
 - **`required`**: must be an array of strings with no duplicates; on 3.0 it must also be non-empty (JSON Schema 2020-12, used by 3.1, permits an empty `required`).
 - **`enum`**: must be a non-empty array.
-- **`items`**: must be a single schema object (not an array/tuple) in either version — tuple typing uses `prefixItems` (3.1-only). On 3.1, a boolean (`true`/`false`) is also a valid Schema value for `items`, per JSON Schema 2020-12; 3.0's Schema Object has no boolean form.
+- **`items`**: must be a single schema (not an array/tuple) in every supported version — tuple typing uses `prefixItems` in 3.1/3.2. In 3.1/3.2, a boolean (`true`/`false`) is also a valid Schema value per JSON Schema 2020-12; 3.0 has no boolean form.
 - **`properties`/`additionalProperties`**: `properties` must be an object; `additionalProperties` must be a boolean or a schema object.
 - **`format`**: must be a string.
 - **`$ref` siblings** (3.0 only): in OpenAPI 3.0, a Reference Object with `$ref` alongside other keys silently ignores those other keys per spec, so this rule flags any sibling keys next to `$ref` (3.1 permits `$ref` siblings, since 3.1's Reference Object is unrestricted JSON Schema).

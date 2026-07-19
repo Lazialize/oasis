@@ -5,7 +5,7 @@ CLI tool providing **lint**, **multi-file bundling**, and an **LSP server** for 
 ## Decisions (fixed)
 
 - **Language/Runtime**: TypeScript + Bun (Bun workspaces monorepo)
-- **OpenAPI versions**: 3.0.x and 3.1.x (no Swagger 2.0)
+- **OpenAPI versions**: 3.0.x, 3.1.x, and 3.2.x (no Swagger 2.0)
 - **Formats**: YAML and JSON source documents
 - **Lint**: built-in rule set + config file to toggle rules / adjust severity (custom rule plugins are out of scope for now)
 - **Milestone order**: core parser → lint → bundle → LSP → VSCode extension
@@ -36,7 +36,7 @@ The single most important design constraint: **every value in a parsed document 
 - `$ref` resolution:
   - Same-document (`#/components/...`) and cross-file (`./shared.yaml#/components/...`) refs.
   - A **workspace graph**: entry document + transitively referenced documents, with cycle detection. Refs resolve lazily; unresolved refs are recorded as diagnostics, not exceptions.
-- Version detection (`openapi: 3.0.x` vs `3.1.x`) exposed on the document; downstream code branches on it (3.1 = JSON Schema 2020-12, `type` arrays, `null` type; 3.0 = `nullable`, etc.).
+- Version detection (`openapi: 3.0.x`, `3.1.x`, or `3.2.x`) exposed on the document; downstream code branches on it (3.1/3.2 = JSON Schema 2020-12, `type` arrays, `null` type; 3.0 = `nullable`, etc.). OpenAPI 3.2 `$self` becomes the base URI for relative references.
 - Core never prints or exits; it returns values + diagnostics. All I/O behind a small `FileSystem` interface so LSP can feed in-memory (unsaved) buffers.
 
 ### packages/linter
@@ -69,7 +69,7 @@ The single most important design constraint: **every value in a parsed document 
 - Input: entry document + workspace graph. Output: single document (YAML or JSON, `--format`).
 - External `$ref`s are lifted into `components/*` of the output; internal refs rewritten to point there. Name conflicts resolved deterministically (suffix with a counter or path-derived name); collisions where two different targets want the same name must not silently merge.
 - Preserve key order where practical; output must be a valid document of the same OpenAPI version.
-- **Path Item `$ref`s** (a `$ref` directly under a `paths/<path>` key, e.g. `paths: { /users: { $ref: './paths/users.yaml' } }`, whole-file or fragment) are **inlined in place** rather than lifted into `components/*` — OpenAPI 3.0 has no `components/pathItems` section, so lifting isn't an option there, and inlining is used for 3.1 too for consistency (a Redocly-like, uniform strategy). `$ref`s found *inside* the inlined path item (schemas, parameters, responses, ...) are still lifted the normal way. Chained path-item refs are followed with a depth guard. Optionally lifting path items into `components/pathItems` for 3.1 output was considered for v0.6 and rejected for 1.0: it would add a config surface (which strategy, per-document or global) right before the API freeze for a 3.1-only feature, while inline-in-place already gives uniform 3.0/3.1 behavior and matches Redocly's default. Revisit post-1.0 if there's real demand.
+- **Path Item `$ref`s** (a `$ref` directly under a `paths/<path>` key, e.g. `paths: { /users: { $ref: './paths/users.yaml' } }`, whole-file or fragment) are **inlined in place** rather than lifted into `components/*` — OpenAPI 3.0 has no `components/pathItems` section, so lifting isn't an option there, and inlining is used for 3.1/3.2 too for consistency (a Redocly-like, uniform strategy). `$ref`s found *inside* the inlined path item (schemas, parameters, responses, ...) are still lifted the normal way. Chained path-item refs are followed with a depth guard. Optionally lifting path items into `components/pathItems` was considered for v0.6 and rejected for 1.0: it would add a config surface (which strategy, per-document or global) right before the API freeze, while inline-in-place already gives uniform behavior across supported versions and matches Redocly's default. Revisit post-1.0 if there's real demand.
 
 ### packages/server (LSP)
 
@@ -90,7 +90,7 @@ The single most important design constraint: **every value in a parsed document 
 
 ## Milestones
 
-1. **M1 core**: scaffold monorepo (Bun workspaces, TypeScript strict, `bun test`), implement core as above with thorough tests (pointer↔range lookups, cross-file refs, cycles, 3.0/3.1 detection).
+1. **M1 core**: scaffold monorepo (Bun workspaces, TypeScript strict, `bun test`), implement core as above with thorough tests (pointer↔range lookups, cross-file refs, cycles, version detection).
 2. **M2 lint**: rule engine, config loading, built-in rules, `oasis lint` CLI with pretty/JSON output + tests (fixture documents, good and bad).
 3. **M3 bundle**: bundler + `oasis bundle` + tests (multi-file fixtures, name conflicts, cycles).
 4. **M4 LSP**: server package + `oasis lsp` + tests where feasible (unit-test handlers against in-memory docs).

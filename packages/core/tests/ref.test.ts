@@ -51,6 +51,53 @@ describe("cross-file $ref resolution (OpenAPI 3.1)", () => {
   });
 });
 
+describe("OpenAPI 3.2 $self", () => {
+  test("uses $self instead of the retrieval URI as the base for relative references", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": [
+        "openapi: 3.2.0",
+        "$self: ./api/openapi.yaml",
+        "info: { title: T, version: '1' }",
+        "paths: {}",
+        "components:",
+        "  schemas:",
+        "    Pet:",
+        "      $ref: ./schemas.yaml#/Pet",
+      ].join("\n"),
+      "/virtual/api/schemas.yaml": "Pet: { type: string }\n",
+    });
+
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    expect(graph.documents.has("/virtual/api/schemas.yaml")).toBe(true);
+    const entry = graph.documents.get("/virtual/entry.yaml")!;
+    const ref = graphReferences(graph, entry).find((candidate) => candidate.value === "./schemas.yaml#/Pet");
+    expect(ref?.baseUri).toBe("file:///virtual/api/openapi.yaml");
+    expect(ref && resolveRef(graph, entry, ref).ok).toBe(true);
+  });
+
+  test("loads a Security Scheme Object referenced by a Security Requirement URI", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": [
+        "openapi: 3.2.0",
+        "$self: ./api/openapi.yaml",
+        "info: { title: T, version: '1' }",
+        "paths: {}",
+        "security:",
+        "  - './security.yaml#/bearer': []",
+      ].join("\n"),
+      "/virtual/api/security.yaml": "bearer: { type: http, scheme: bearer }\n",
+    });
+
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    expect(graph.documents.has("/virtual/api/security.yaml")).toBe(true);
+    const entry = graph.documents.get("/virtual/entry.yaml")!;
+    const ref = graphReferences(graph, entry).find((candidate) => candidate.kind === "security-scheme");
+    expect(ref?.value).toBe("./security.yaml#/bearer");
+    expect(ref?.targetKind).toBe("security-scheme");
+    expect(ref && resolveRef(graph, entry, ref).ok).toBe(true);
+  });
+});
+
 describe("$ref cycle detection", () => {
   test("terminates and records a diagnostic instead of looping", async () => {
     const fs = new NodeFileSystem();

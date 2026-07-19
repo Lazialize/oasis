@@ -27,6 +27,7 @@ describe("classifyPointer covers all component sections", () => {
     ["/components/examples/Foo", "example"],
     ["/components/links/Foo", "link"],
     ["/components/callbacks/Foo", "callback"],
+    ["/components/mediaTypes/Foo", "mediaType"],
   ];
   for (const [pointer, kind] of cases) {
     test(`${pointer} -> ${kind}`, () => {
@@ -156,6 +157,37 @@ describe("version-specific schema fields", () => {
   test("License offers 3.1-only identifier only in 3.1", () => {
     expect(labelsAt("/info/license", "3.1")).toContain("identifier");
     expect(labelsAt("/info/license", "3.0")).not.toContain("identifier");
+  });
+});
+
+describe("OpenAPI 3.2 completion contexts", () => {
+  test("root and Path Item keys are version-gated", () => {
+    expect(labelsAt("", "3.2")).toContain("$self");
+    expect(labelsAt("", "3.1")).not.toContain("$self");
+
+    const path32 = labelsAt("/paths/~1events", "3.2");
+    expect(path32).toContain("query");
+    expect(path32).toContain("additionalOperations");
+    expect(labelsAt("/paths/~1events", "3.1")).not.toContain("query");
+    expect(classifyPointer("/paths/~1events/additionalOperations/COPY")).toBe("operation");
+  });
+
+  test("media type, Example, OAuth, Discriminator, and XML additions are offered", () => {
+    expect(labelsAt("/components", "3.2")).toContain("mediaTypes");
+    expect(labelsAt("/components", "3.1")).not.toContain("mediaTypes");
+
+    const mediaType = labelsAt("/components/mediaTypes/Stream", "3.2");
+    expect(mediaType).toContain("itemSchema");
+    expect(mediaType).toContain("prefixEncoding");
+    expect(mediaType).toContain("itemEncoding");
+    expect(classifyPointer("/components/mediaTypes/Stream/prefixEncoding/0")).toBe("encoding");
+
+    const example = labelsAt("/components/examples/Payload", "3.2");
+    expect(example).toContain("dataValue");
+    expect(example).toContain("serializedValue");
+    expect(labelsAt("/components/securitySchemes/oauth/flows", "3.2")).toContain("deviceAuthorization");
+    expect(labelsAt("/components/schemas/Pet/discriminator", "3.2")).toContain("defaultMapping");
+    expect(labelsAt("/components/schemas/Pet/xml", "3.2")).toContain("nodeType");
   });
 });
 

@@ -4,6 +4,7 @@ import {
   isNamedEntryContainer,
   NAMED_ENTRY_CONTAINER_KEYS,
   NAMED_ENTRY_CONTAINER_KEYS_31,
+  NAMED_ENTRY_CONTAINER_KEYS_32,
 } from "./named-containers.ts";
 import type { OpenApiVersion } from "./version.ts";
 
@@ -25,6 +26,7 @@ export function isLiteralDataKey(key: string, value: Node): boolean {
 export const CONTAINER_KEYS = new Set<string>([
   ...NAMED_ENTRY_CONTAINER_KEYS,
   ...NAMED_ENTRY_CONTAINER_KEYS_31,
+  ...NAMED_ENTRY_CONTAINER_KEYS_32,
 ]);
 
 export function isContainerKey(key: string, value: Node, version?: OpenApiVersion): boolean {

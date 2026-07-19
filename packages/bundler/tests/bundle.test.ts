@@ -48,6 +48,48 @@ describe("bundle", () => {
     expect(result.output).toContain("3.1.0");
   });
 
+  test("OpenAPI 3.2: $self scopes refs and mediaTypes/additionalOperations are bundled", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": [
+        "openapi: 3.2.0",
+        "$self: ./api/openapi.yaml",
+        "info: { title: t, version: '1' }",
+        "paths:",
+        "  /events:",
+        "    additionalOperations:",
+        "      COPY:",
+        "        responses:",
+        "          '200':",
+        "            content:",
+        "              application/json:",
+        "                $ref: './media.yaml#/Media'",
+        "components:",
+        "  mediaTypes:",
+        "    EventStream:",
+        "      $ref: './media.yaml#/Media'",
+        "",
+      ].join("\n"),
+      "/virtual/api/media.yaml": [
+        "Media:",
+        "  itemSchema:",
+        "    type: string",
+        "  itemEncoding:",
+        "    contentType: text/plain",
+        "",
+      ].join("\n"),
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const result = bundle(graph);
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.output).not.toContain("./media.yaml");
+    expect(result.output).toContain("mediaTypes:");
+    expect(result.output).toContain("#/components/mediaTypes/Media");
+    expect(result.output).toContain("additionalOperations:");
+    expect(result.output).toContain("itemSchema:");
+    await assertSelfContained(result.output);
+  });
+
   test("nested internal ref inside a lifted subtree is itself lifted and rewritten", async () => {
     const graph = await loadFixture("multifile30");
     const result = bundle(graph);

@@ -1,6 +1,6 @@
 # `structure/object-shape`
 
-This rule validates the OpenAPI metadata objects that the other `structure/*` rules don't already cover — the Info, Contact, License, Tag, and External Documentation Objects — against a single version-aware shape table (`packages/linter/src/object-shape.ts`). For each of these objects it checks required fields are present, each field holds a value of the correct JSON type, fields only appear in a document version that allows them (e.g. `info.summary` and `license.identifier` are 3.1-only), mutually exclusive fields don't co-occur (`license.identifier` vs `license.url`), and unknown non-extension keys are flagged (`x-*` extensions are allowed).
+This rule validates OpenAPI objects against a single version-aware shape table (`packages/linter/src/object-shape.ts`). It checks required fields, JSON types, version availability, mutual exclusions, and unknown non-extension keys. The table includes OpenAPI 3.2 additions such as root `$self`, Server `name`, Tag `summary`/`parent`/`kind`, Discriminator `defaultMapping`, and XML `nodeType`.
 
 The same shape table drives the LSP server's key completions, so the keys the editor suggests and the keys the linter accepts can't drift apart. Objects with their own dedicated rules (Schema, Parameter, Response, Security Scheme, Server, Path Item, Operation, ...) are intentionally left to those rules to avoid duplicate diagnostics — for example Server Objects are fully validated by [`structure/server-variables`](server-variables.md).
 

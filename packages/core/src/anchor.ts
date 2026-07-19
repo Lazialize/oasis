@@ -14,7 +14,7 @@ import {
 import type { OpenApiObjectKind } from "./semantic-traversal.ts";
 import type { Range } from "./types.ts";
 import { resolveUriReference, stripUriFragment } from "./uri.ts";
-import { detectVersion } from "./version.ts";
+import { detectVersion, documentBaseUri, hasJsonSchema202012 } from "./version.ts";
 import { resolveAlias } from "./walk.ts";
 
 export interface SchemaResourceEntry {
@@ -51,7 +51,7 @@ function scalarString(node: unknown): string | undefined {
 
 /** Build an index from actual 3.1 Schema Object contexts, never from lookalike OpenAPI/extension data. */
 export function buildAnchorIndex(doc: OasisDocument, options: AnchorIndexOptions = {}): AnchorIndex {
-  const baseUri = stripUriFragment(options.baseUri ?? pathToFileURL(doc.filePath).href);
+  const baseUri = stripUriFragment(options.baseUri ?? documentBaseUri(doc, pathToFileURL(doc.filePath).href));
   const schemaDocument = options.schemaDocument ?? false;
   const cacheKey = `${baseUri}\u0000${schemaDocument}`;
   const docCache = cacheByDocument.get(doc);
@@ -158,7 +158,7 @@ export function buildAnchorIndex(doc: OasisDocument, options: AnchorIndexOptions
     }
   }
 
-  if (isNode(root) && (schemaDocument || detectVersion(doc) === "3.1")) {
+  if (isNode(root) && (schemaDocument || hasJsonSchema202012(detectVersion(doc)))) {
     resource(baseUri, root, baseUri);
     if (schemaDocument) walkSchema(root, baseUri, baseUri, "");
     else scanOpenApi(root, "root");

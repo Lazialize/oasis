@@ -24,9 +24,10 @@ export const KIND_TO_COMPONENT_SECTION: Partial<Record<ObjectKind, string>> = {
   link: "links",
   callback: "callbacks",
   pathItem: "pathItems",
+  mediaType: "mediaTypes",
 };
 
-const HTTP_METHODS = ["get", "put", "post", "delete", "options", "head", "patch", "trace"];
+const HTTP_METHODS = ["get", "put", "post", "delete", "options", "head", "patch", "trace", "query"];
 
 const CORE_KIND_TO_OBJECT_KIND: Partial<Record<OpenApiObjectKind, ObjectKind>> = {
   root: "root",
@@ -42,6 +43,7 @@ const CORE_KIND_TO_OBJECT_KIND: Partial<Record<OpenApiObjectKind, ObjectKind>> =
   callback: "callback",
   example: "example",
   link: "link",
+  "security-scheme": "securityScheme",
   schema: "schema",
 };
 
@@ -135,6 +137,9 @@ type IntermediateState =
   | "componentLinkMap"
   | "componentCallbackMap"
   | "componentPathItemMap"
+  | "componentMediaTypeMap"
+  | "additionalOperationsMap"
+  | "encodingList"
   | "unknown";
 
 type WalkState = ObjectKind | IntermediateState;
@@ -165,6 +170,8 @@ const OBJECT_KINDS: ReadonlySet<string> = new Set<ObjectKind>([
   "securityScheme",
   "oauthFlows",
   "oauthFlow",
+  "discriminator",
+  "xml",
 ]);
 
 /** JSON Schema keywords whose value is a single nested Schema Object. */
@@ -240,9 +247,12 @@ function step(state: WalkState, seg: string): WalkState {
       return "pathItem";
     case "pathItem":
       if (HTTP_METHODS.includes(seg)) return "operation";
+      if (seg === "additionalOperations") return "additionalOperationsMap";
       if (seg === "parameters") return "parameterList";
       if (seg === "servers") return "serverList";
       return "unknown";
+    case "additionalOperationsMap":
+      return "operation";
     case "parameterList":
       return isIndex(seg) ? "parameter" : "unknown";
     case "operation":
@@ -266,14 +276,22 @@ function step(state: WalkState, seg: string): WalkState {
       return "mediaType";
     case "mediaType":
       if (seg === "schema") return "schema";
+      if (seg === "itemSchema") return "schema";
       if (seg === "examples") return "exampleMap";
       if (seg === "encoding") return "encodingMap";
+      if (seg === "prefixEncoding") return "encodingList";
+      if (seg === "itemEncoding") return "encoding";
       return "unknown";
     case "encodingMap":
       return "encoding";
     case "encoding":
       if (seg === "headers") return "headerMap";
+      if (seg === "encoding") return "encodingMap";
+      if (seg === "prefixEncoding") return "encodingList";
+      if (seg === "itemEncoding") return "encoding";
       return "unknown";
+    case "encodingList":
+      return isIndex(seg) ? "encoding" : "unknown";
     case "exampleMap":
       return "example";
     case "responses":
@@ -299,6 +317,11 @@ function step(state: WalkState, seg: string): WalkState {
       if (SCHEMA_SINGLE.has(seg)) return "schema";
       if (SCHEMA_SEQ.has(seg)) return "schemaList";
       if (seg === "externalDocs") return "externalDocs";
+      if (seg === "discriminator") return "discriminator";
+      if (seg === "xml") return "xml";
+      return "unknown";
+    case "discriminator":
+    case "xml":
       return "unknown";
     case "schemaPropMap":
       return "schema";
@@ -315,6 +338,7 @@ function step(state: WalkState, seg: string): WalkState {
       if (seg === "links") return "componentLinkMap";
       if (seg === "callbacks") return "componentCallbackMap";
       if (seg === "pathItems") return "componentPathItemMap";
+      if (seg === "mediaTypes") return "componentMediaTypeMap";
       return "unknown";
     case "componentSchemaMap":
       return "schema";
@@ -336,11 +360,13 @@ function step(state: WalkState, seg: string): WalkState {
       return "callback";
     case "componentPathItemMap":
       return "pathItem";
+    case "componentMediaTypeMap":
+      return "mediaType";
     case "securityScheme":
       if (seg === "flows") return "oauthFlows";
       return "unknown";
     case "oauthFlows":
-      if (seg === "implicit" || seg === "password" || seg === "clientCredentials" || seg === "authorizationCode") {
+      if (seg === "implicit" || seg === "password" || seg === "clientCredentials" || seg === "authorizationCode" || seg === "deviceAuthorization") {
         return "oauthFlow";
       }
       return "unknown";

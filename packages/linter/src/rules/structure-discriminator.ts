@@ -157,6 +157,23 @@ function checkMapping(ctx: RuleContext, doc: OasisDocument, mappingNode: Node, l
   }
 }
 
+function checkDefaultMapping(ctx: RuleContext, doc: OasisDocument, node: Node, label: string): void {
+  if (ctx.version !== "3.2") {
+    ctx.report({ doc, node }, `${label} "discriminator.defaultMapping" is only valid in OpenAPI 3.2.`);
+    return;
+  }
+  if (!isScalar(node) || typeof node.value !== "string" || node.value === "") {
+    ctx.report({ doc, node }, `${label} "discriminator.defaultMapping" must be a non-empty string.`);
+    return;
+  }
+  const target = classifyMappingValue(node.value);
+  if (target.kind === "external") return;
+  const result = resolveRef(ctx.graph, doc, target.ref);
+  if (!result.ok) {
+    ctx.report({ doc, node }, `${label} "discriminator.defaultMapping" -> "${node.value}" does not resolve to a schema in the workspace.`);
+  }
+}
+
 function checkDiscriminator(ctx: RuleContext, doc: OasisDocument, schemaNode: Node, label: string): void {
   if (!isMap(schemaNode)) return;
   const discNode = childAt(schemaNode, "discriminator");
@@ -176,6 +193,18 @@ function checkDiscriminator(ctx: RuleContext, doc: OasisDocument, schemaNode: No
 
   const mappingNode = childAt(discNode, "mapping");
   if (mappingNode) checkMapping(ctx, doc, mappingNode, label);
+  const defaultMappingNode = childAt(discNode, "defaultMapping");
+  if (defaultMappingNode) checkDefaultMapping(ctx, doc, defaultMappingNode, label);
+
+  if (ctx.version === "3.2") {
+    const ownShape = effectiveSchemaHas(ctx, doc, schemaNode, propertyName);
+    if (ownShape.complete && ownShape.hasProperty && !ownShape.hasRequired && !defaultMappingNode) {
+      ctx.report(
+        { doc, node: discNode },
+        `${label} has an optional discriminator property "${propertyName}" and must define "defaultMapping" in OpenAPI 3.2.`,
+      );
+    }
+  }
 
   const oneOf = childAt(schemaNode, "oneOf");
   const anyOf = childAt(schemaNode, "anyOf");

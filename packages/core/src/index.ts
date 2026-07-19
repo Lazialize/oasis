@@ -18,12 +18,13 @@ export {
 } from "./pointer.ts";
 
 export type { OpenApiVersion } from "./version.ts";
-export { detectVersion } from "./version.ts";
+export { detectVersion, documentBaseUri, hasJsonSchema202012 } from "./version.ts";
 
 export {
   isNamedEntryContainer,
   NAMED_ENTRY_CONTAINER_KEYS,
   NAMED_ENTRY_CONTAINER_KEYS_31,
+  NAMED_ENTRY_CONTAINER_KEYS_32,
 } from "./named-containers.ts";
 
 export type { FileSystem } from "./filesystem.ts";

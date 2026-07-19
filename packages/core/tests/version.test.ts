@@ -34,6 +34,12 @@ describe("detectVersion", () => {
     expect(detectVersion(doc("3.1"))).toBe("3.1");
   });
 
+  test("detects OpenAPI 3.2", () => {
+    expect(detectVersion(doc("3.2.0"))).toBe("3.2");
+    expect(detectVersion(doc("3.2.4"))).toBe("3.2");
+    expect(detectVersion(doc("3.2"))).toBe("3.2");
+  });
+
   test("rejects versions like 3.10.0 that resemble 3.1 but are different", () => {
     // 3.10 should NOT match 3.1; the regex ensures the minor version is exactly 1, not 10
     expect(detectVersion(doc("3.10.0"))).toBeUndefined();
@@ -43,6 +49,7 @@ describe("detectVersion", () => {
   test("handles prerelease versions with hyphen", () => {
     expect(detectVersion(doc("3.0.0-rc1"))).toBe("3.0");
     expect(detectVersion(doc("3.1.0-rc1"))).toBe("3.1");
+    expect(detectVersion(doc("3.2.0-rc1"))).toBe("3.2");
     expect(detectVersion(doc("3.0-rc1"))).toBe("3.0");
     expect(detectVersion(doc("3.1-rc1"))).toBe("3.1");
   });
@@ -67,6 +74,6 @@ describe("detectVersion", () => {
     expect(detectVersion(doc("4.0.0"))).toBeUndefined();
     expect(detectVersion(doc("not-a-version"))).toBeUndefined();
     expect(detectVersion(doc("3"))).toBeUndefined();
-    expect(detectVersion(doc("3.2"))).toBeUndefined();
+    expect(detectVersion(doc("3.20"))).toBeUndefined();
   });
 });
