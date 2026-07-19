@@ -7,7 +7,7 @@ Configurable casing checks for four independent naming targets: operation IDs, c
 ## Version notes
 
 - **Operation IDs and components** are walked via the shared operation/document iterators, which on 3.1 documents include `webhooks` operations alongside `paths` operations.
-- **Component names** (`componentName`) check every `components/*` group covered by `COMPONENT_SECTIONS` — `schemas`, `responses`, `parameters`, `examples`, `requestBodies`, `headers`, `securitySchemes`, `links`, `callbacks` — and additionally `components/pathItems`, the 3.1-only section for reusable Path Item Objects. On a 3.0 document `pathItems` simply won't appear, so this is transparent across versions.
+- **Component names** (`componentName`) check every supported `components/*` group, including `pathItems` in 3.1/3.2 and `mediaTypes` in 3.2.
 - **Property names** (`propertyName`) recurse into schemas reachable via `properties`, `items`, `additionalProperties`, `allOf`, `oneOf`, and `anyOf`. On 3.1 documents, `patternProperties` keys are deliberately *not* checked, since those keys are regular expressions, not literal property names, and would produce nonsensical casing violations.
 - **Numeric bounds and other keywords are unaffected** — this rule is unrelated to schema validation; its only version sensitivity is the `pathItems` component section and the `patternProperties` exclusion above.
 

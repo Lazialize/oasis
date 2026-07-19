@@ -24,10 +24,11 @@ export type OpenApiObjectKind =
   | "callback"
   | "example"
   | "link"
+  | "security-scheme"
   | "schema";
 
 /** HTTP method keys that introduce an Operation Object under a Path Item Object. */
-export const HTTP_METHODS = new Set(["get", "put", "post", "delete", "options", "head", "patch", "trace"]);
+export const HTTP_METHODS = new Set(["get", "put", "post", "delete", "options", "head", "patch", "trace", "query"]);
 
 /** JSON Schema 2020-12 applicator keywords whose value is a single subschema. */
 export const SINGLE_SCHEMA_KEYS = new Set([
@@ -65,9 +66,11 @@ export function directObjectKind(
   if (!schema31 || key === undefined) return undefined;
   if (parentKind === "path-item" && HTTP_METHODS.has(key)) return "operation";
   if (parentKind === "operation" && key === "requestBody") return "request-body";
-  if ((parentKind === "parameter" || parentKind === "header" || parentKind === "media-type") && key === "schema") {
+  if ((parentKind === "parameter" || parentKind === "header" || parentKind === "media-type") &&
+    (key === "schema" || key === "itemSchema")) {
     return "schema";
   }
+  if ((parentKind === "media-type" || parentKind === "encoding") && key === "itemEncoding") return "encoding";
   if (parentKind === "callback" && !key.startsWith("x-")) return "path-item";
   if (parentKind === "schema" && (SINGLE_SCHEMA_KEYS.has(key) || SEQUENCE_SCHEMA_KEYS.has(key))) return "schema";
   return undefined;
@@ -99,12 +102,17 @@ export function containerEntryKind(
     if (key === "responses") return "response";
     if (key === "pathItems") return "path-item";
     if (key === "callbacks") return "callback";
+    if (key === "mediaTypes") return "media-type";
+    if (key === "securitySchemes") return "security-scheme";
   }
+  if (parentKind === "path-item" && key === "additionalOperations") return "operation";
   if ((parentKind === "path-item" || parentKind === "operation") && key === "parameters") return "parameter";
   if (parentKind === "operation" && key === "responses") return "response";
   if (parentKind === "operation" && key === "callbacks") return "callback";
   if (parentKind === "response" && key === "headers") return "header";
   if (parentKind === "media-type" && key === "encoding") return "encoding";
+  if ((parentKind === "media-type" || parentKind === "encoding") && key === "prefixEncoding") return "encoding";
+  if (parentKind === "encoding" && key === "encoding") return "encoding";
   if (parentKind === "encoding" && key === "headers") return "header";
   if (
     (parentKind === "parameter" ||

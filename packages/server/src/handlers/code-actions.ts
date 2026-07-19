@@ -185,7 +185,7 @@ function buildAddOperationId(
 ): CodeActionResult | undefined {
   if (!/is missing an operationId/.test(diag.message)) return undefined;
   const { start, end } = toRangeOffsets(doc, diag.range);
-  const ops = iterateOperations(graph, entryDoc);
+  const ops = iterateOperations(graph, entryDoc, detectVersion(entryDoc));
   const op = ops.find((o) => o.doc.filePath === doc.filePath && matchesNodeRange(o.node, start, end));
   if (!op) return undefined;
 
@@ -207,7 +207,7 @@ function buildAddDescription(
   index: number,
 ): CodeActionResult | undefined {
   const { start, end } = toRangeOffsets(doc, diag.range);
-  const op = iterateOperations(graph, entryDoc).find((o) => o.doc.filePath === doc.filePath && matchesNodeRange(o.node, start, end));
+  const op = iterateOperations(graph, entryDoc, detectVersion(entryDoc)).find((o) => o.doc.filePath === doc.filePath && matchesNodeRange(o.node, start, end));
   if (!op) return undefined;
   return buildInsertFirstKeyAction(op.doc, op.node, "description: TODO", "Add description", index);
 }
@@ -345,7 +345,7 @@ function buildAddPathParam(
 ): CodeActionResult | undefined {
   const { start, end } = toRangeOffsets(doc, diag.range);
 
-  for (const pathItem of iteratePathItems(graph, entryDoc)) {
+  for (const pathItem of iteratePathItems(graph, entryDoc, detectVersion(entryDoc))) {
     if (!isMap(pathItem.node)) continue;
 
     // The "missing declared param" diagnostic is attached to the path template's key (see
@@ -369,6 +369,11 @@ function buildAddPathParam(
       if (resolved.doc.filePath === doc.filePath && matchesNodeRange(resolved.node, start, end)) {
         return buildParamFix(graph, resolved.doc, resolved.node, pathItem.template, diag, index);
       }
+    }
+  }
+  for (const op of iterateOperations(graph, entryDoc, detectVersion(entryDoc))) {
+    if (op.doc.filePath === doc.filePath && matchesNodeRange(op.node, start, end)) {
+      return buildParamFix(graph, op.doc, op.node, op.pathItem.template, diag, index);
     }
   }
   return undefined;
@@ -783,7 +788,7 @@ function buildInlineRef(graph: WorkspaceGraph, entryDoc: OasisDocument, doc: Oas
   // 3.1 (JSON Schema) gives siblings of `$ref` meaning; 3.0 ignores them. Only offer the action
   // when inlining can't silently drop sibling keys.
   const version = detectVersion(entryDoc);
-  if (version === "3.1" && refNode.items.length > 1) return undefined;
+  if (version !== "3.0" && refNode.items.length > 1) return undefined;
 
   // A whole Path Item behind a $ref (a direct entry of `paths`/`webhooks`) is large/structural;
   // not supported for now.

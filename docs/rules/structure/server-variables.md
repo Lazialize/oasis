@@ -6,7 +6,7 @@ This rule checks the shape of every Server Object, and its `variables` against t
 
 ## Version notes
 
-No version-specific behavior — this rule applies identically to OpenAPI 3.0 and 3.1 documents.
+OpenAPI 3.2 adds the optional string `name` field to Server Objects; this rule accepts and type-checks it only for 3.2. URL template and variable checks otherwise apply identically across supported versions.
 
 ## Options
 

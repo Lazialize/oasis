@@ -1,12 +1,12 @@
 # `structure/xml`
 
-This rule checks the Schema Object `xml` field in every schema in the document (including inline ones, walked through `properties`, `items`, `allOf`/`oneOf`/`anyOf`, and `additionalProperties`): only the known keys `name`, `namespace`, `prefix`, `attribute`, `wrapped` (plus `x-` extensions) are allowed; `name`/`namespace`/`prefix` must be strings and `attribute`/`wrapped` must be booleans; and `namespace`, when present, should look like an absolute URI (a `scheme:` prefix). The `xml` field only matters to tooling that generates or validates XML representations of a schema, so a malformed or misnamed key here is easy to miss visually but breaks XML (de)serialization silently for any consumer that reads it — this rule surfaces that early.
+This rule checks the Schema Object `xml` field in every schema in the document (including inline ones, walked through `properties`, `items`, `allOf`/`oneOf`/`anyOf`, and `additionalProperties`): known keys and primitive types are validated, and `namespace`, when present, should look like an absolute URI. OpenAPI 3.2's `nodeType` must be one of `element`, `attribute`, `text`, `cdata`, or `none`, and cannot coexist with the legacy `attribute` or `wrapped` fields.
 
 **Default severity:** `error`
 
 ## Version notes
 
-No version-specific behavior — this rule applies identically to OpenAPI 3.0 and 3.1 documents.
+OpenAPI 3.0 and 3.1 support `name`, `namespace`, `prefix`, `attribute`, and `wrapped`. OpenAPI 3.2 adds `nodeType` and makes it mutually exclusive with `attribute` and `wrapped`.
 
 ## Options
 

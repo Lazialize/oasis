@@ -313,7 +313,7 @@ function checkObject(
   // by neither `properties` nor `patternProperties`. Compiled patterns that aren't valid JS regexes
   // are skipped (no crash, no false positive) but conservatively treated as matching nothing.
   const patternMatched = new Set<string>();
-  const patternPropertiesNode = env.version === "3.1" ? childAt(schema, "patternProperties") : undefined;
+  const patternPropertiesNode = env.version !== "3.0" ? childAt(schema, "patternProperties") : undefined;
   if (isMap(patternPropertiesNode)) {
     const patterns: { re: RegExp; schema: Node }[] = [];
     for (const pair of patternPropertiesNode.items) {
@@ -374,7 +374,7 @@ function checkArray(env: ValidateEnv, doc: OasisDocument, schema: Node, exampleD
   }
 
   let startIdx = 0;
-  const prefixItemsNode = env.version === "3.1" ? childAt(schema, "prefixItems") : undefined;
+  const prefixItemsNode = env.version !== "3.0" ? childAt(schema, "prefixItems") : undefined;
   if (isSeq(prefixItemsNode)) {
     for (let i = 0; i < prefixItemsNode.items.length; i++) {
       const itemExample = exampleNode.items[i];
@@ -480,7 +480,7 @@ function checkSchema(
   // siblings by following the `$ref`. In 3.0 the siblings are ignored per spec, so fall through to
   // the normal resolve-and-check path below.
   const raw = resolveAlias(schemaLoc.node) ?? schemaLoc.node;
-  if (env.version === "3.1" && isRefWithSiblings(raw)) {
+  if (env.version !== "3.0" && isRefWithSiblings(raw)) {
     const failures: ExampleFailure[] = [];
     const target = resolveSchema(env, { doc: schemaLoc.doc, node: raw });
     if (target !== "unresolved") {

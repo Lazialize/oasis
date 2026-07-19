@@ -6,7 +6,7 @@ Flags components declared under `components/*` that are never referenced anywher
 
 ## Version notes
 
-This rule walks operations (via the shared operation iterator) to collect `security` requirement usage, which includes 3.1 `webhooks` operations alongside `paths` operations — a security scheme referenced only from a webhook's `security` block is correctly treated as used. `components/pathItems`, the 3.1-only component section for reusable Path Item Objects, is explicitly excluded from this rule's unused-detection (see `COMPONENT_CATEGORIES` in the source, which filters it out of the shared `COMPONENT_SECTIONS` list) — unused-detection for that section isn't supported yet, so entries there are never flagged regardless of version.
+This rule walks all version-appropriate operations to collect component usage, including 3.1/3.2 `webhooks` and 3.2 `query`/`additionalOperations`. OpenAPI 3.2 `components/mediaTypes` entries participate in unused detection. `components/pathItems` remains explicitly excluded because unused detection for that section is not yet supported.
 
 ## Options
 

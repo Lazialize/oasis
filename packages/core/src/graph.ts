@@ -1,5 +1,5 @@
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { isNode } from "yaml";
+import { isMap, isNode, isScalar } from "yaml";
 import type { Node } from "yaml";
 import { buildAnchorIndex, resolveAnchor } from "./anchor.ts";
 import type { AnchorIndex, SchemaResourceEntry } from "./anchor.ts";
@@ -12,7 +12,8 @@ import { findRefs, parseRefString, resolveRef } from "./ref.ts";
 import type { FoundRef, OpenApiObjectKind } from "./ref.ts";
 import type { Diagnostic, Range } from "./types.ts";
 import { resolveUriReference, stripUriFragment, uriScheme } from "./uri.ts";
-import { detectVersion } from "./version.ts";
+import { detectVersion, documentBaseUri } from "./version.ts";
+import type { OpenApiVersion } from "./version.ts";
 import { resolveAlias } from "./walk.ts";
 
 export interface GraphResource extends SchemaResourceEntry {
@@ -67,8 +68,9 @@ export async function loadWorkspaceGraph(fs: FileSystem, entryPath: string): Pro
     const key = `${doc.filePath}\u0000${schemaDocument}`;
     const cached = indexed.get(key);
     if (cached) return cached;
-    const index = buildAnchorIndex(doc, { baseUri: pathToFileURL(doc.filePath).href, schemaDocument });
     const retrievalUri = pathToFileURL(doc.filePath).href;
+    const baseUri = documentBaseUri(doc, retrievalUri);
+    const index = buildAnchorIndex(doc, { baseUri, schemaDocument });
     const root = doc.yamlDoc.contents;
     // Every loaded document has a retrieval resource even when it is an external OpenAPI object
     // rather than a standalone Schema Document. Schema indexing remains gated independently.
@@ -159,10 +161,18 @@ export async function loadWorkspaceGraph(fs: FileSystem, entryPath: string): Pro
     return { node: anchor.node, baseUri };
   }
 
-  async function scanScope(doc: OasisDocument, node: Node, kind: OpenApiObjectKind | undefined, baseUri: string): Promise<void> {
+  async function scanScope(
+    doc: OasisDocument,
+    node: Node,
+    kind: OpenApiObjectKind | undefined,
+    baseUri: string,
+    inheritedVersion?: OpenApiVersion,
+    securitySchemeNames?: ReadonlySet<string>,
+  ): Promise<void> {
     if (!markScanned(node, kind, baseUri)) return;
     indexDocument(doc, kind === "schema" && detectVersion(doc) === undefined);
-    for (const ref of findRefs(doc, node, kind, baseUri)) {
+    const version = detectVersion(doc) ?? inheritedVersion;
+    for (const ref of findRefs(doc, node, kind, baseUri, version, securitySchemeNames)) {
       recordRef(doc.filePath, ref);
       const { pointer } = parseRefString(ref.value);
       // A `file:` resourceUri is canonicalized against the physical identity the target was (or
@@ -183,7 +193,7 @@ export async function loadWorkspaceGraph(fs: FileSystem, entryPath: string): Pro
       if (!resource) continue;
       const target = targetScope(resource, pointer);
       if (target) {
-        await scanScope(resource.doc, target.node, ref.targetKind, target.baseUri);
+        await scanScope(resource.doc, target.node, ref.targetKind, target.baseUri, version, securitySchemeNames);
       }
     }
   }
@@ -191,8 +201,28 @@ export async function loadWorkspaceGraph(fs: FileSystem, entryPath: string): Pro
   const canonicalEntry = fs.canonicalize(entryPath);
   const entryDoc = await loadFile(canonicalEntry);
   if (entryDoc && isNode(entryDoc.yamlDoc.contents)) {
+    const securitySchemeNames = new Set<string>();
+    const root = entryDoc.yamlDoc.contents;
+    if (isMap(root)) {
+      const components = root.items.find((pair) => isScalar(pair.key) && pair.key.value === "components")?.value;
+      if (isMap(components)) {
+        const schemes = components.items.find((pair) => isScalar(pair.key) && pair.key.value === "securitySchemes")?.value;
+        if (isMap(schemes)) {
+          for (const pair of schemes.items) {
+            if (isScalar(pair.key)) securitySchemeNames.add(String(pair.key.value));
+          }
+        }
+      }
+    }
     indexDocument(entryDoc, false);
-    await scanScope(entryDoc, entryDoc.yamlDoc.contents, undefined, pathToFileURL(entryDoc.filePath).href);
+    await scanScope(
+      entryDoc,
+      entryDoc.yamlDoc.contents,
+      undefined,
+      documentBaseUri(entryDoc, pathToFileURL(entryDoc.filePath).href),
+      detectVersion(entryDoc),
+      securitySchemeNames,
+    );
   }
   const graph = { entryPath: canonicalEntry, documents, diagnostics, fileSystem: fs, references, resources, collidedResourceUris };
   detectReferenceCycles(graph, referenceOccurrences);

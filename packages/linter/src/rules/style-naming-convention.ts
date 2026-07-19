@@ -14,7 +14,7 @@ type OptionKey = (typeof OPTION_KEYS)[number];
 
 export type NamingConventionOptions = Partial<Record<OptionKey, CasingStyle>>;
 
-/** Groups under `components/*` (and, in 3.1, `components/pathItems`) whose keys name a component. */
+/** Groups under `components/*` whose keys name a reusable component. */
 const COMPONENT_CATEGORIES = [
   "schemas",
   "responses",
@@ -26,6 +26,7 @@ const COMPONENT_CATEGORIES = [
   "links",
   "callbacks",
   "pathItems",
+  "mediaTypes",
 ] as const;
 
 /**

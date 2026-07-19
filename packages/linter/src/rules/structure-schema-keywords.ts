@@ -6,7 +6,7 @@ import { childAt, isRefObject, keyToString } from "../util.ts";
 import type { Rule, RuleContext } from "../types.ts";
 
 /**
- * JSON Schema 2020-12 keywords available in OpenAPI 3.1's Schema Object dialect but not in
+ * JSON Schema 2020-12 keywords available in OpenAPI 3.1/3.2's Schema Object dialect but not in
  * OpenAPI 3.0's (a restricted subset of JSON Schema Draft 4-ish). `nullable` is the inverse case
  * (3.0-only, flagged on 3.1) and is intentionally not handled here — `structure/schema-nullable`
  * already covers it, along with 3.0 `type` arrays and `type: null`.
@@ -72,7 +72,7 @@ function checkVersionOnlyKeywords(ctx: RuleContext, doc: OasisDocument, schema: 
   for (const key of SCHEMA_31_ONLY_KEYWORDS) {
     const node = childAt(schema, key);
     if (node) {
-      ctx.report({ doc, node }, `"${key}" is not supported in OpenAPI 3.0; it's a JSON Schema 2020-12 keyword available in OpenAPI 3.1.`);
+      ctx.report({ doc, node }, `"${key}" is not supported in OpenAPI 3.0; it's a JSON Schema 2020-12 keyword available in OpenAPI 3.1 or 3.2.`);
     }
   }
 }
@@ -82,8 +82,8 @@ function checkExclusive(ctx: RuleContext, doc: OasisDocument, schema: Node, key:
   if (!node) return;
   if (ctx.version === "3.0" && !isBooleanScalar(node)) {
     ctx.report({ doc, node }, `"${key}" must be a boolean in OpenAPI 3.0 (used alongside "minimum"/"maximum"); the numeric form is a 3.1 (JSON Schema 2020-12) feature.`);
-  } else if (ctx.version === "3.1" && !isNumberScalar(node)) {
-    ctx.report({ doc, node }, `"${key}" must be a number in OpenAPI 3.1 (JSON Schema 2020-12); the boolean form alongside "minimum"/"maximum" is OpenAPI 3.0.`);
+  } else if (ctx.version !== "3.0" && !isNumberScalar(node)) {
+    ctx.report({ doc, node }, `"${key}" must be a number in OpenAPI 3.1 or 3.2 (JSON Schema 2020-12); the boolean form alongside "minimum"/"maximum" is OpenAPI 3.0.`);
   }
 }
 
@@ -104,38 +104,36 @@ function checkType(ctx: RuleContext, doc: OasisDocument, schema: Node): void {
     return;
   }
 
-  if (ctx.version === "3.1") {
-    if (isScalar(typeNode)) {
-      if (typeof typeNode.value !== "string") {
-        ctx.report({ doc, node: typeNode }, '"type" must be a string or array of strings in OpenAPI 3.1.');
-      } else if (!TYPE_NAMES_31.has(typeNode.value)) {
-        ctx.report({ doc, node: typeNode }, `"type: ${typeNode.value}" is not a valid JSON Schema type.`);
-      }
-      return;
+  if (isScalar(typeNode)) {
+    if (typeof typeNode.value !== "string") {
+      ctx.report({ doc, node: typeNode }, '"type" must be a string or array of strings in OpenAPI 3.1 or 3.2.');
+    } else if (!TYPE_NAMES_31.has(typeNode.value)) {
+      ctx.report({ doc, node: typeNode }, `"type: ${typeNode.value}" is not a valid JSON Schema type.`);
     }
-    if (isSeq(typeNode)) {
-      if (typeNode.items.length === 0) {
-        ctx.report({ doc, node: typeNode }, '"type" array must contain at least one type (JSON Schema 2020-12 requires a non-empty array).');
-        return;
-      }
-      const seenValues = new Set<string>();
-      for (const item of typeNode.items) {
-        if (!isNode(item) || !isScalar(item) || typeof item.value !== "string") {
-          ctx.report({ doc, node: isNode(item) ? item : typeNode }, '"type" array entries must be strings.');
-          continue;
-        }
-        if (!TYPE_NAMES_31.has(item.value)) {
-          ctx.report({ doc, node: item }, `"type: ${item.value}" is not a valid JSON Schema type.`);
-        }
-        if (seenValues.has(item.value)) {
-          ctx.report({ doc, node: item }, `"type" array contains duplicate entry "${item.value}".`);
-        }
-        seenValues.add(item.value);
-      }
-      return;
-    }
-    ctx.report({ doc, node: typeNode }, '"type" must be a string or array of strings in OpenAPI 3.1.');
+    return;
   }
+  if (isSeq(typeNode)) {
+    if (typeNode.items.length === 0) {
+      ctx.report({ doc, node: typeNode }, '"type" array must contain at least one type (JSON Schema 2020-12 requires a non-empty array).');
+      return;
+    }
+    const seenValues = new Set<string>();
+    for (const item of typeNode.items) {
+      if (!isNode(item) || !isScalar(item) || typeof item.value !== "string") {
+        ctx.report({ doc, node: isNode(item) ? item : typeNode }, '"type" array entries must be strings.');
+        continue;
+      }
+      if (!TYPE_NAMES_31.has(item.value)) {
+        ctx.report({ doc, node: item }, `"type: ${item.value}" is not a valid JSON Schema type.`);
+      }
+      if (seenValues.has(item.value)) {
+        ctx.report({ doc, node: item }, `"type" array contains duplicate entry "${item.value}".`);
+      }
+      seenValues.add(item.value);
+    }
+    return;
+  }
+  ctx.report({ doc, node: typeNode }, '"type" must be a string or array of strings in OpenAPI 3.1 or 3.2.');
 }
 
 function checkNumerics(ctx: RuleContext, doc: OasisDocument, schema: Node): void {
@@ -186,8 +184,8 @@ function checkConsistency(ctx: RuleContext, doc: OasisDocument, schema: Node): v
   const additionalPropertiesIsFalse = !!additionalProperties && isScalar(additionalProperties) && additionalProperties.value === false;
   if (isSeq(requiredNode) && isMap(propertiesNode) && additionalPropertiesIsFalse) {
     const propertyNames = new Set(propertiesNode.items.map((p) => keyToString(p.key)));
-    // `patternProperties` is 3.1-only (JSON Schema 2020-12); on 3.0 there's no such escape hatch.
-    const patternRegexes = ctx.version === "3.1" ? compiledPatternProperties(schema) : [];
+    // `patternProperties` is available in 3.1+ (JSON Schema 2020-12); on 3.0 there's no such escape hatch.
+    const patternRegexes = ctx.version !== "3.0" ? compiledPatternProperties(schema) : [];
     for (const item of requiredNode.items) {
       const name = stringValue(isNode(item) ? item : undefined);
       if (name !== undefined && !propertyNames.has(name) && !patternRegexes.some((re) => re.test(name))) {
@@ -200,7 +198,7 @@ function checkConsistency(ctx: RuleContext, doc: OasisDocument, schema: Node): v
   }
 }
 
-/** Compiled `patternProperties` (3.1) regexes on `schema`, skipping any that fail to compile. */
+/** Compiled `patternProperties` (3.1+) regexes on `schema`, skipping any that fail to compile. */
 function compiledPatternProperties(schema: Node): RegExp[] {
   const patternPropertiesNode = childAt(schema, "patternProperties");
   if (!isMap(patternPropertiesNode)) return [];
@@ -238,7 +236,7 @@ function checkRequired(ctx: RuleContext, doc: OasisDocument, schema: Node): void
     return;
   }
   // OpenAPI 3.0's Schema Object requires "required" to have at least one element; JSON Schema
-  // 2020-12 (OpenAPI 3.1) permits an empty array (it's simply vacuously satisfied).
+  // 2020-12 (OpenAPI 3.1/3.2) permits an empty array (it's simply vacuously satisfied).
   if (node.items.length === 0) {
     if (ctx.version === "3.0") {
       ctx.report({ doc, node }, '"required" must be a non-empty array of strings in OpenAPI 3.0.');
@@ -274,13 +272,13 @@ function checkItems(ctx: RuleContext, doc: OasisDocument, schema: Node): void {
       { doc, node },
       ctx.version === "3.0"
         ? '"items" must be a single schema object in OpenAPI 3.0; tuple-typed arrays are not supported.'
-        : '"items" must be a single schema object in OpenAPI 3.1; use "prefixItems" for tuple validation.',
+        : '"items" must be a single schema object in OpenAPI 3.1 or 3.2; use "prefixItems" for tuple validation.',
     );
     return;
   }
-  // In OpenAPI 3.1 (JSON Schema 2020-12) a Schema may be a boolean (`true`/`false`) as well as an
+  // In OpenAPI 3.1/3.2 (JSON Schema 2020-12) a Schema may be a boolean (`true`/`false`) as well as an
   // object; OpenAPI 3.0's Schema Object has no boolean form.
-  if (ctx.version === "3.1" && isBooleanScalar(node)) return;
+  if (ctx.version !== "3.0" && isBooleanScalar(node)) return;
   if (!isMap(node)) {
     ctx.report({ doc, node }, '"items" must be a schema object.');
   }
@@ -338,7 +336,7 @@ export const structureSchemaKeywords: Rule = {
     "Validates Schema Object keywords against the document's dialect (OpenAPI 3.0's restricted subset vs 3.1's JSON Schema 2020-12), value types (type, numeric bounds, pattern, required, enum, items, properties, additionalProperties, format), internal consistency (min/max contradictions, required properties excluded by additionalProperties: false), and $ref sibling handling.",
   defaultSeverity: "error",
   check(ctx) {
-    if (ctx.version !== "3.0" && ctx.version !== "3.1") return;
+    if (ctx.version !== "3.0" && ctx.version !== "3.1" && ctx.version !== "3.2") return;
 
     const seen = new Set<Node>();
     for (const site of iterateSchemas(ctx.graph, ctx.entryDoc, ctx.documents, ctx.version)) {

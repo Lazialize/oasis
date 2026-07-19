@@ -29,7 +29,7 @@ describe("structure/required-fields", () => {
 });
 
 describe("structure/openapi-version", () => {
-  test("flags a non 3.0/3.1 version string", async () => {
+  test("flags a non 3.0/3.1/3.2 version string", async () => {
     const diagnostics = await lintFixture("structure/bad-version.yaml");
     const d = diagnostics.find((d) => d.rule === "structure/openapi-version");
     expect(d).toBeDefined();
@@ -142,10 +142,10 @@ paths: {}
     expect(d).toBeDefined();
   });
 
-  test("rejects an unsupported minor version (3.2.0)", async () => {
+  test("rejects an unsupported minor version (3.3.0)", async () => {
     const fs = new InMemoryFileSystem({
       "/virtual/entry.yaml": `
-openapi: 3.2.0
+openapi: 3.3.0
 info:
   title: T
   version: "1"

@@ -1,5 +1,6 @@
 import { isMap, isNode, isScalar, isSeq } from "yaml";
 import type { Node } from "yaml";
+import { foundRefForNode, isExternalUriReference, resolveRef } from "@oasis/core";
 import type { OasisDocument } from "@oasis/core";
 import { iterateOperations } from "../openapi-walk.ts";
 import { childAt, keyToString, resolveMaybeRef } from "../util.ts";
@@ -74,7 +75,27 @@ function checkSecurityNode(
     if (!isNode(requirement) || !isMap(requirement)) continue;
     for (const pair of requirement.items) {
       const name = keyToString(pair.key);
-      const info = defined.get(name);
+      let info = defined.get(name);
+      if (!info && ctx.version === "3.2" && isScalar(pair.key)) {
+        // In 3.2, a non-component key is a URI reference to a Security Scheme Object. Network
+        // resources are intentionally not fetched by the workspace graph, but are valid; local and
+        // fragment references are resolved so their OAuth scopes can still be checked.
+        if (isExternalUriReference(name) || name.startsWith("//")) {
+          info = { type: undefined, oauth2Scopes: undefined };
+        } else {
+          const occurrence = foundRefForNode(ctx.graph, doc, pair.key);
+          const result = resolveRef(ctx.graph, doc, occurrence ?? name);
+          if (result.ok) {
+            info = readSchemeInfo(ctx, result.doc, result.node);
+          } else {
+            ctx.report(
+              { doc, node: pair.key },
+              `${label} references security scheme URI "${name}", which could not be resolved.`,
+            );
+            continue;
+          }
+        }
+      }
       if (!info) {
         const node = isNode(pair.key) ? pair.key : requirement;
         ctx.report(

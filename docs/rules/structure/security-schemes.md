@@ -1,12 +1,12 @@
 # `structure/security-schemes`
 
-This rule checks every Security Scheme Object under `components/securitySchemes` (resolving `$ref`s first, deduplicating by resolved location): it must have a `type` that's recognized for the document's OpenAPI version, and the fields required by that type must be present and correctly shaped — `apiKey` needs a non-empty string `name` and an `in` of `query`/`header`/`cookie`; `http` needs a non-empty string `scheme`; `oauth2` needs a `flows` object defining at least one of `implicit`/`password`/`clientCredentials`/`authorizationCode`, and each declared flow needs its required URL field(s) (`authorizationUrl` and/or `tokenUrl` depending on flow type) plus a `scopes` object; `openIdConnect` needs a non-empty string `openIdConnectUrl`. A security scheme with a missing or wrong-shaped required field will typically be silently ignored or misconfigured by client/server code generators, leaving an API that looks secured in the spec but isn't actually enforceable in generated code.
+This rule checks every Security Scheme Object under `components/securitySchemes` (resolving `$ref`s first, deduplicating by resolved location): it must have a `type` recognized for the document's OpenAPI version, and the fields required by that type must be present and correctly shaped. It validates API key, HTTP, OAuth2, OpenID Connect, and mutual TLS schemes, including each OAuth flow's required URLs and `scopes` object.
 
 **Default severity:** `error`
 
 ## Version notes
 
-OpenAPI 3.1 adds a `mutualTLS` scheme type (mTLS via the TLS layer, no extra required fields beyond `type`) that does not exist in 3.0; this rule accepts `type: mutualTLS` only on 3.1 documents. On a 3.0 document, `type: mutualTLS` is reported as an unrecognized `type` value (`expected one of: apiKey, http, oauth2, openIdConnect`). All other type-specific required-field checks (apiKey, http, oauth2, openIdConnect) apply identically to both versions.
+OpenAPI 3.1 adds `mutualTLS`, which remains available in 3.2. OpenAPI 3.2 additionally adds the OAuth2 `deviceAuthorization` flow (requiring `deviceAuthorizationUrl`, `tokenUrl`, and `scopes`) plus the optional `oauth2MetadataUrl` and `deprecated` fields. These additions are rejected on earlier versions.
 
 ## Options
 

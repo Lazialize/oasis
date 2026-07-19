@@ -120,7 +120,7 @@ export const exampleSchemaMatch: Rule = {
     'Checks that "example"/"examples[].value" values conform to their schema, version-aware (3.0 dialect vs 3.1 / JSON Schema 2020-12). Validates a hand-rolled subset of keywords (see README); schemas using "not", "discriminator", or an unresolved $ref are skipped.',
   defaultSeverity: "warn",
   check(ctx) {
-    if (ctx.version !== "3.0" && ctx.version !== "3.1") return;
+    if (ctx.version !== "3.0" && ctx.version !== "3.1" && ctx.version !== "3.2") return;
     const env: ValidateEnv = { graph: ctx.graph, version: ctx.version };
     const seen = new Set<Node>();
 

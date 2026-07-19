@@ -1,6 +1,6 @@
 # Oasis
 
-OpenAPI 3.0/3.1 toolkit: linter, multi-file bundler, LSP server, and a VS Code extension. Bun workspaces monorepo. Architecture and design constraints: @DESIGN.md. CLI usage and built-in rule docs: README.md.
+OpenAPI 3.0/3.1/3.2 toolkit: linter, multi-file bundler, LSP server, and a VS Code extension. Bun workspaces monorepo. Architecture and design constraints: @DESIGN.md. CLI usage and built-in rule docs: README.md.
 
 ## Commands
 

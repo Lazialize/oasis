@@ -23,7 +23,7 @@ export type FieldType = "string" | "boolean" | "number" | "integer" | "object" |
 export interface FieldSpec {
   /** Allowed JSON types for the field's value. Omit for "any type accepted". */
   types?: readonly FieldType[];
-  /** OpenAPI versions this field is legal in. Omit when legal in both 3.0 and 3.1. */
+  /** OpenAPI versions this field is legal in. Omit when legal in every supported version. */
   versions?: readonly OpenApiVersion[];
 }
 
@@ -52,7 +52,8 @@ const S: readonly FieldType[] = ["string"];
 const B: readonly FieldType[] = ["boolean"];
 const A: readonly FieldType[] = ["array"];
 const O: readonly FieldType[] = ["object"];
-const V31: readonly OpenApiVersion[] = ["3.1"];
+const V31: readonly OpenApiVersion[] = ["3.1", "3.2"];
+const V32: readonly OpenApiVersion[] = ["3.2"];
 const V30: readonly OpenApiVersion[] = ["3.0"];
 
 /** Every object kind the shape table describes; also the classification vocabulary the server shares. */
@@ -78,6 +79,8 @@ export type ObjectKind =
   | "link"
   | "callback"
   | "schema"
+  | "discriminator"
+  | "xml"
   | "components"
   | "securityScheme"
   | "oauthFlows"
@@ -92,6 +95,7 @@ const HTTP_METHOD_FIELDS: Record<string, FieldSpec> = {
   head: { types: O },
   patch: { types: O },
   trace: { types: O },
+  query: { types: O, versions: V32 },
 };
 
 /**
@@ -181,6 +185,7 @@ export const OBJECT_SHAPES: Readonly<Record<ObjectKind, ObjectShape>> = {
       // 3.1 only
       webhooks: { types: O, versions: V31 },
       jsonSchemaDialect: { types: S, versions: V31 },
+      $self: { types: S, versions: V32 },
     },
   },
   info: {
@@ -225,6 +230,7 @@ export const OBJECT_SHAPES: Readonly<Record<ObjectKind, ObjectShape>> = {
       url: { types: S },
       description: { types: S },
       variables: { types: O },
+      name: { types: S, versions: V32 },
     },
   },
   serverVariable: {
@@ -254,6 +260,9 @@ export const OBJECT_SHAPES: Readonly<Record<ObjectKind, ObjectShape>> = {
       name: { types: S },
       description: { types: S },
       externalDocs: { types: O },
+      summary: { types: S, versions: V32 },
+      parent: { types: S, versions: V32 },
+      kind: { types: S, versions: V32 },
     },
   },
   pathItem: {
@@ -266,6 +275,7 @@ export const OBJECT_SHAPES: Readonly<Record<ObjectKind, ObjectShape>> = {
       description: { types: S },
       servers: { types: A },
       parameters: { types: A },
+      additionalOperations: { types: O, versions: V32 },
       ...HTTP_METHOD_FIELDS,
     },
   },
@@ -325,6 +335,7 @@ export const OBJECT_SHAPES: Readonly<Record<ObjectKind, ObjectShape>> = {
       example: {},
       examples: { types: O },
       content: { types: O },
+      allowReserved: { types: B, versions: V32 },
       $ref: { types: S },
     },
   },
@@ -351,11 +362,11 @@ export const OBJECT_SHAPES: Readonly<Record<ObjectKind, ObjectShape>> = {
   },
   response: {
     name: "Response Object",
-    required: ["description"],
     extensions: true,
     referenceable: true,
     fields: {
       description: { types: S },
+      summary: { types: S, versions: V32 },
       headers: { types: O },
       content: { types: O },
       links: { types: O },
@@ -370,6 +381,9 @@ export const OBJECT_SHAPES: Readonly<Record<ObjectKind, ObjectShape>> = {
       example: {},
       examples: { types: O },
       encoding: { types: O },
+      itemSchema: { types: O, versions: V32 },
+      prefixEncoding: { types: A, versions: V32 },
+      itemEncoding: { types: O, versions: V32 },
     },
   },
   encoding: {
@@ -381,6 +395,9 @@ export const OBJECT_SHAPES: Readonly<Record<ObjectKind, ObjectShape>> = {
       style: { types: S },
       explode: { types: B },
       allowReserved: { types: B },
+      encoding: { types: O, versions: V32 },
+      prefixEncoding: { types: A, versions: V32 },
+      itemEncoding: { types: O, versions: V32 },
     },
   },
   example: {
@@ -393,6 +410,8 @@ export const OBJECT_SHAPES: Readonly<Record<ObjectKind, ObjectShape>> = {
       description: { types: S },
       value: {},
       externalValue: { types: S },
+      dataValue: { versions: V32 },
+      serializedValue: { types: S, versions: V32 },
       $ref: { types: S },
     },
   },
@@ -428,6 +447,29 @@ export const OBJECT_SHAPES: Readonly<Record<ObjectKind, ObjectShape>> = {
     allowUnknownFields: true,
     fields: SCHEMA_FIELDS,
   },
+  discriminator: {
+    name: "Discriminator Object",
+    required: ["propertyName"],
+    extensions: true,
+    fields: {
+      propertyName: { types: S },
+      mapping: { types: O },
+      defaultMapping: { types: S, versions: V32 },
+    },
+  },
+  xml: {
+    name: "XML Object",
+    extensions: true,
+    mutuallyExclusive: [["nodeType", "attribute"], ["nodeType", "wrapped"]],
+    fields: {
+      name: { types: S },
+      namespace: { types: S },
+      prefix: { types: S },
+      attribute: { types: B },
+      wrapped: { types: B },
+      nodeType: { types: S, versions: V32 },
+    },
+  },
   components: {
     name: "Components Object",
     extensions: true,
@@ -442,6 +484,7 @@ export const OBJECT_SHAPES: Readonly<Record<ObjectKind, ObjectShape>> = {
       links: { types: O },
       callbacks: { types: O },
       pathItems: { types: O, versions: V31 },
+      mediaTypes: { types: O, versions: V32 },
     },
   },
   securityScheme: {
@@ -458,6 +501,8 @@ export const OBJECT_SHAPES: Readonly<Record<ObjectKind, ObjectShape>> = {
       bearerFormat: { types: S },
       flows: { types: O },
       openIdConnectUrl: { types: S },
+      oauth2MetadataUrl: { types: S, versions: V32 },
+      deprecated: { types: B, versions: V32 },
       $ref: { types: S },
     },
   },
@@ -469,6 +514,7 @@ export const OBJECT_SHAPES: Readonly<Record<ObjectKind, ObjectShape>> = {
       password: { types: O },
       clientCredentials: { types: O },
       authorizationCode: { types: O },
+      deviceAuthorization: { types: O, versions: V32 },
     },
   },
   oauthFlow: {
@@ -479,6 +525,7 @@ export const OBJECT_SHAPES: Readonly<Record<ObjectKind, ObjectShape>> = {
       tokenUrl: { types: S },
       refreshUrl: { types: S },
       scopes: { types: O },
+      deviceAuthorizationUrl: { types: S, versions: V32 },
     },
   },
 };

@@ -63,5 +63,6 @@ export const structureObjectShape: Rule = {
       if (!isMap(op.node)) continue;
       validateIn("externalDocs", op.doc, childAt(op.node, "externalDocs"), `"${op.pointer}/externalDocs"`);
     }
+
   },
 };

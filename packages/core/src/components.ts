@@ -1,5 +1,4 @@
-/** Every section that may appear under an OpenAPI document's `components` object
- * (`pathItems` is 3.1-only). */
+/** Every section that may appear under an OpenAPI document's `components` object. */
 export const COMPONENT_SECTIONS = [
   "schemas",
   "parameters",
@@ -11,6 +10,7 @@ export const COMPONENT_SECTIONS = [
   "callbacks",
   "securitySchemes",
   "pathItems",
+  "mediaTypes",
 ] as const;
 
 export type ComponentSection = (typeof COMPONENT_SECTIONS)[number];

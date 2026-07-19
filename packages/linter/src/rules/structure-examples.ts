@@ -6,6 +6,7 @@ import { childAt, isRefObject, keyToString, resolveMaybeRef } from "../util.ts";
 import type { Rule, RuleContext } from "../types.ts";
 
 const ALLOWED_KEYS = new Set(["summary", "description", "value", "externalValue"]);
+const ALLOWED_KEYS_32 = new Set([...ALLOWED_KEYS, "dataValue", "serializedValue"]);
 
 function checkExampleObject(ctx: RuleContext, doc: OasisDocument, node: Node, label: string): void {
   if (!isMap(node) || isRefObject(node)) return;
@@ -13,21 +14,36 @@ function checkExampleObject(ctx: RuleContext, doc: OasisDocument, node: Node, la
   for (const pair of node.items) {
     const key = keyToString(pair.key);
     if (key.startsWith("x-")) continue;
-    if (!ALLOWED_KEYS.has(key) && isNode(pair.key)) {
+    const allowed = ctx.version === "3.2" ? ALLOWED_KEYS_32 : ALLOWED_KEYS;
+    if (!allowed.has(key) && isNode(pair.key)) {
       ctx.report(
         { doc, node: pair.key },
-        `${label} has unknown key "${key}"; expected one of: summary, description, value, externalValue.`,
+        `${label} has unknown key "${key}"; expected one of: ${[...allowed].join(", ")}.`,
       );
     }
   }
 
   const valueNode = childAt(node, "value");
   const externalValueNode = childAt(node, "externalValue");
+  const dataValueNode = childAt(node, "dataValue");
+  const serializedValueNode = childAt(node, "serializedValue");
   if (valueNode && externalValueNode) {
-    ctx.report({ doc, node: externalValueNode }, `${label} must not set both "value" and "externalValue".`);
+    ctx.report({ doc, node: valueNode }, `${label} must not set both "value" and "externalValue".`);
+  }
+  if (valueNode && dataValueNode) {
+    ctx.report({ doc, node: valueNode }, `${label} must not set both "value" and "dataValue".`);
+  }
+  if (valueNode && serializedValueNode) {
+    ctx.report({ doc, node: valueNode }, `${label} must not set both "value" and "serializedValue".`);
+  }
+  if (serializedValueNode && externalValueNode) {
+    ctx.report({ doc, node: serializedValueNode }, `${label} must not set both "serializedValue" and "externalValue".`);
   }
   if (externalValueNode && (!isScalar(externalValueNode) || typeof externalValueNode.value !== "string")) {
     ctx.report({ doc, node: externalValueNode }, `${label} "externalValue" must be a string.`);
+  }
+  if (serializedValueNode && (!isScalar(serializedValueNode) || typeof serializedValueNode.value !== "string")) {
+    ctx.report({ doc, node: serializedValueNode }, `${label} "serializedValue" must be a string.`);
   }
 }
 

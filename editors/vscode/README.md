@@ -2,7 +2,7 @@
 
 A thin [Language Server Protocol](https://microsoft.github.io/language-server-protocol/) client
 for the `oasis` OpenAPI toolkit. It spawns `oasis lsp` and wires it up to VS Code to provide, for
-OpenAPI 3.0/3.1 YAML and JSON documents:
+OpenAPI 3.0/3.1/3.2 YAML and JSON documents:
 
 - **Diagnostics** — lint errors/warnings, updated as you type (debounced).
 - **Go to Definition** — jump from a `$ref` to its target, including across files.

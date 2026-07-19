@@ -34,7 +34,7 @@ export const structureRequiredFields: Rule = {
     }
 
     const hasPaths = !!childAt(root, "paths");
-    if (ctx.version === "3.1") {
+    if (ctx.version === "3.1" || ctx.version === "3.2") {
       const hasWebhooks = !!childAt(root, "webhooks");
       const hasComponents = !!childAt(root, "components");
       if (!hasPaths && !hasWebhooks && !hasComponents) {

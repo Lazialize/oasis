@@ -1,7 +1,7 @@
 import { isMap, isScalar, isNode } from "yaml";
 import type { Node } from "yaml";
 import { detectVersion } from "@oasis/core";
-import type { OasisDocument, Range } from "@oasis/core";
+import type { OasisDocument, OpenApiVersion, Range } from "@oasis/core";
 import { HTTP_METHODS } from "@oasis/linter";
 import { getChildNode, nodeRange } from "../yaml-helpers.ts";
 
@@ -20,7 +20,7 @@ export interface SymbolResult {
  * `iteratePathItems`/workspace symbols use — a top-level `$ref` Path Item simply has no method keys
  * of its own, so it appears as a childless entry.
  */
-function pathItemContainerSymbols(containerNode: Node, doc: OasisDocument): SymbolResult[] {
+function pathItemContainerSymbols(containerNode: Node, doc: OasisDocument, version: OpenApiVersion | undefined): SymbolResult[] {
   const children: SymbolResult[] = [];
   if (!isMap(containerNode)) return children;
   for (const pair of containerNode.items) {
@@ -31,8 +31,17 @@ function pathItemContainerSymbols(containerNode: Node, doc: OasisDocument): Symb
       for (const opPair of pair.value.items) {
         if (!isScalar(opPair.key) || !isNode(opPair.value)) continue;
         const method = String(opPair.key.value);
-        if (!(HTTP_METHODS as readonly string[]).includes(method)) continue;
+        if (!(HTTP_METHODS as readonly string[]).includes(method) || (method === "query" && version !== "3.2")) continue;
         opChildren.push(makeSymbol(method.toUpperCase(), "operation", opPair.value, doc, []));
+      }
+      if (version === "3.2") {
+        const additional = getChildNode(pair.value, "additionalOperations");
+        if (additional && isMap(additional)) {
+          for (const operationPair of additional.items) {
+            if (!isScalar(operationPair.key) || !isNode(operationPair.value)) continue;
+            opChildren.push(makeSymbol(String(operationPair.key.value), "operation", operationPair.value, doc, []));
+          }
+        }
       }
     }
     children.push(makeSymbol(entryName, "namespace", pair.value, doc, opChildren));
@@ -40,28 +49,29 @@ function pathItemContainerSymbols(containerNode: Node, doc: OasisDocument): Symb
   return children;
 }
 
-/** Outline: paths and (3.1) webhooks (one symbol per entry, children per operation), components
+/** Outline: paths and (3.1+) webhooks (one symbol per entry, children per operation), components
  * (per section, per name), info. */
 export function getDocumentSymbols(doc: OasisDocument): SymbolResult[] {
   const root = doc.yamlDoc.contents;
   if (!isMap(root)) return [];
 
   const symbols: SymbolResult[] = [];
+  const version = detectVersion(doc);
 
   const infoNode = getChildNode(root, "info");
   if (infoNode) symbols.push(makeSymbol("info", "info", infoNode, doc, []));
 
   const pathsNode = getChildNode(root, "paths");
   if (pathsNode && isMap(pathsNode)) {
-    symbols.push(makeSymbol("paths", "namespace", pathsNode, doc, pathItemContainerSymbols(pathsNode, doc)));
+    symbols.push(makeSymbol("paths", "namespace", pathsNode, doc, pathItemContainerSymbols(pathsNode, doc, version)));
   }
 
-  // `webhooks` is a 3.1-only root map of Path Items; on 3.0 documents it isn't a spec key, so a
+  // `webhooks` is a 3.1+ root map of Path Items; on 3.0 documents it isn't a spec key, so a
   // stray `webhooks` mapping is left out of the outline (matching workspace symbols / the linter).
-  if (detectVersion(doc) === "3.1") {
+  if (version === "3.1" || version === "3.2") {
     const webhooksNode = getChildNode(root, "webhooks");
     if (webhooksNode && isMap(webhooksNode)) {
-      symbols.push(makeSymbol("webhooks", "namespace", webhooksNode, doc, pathItemContainerSymbols(webhooksNode, doc)));
+      symbols.push(makeSymbol("webhooks", "namespace", webhooksNode, doc, pathItemContainerSymbols(webhooksNode, doc, version)));
     }
   }
 

@@ -2,7 +2,7 @@
 
 **OpenAPI Specification Integrated Suite**
 
-OASIS is an integrated toolkit for working with OpenAPI 3.0 and 3.1 documents. It brings linting,
+OASIS is an integrated toolkit for working with OpenAPI 3.0, 3.1, and 3.2 documents. It brings linting,
 multi-file bundling, and language-server features together behind a single `oasis` command, with a
 companion VS Code extension for editor integration.
 
@@ -16,7 +16,8 @@ companion VS Code extension for editor integration.
   rename support through the Language Server Protocol (LSP).
 - **Workspace awareness** — follow `$ref`s throughout multi-file projects and attribute results to
   the file where each issue originates.
-- **OpenAPI 3.0 and 3.1** — version-aware behavior for both YAML and JSON documents.
+- **OpenAPI 3.0, 3.1, and 3.2** — version-aware behavior for both YAML and JSON documents, including
+  3.2 `$self`, `query` operations, reusable media types, and the expanded serialization model.
 
 | Command | Purpose |
 | --- | --- |
@@ -264,10 +265,10 @@ checks and why, version notes, options, and good/bad examples). Compact summary:
 | Rule | Default | Summary |
 | --- | --- | --- |
 | [`structure/required-fields`](docs/rules/structure/required-fields.md) | error | `openapi`, `info.title`, `info.version`, `paths`/`webhooks`/`components` present |
-| [`structure/openapi-version`](docs/rules/structure/openapi-version.md) | error | `openapi` is a valid `3.0.x` / `3.1.x` string |
+| [`structure/openapi-version`](docs/rules/structure/openapi-version.md) | error | `openapi` is a valid `3.0.x` / `3.1.x` / `3.2.x` string |
 | [`structure/field-types`](docs/rules/structure/field-types.md) | error | Common objects have the right shapes |
 | [`structure/http-methods`](docs/rules/structure/http-methods.md) | error | Only valid HTTP verbs / metadata keys under a path item |
-| [`structure/schema-nullable`](docs/rules/structure/schema-nullable.md) | error | Version-correct nullability (3.0 `nullable` vs 3.1 `type` arrays/`null`) |
+| [`structure/schema-nullable`](docs/rules/structure/schema-nullable.md) | error | Version-correct nullability (3.0 `nullable` vs 3.1/3.2 `type` arrays/`null`) |
 | [`structure/schema-keywords`](docs/rules/structure/schema-keywords.md) | error | Schema Object keywords match dialect, types, and internal consistency |
 | [`structure/security-schemes`](docs/rules/structure/security-schemes.md) | error | `securitySchemes` entries have a recognized `type` and its required fields |
 | [`structure/server-variables`](docs/rules/structure/server-variables.md) | error | Server `variables` agree with `{var}` placeholders in `url` |

@@ -6,7 +6,7 @@ This rule checks Discriminator Objects on every schema in the document (includin
 
 ## Version notes
 
-In **OpenAPI 3.0**, the spec additionally requires that a discriminator's `propertyName` be listed in the branch schema's own effective `required` array (not just present in `properties`) — this rule enforces that only on 3.0 documents, reporting a branch schema whose effective `required` (again, flattened through `allOf`/`$ref`) doesn't include the discriminator property. In **OpenAPI 3.1**, this additional `required` constraint does not apply; a branch schema only needs `propertyName` defined in `properties`, it need not be `required`. All other checks (`propertyName` shape, `mapping` resolution, effective property presence in branches) apply identically to both versions.
+In **OpenAPI 3.0**, the spec additionally requires that a discriminator's `propertyName` be listed in the branch schema's own effective `required` array (not just present in `properties`) — this rule enforces that only on 3.0 documents. In **OpenAPI 3.1/3.2**, this additional constraint does not apply. OpenAPI 3.2 adds `defaultMapping`; the rule validates and resolves it, and requires it when the discriminating property is defined but optional.
 
 ## Options
 

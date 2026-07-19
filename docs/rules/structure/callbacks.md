@@ -6,7 +6,7 @@ This rule checks Callback Objects — both operation-level `callbacks` and `comp
 
 ## Version notes
 
-No version-specific behavior — this rule applies identically to OpenAPI 3.0 and 3.1 documents.
+Callback Path Item Objects use the same version-aware operation keys as normal paths. OpenAPI 3.2 therefore permits `query` and `additionalOperations` inside callbacks; earlier versions reject them.
 
 ## Options
 

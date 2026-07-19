@@ -4,19 +4,19 @@ import { resolveAlias } from "@oasis/core";
 import type { OasisDocument, OpenApiVersion, WorkspaceGraph } from "@oasis/core";
 import { childAt, isRefObject, keyToString, resolveMaybeRef } from "./util.ts";
 
-export const HTTP_METHODS = ["get", "put", "post", "delete", "options", "head", "patch", "trace"] as const;
+export const HTTP_METHODS = ["get", "put", "post", "delete", "options", "head", "patch", "trace", "query"] as const;
 export type HttpMethod = (typeof HTTP_METHODS)[number];
 
 /** Non-method keys that are legal directly under a Path Item Object. */
-export const PATH_ITEM_NON_METHOD_KEYS = new Set(["$ref", "summary", "description", "servers", "parameters"]);
+export const PATH_ITEM_NON_METHOD_KEYS = new Set(["$ref", "summary", "description", "servers", "parameters", "additionalOperations"]);
 
-/** Which root map a path item came from. `webhooks` is 3.1-only. */
+/** Which root map a path item came from. `webhooks` is available in 3.1+. */
 export type PathItemOrigin = "paths" | "webhooks";
 
 export interface PathItemInfo {
   /** The map key: a path template (e.g. "/pets/{id}") for `paths`, an arbitrary name for `webhooks`. */
   template: string;
-  /** Whether this entry came from the root `paths` or (3.1) `webhooks` map. */
+  /** Whether this entry came from the root `paths` or (3.1+) `webhooks` map. */
   origin: PathItemOrigin;
   /** The key node for the path template, always in `entryDoc`. */
   keyNode: Node | undefined;
@@ -66,7 +66,7 @@ function computeIteratePathItems(graph: WorkspaceGraph, entryDoc: OasisDocument,
   const root = entryDoc.yamlDoc.contents;
   if (!isNode(root) || !isMap(root)) return [];
 
-  const origins: PathItemOrigin[] = version === "3.1" ? ["paths", "webhooks"] : ["paths"];
+  const origins: PathItemOrigin[] = version === "3.1" || version === "3.2" ? ["paths", "webhooks"] : ["paths"];
   const results: PathItemInfo[] = [];
 
   for (const origin of origins) {
@@ -92,7 +92,8 @@ function computeIteratePathItems(graph: WorkspaceGraph, entryDoc: OasisDocument,
 }
 
 export interface OperationInfo {
-  method: HttpMethod;
+  /** Lowercase fixed method name, or the authored method token from 3.2 `additionalOperations`. */
+  method: string;
   pathItem: PathItemInfo;
   doc: OasisDocument;
   node: Node;
@@ -112,10 +113,23 @@ function computeIterateOperations(graph: WorkspaceGraph, entryDoc: OasisDocument
   for (const pathItem of iteratePathItems(graph, entryDoc, version)) {
     if (!isMap(pathItem.node)) continue;
     for (const method of HTTP_METHODS) {
+      if (method === "query" && version !== "3.2") continue;
       const child = childAt(pathItem.node, method);
       if (!child) continue;
       const resolved = resolveMaybeRef(graph, pathItem.doc, child, `${pathItem.pointer}/${method}`);
       results.push({ method, pathItem, doc: resolved.doc, node: resolved.node, pointer: resolved.pointer });
+    }
+    if (version === "3.2") {
+      const additional = childAt(pathItem.node, "additionalOperations");
+      if (isMap(additional)) {
+        for (const pair of additional.items) {
+          const method = keyToString(pair.key);
+          if (!isNode(pair.value)) continue;
+          const pointer = `${pathItem.pointer}/additionalOperations/${method}`;
+          const resolved = resolveMaybeRef(graph, pathItem.doc, pair.value, pointer);
+          results.push({ method, pathItem, doc: resolved.doc, node: resolved.node, pointer: resolved.pointer });
+        }
+      }
     }
   }
   return results;
@@ -282,8 +296,10 @@ function computeIterateSchemas(
       if (!isNode(pair.value)) continue;
       const mediaTypeNode = resolveAlias(pair.value);
       if (!mediaTypeNode || !isMap(mediaTypeNode)) continue;
-      const schema = childAt(mediaTypeNode, "schema");
-      if (schema) addSchema(doc, schema, `${pointer}/${mediaType}/schema`);
+      for (const field of ["schema", "itemSchema"] as const) {
+        const schema = childAt(mediaTypeNode, field);
+        if (schema) addSchema(doc, schema, `${pointer}/${mediaType}/${field}`);
+      }
     }
   }
 
@@ -343,6 +359,13 @@ function computeIterateSchemas(
       if (isMap(n)) addFromContent(d, childAt(n, "content"), `${p}/content`);
     });
     eachComponentEntry(graph, doc, components, "responses", addFromResponse);
+    eachComponentEntry(graph, doc, components, "mediaTypes", (d, n, p) => {
+      if (!isMap(n)) return;
+      for (const field of ["schema", "itemSchema"] as const) {
+        const schema = childAt(n, field);
+        if (schema) addSchema(d, schema, `${p}/${field}`);
+      }
+    });
   }
 
   // Operation-level sites, following the paths (and, on 3.1, webhooks) walk.
@@ -430,6 +453,14 @@ function computeIterateMediaTypes(
     const components = childAt(root, "components");
     if (!components || !isMap(components)) continue;
 
+    eachComponentEntry(graph, doc, components, "mediaTypes", (d, n, p) => {
+      if (!isMap(n)) return;
+      const key = `${d.filePath}::${p}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      results.push({ doc: d, node: n, pointer: p });
+    });
+
     eachComponentEntry(graph, doc, components, "requestBodies", (d, n, p) => {
       if (isMap(n)) addFromContent(d, childAt(n, "content"), `${p}/content`);
     });
@@ -468,7 +499,7 @@ function computeIterateMediaTypes(
 /**
  * JSON Schema applicator keywords whose value is a *single* nested Schema Object.
  * `items`/`additionalProperties`/`not` exist in both dialects; the rest are JSON Schema 2020-12
- * (OpenAPI 3.1) only.
+ * (OpenAPI 3.1/3.2) only.
  */
 const SINGLE_SCHEMA_KEYS_COMMON = ["items", "additionalProperties", "not"] as const;
 const SINGLE_SCHEMA_KEYS_31 = [
@@ -494,10 +525,10 @@ const SEQ_OF_SCHEMAS_KEYS_31 = ["prefixItems"] as const;
  * Recursively visit every nested Schema Object reachable from `node` through the JSON Schema
  * applicators legal in the document's `version`. Traversal is complete and version-aware:
  * - 3.0: `properties`, `items`, `additionalProperties`, `allOf`/`oneOf`/`anyOf`, `not`.
- * - 3.1 (JSON Schema 2020-12): all of the above plus `patternProperties`, `prefixItems`,
+ * - 3.1/3.2 (JSON Schema 2020-12): all of the above plus `patternProperties`, `prefixItems`,
  *   `if`/`then`/`else`, `contains`, `propertyNames`, `dependentSchemas`, `$defs`,
  *   `unevaluatedItems`, `unevaluatedProperties`, `contentSchema`.
- * When `version` is `undefined` the 3.1 applicators are included too, so nothing is missed on a
+ * When `version` is `undefined` the 3.1+ applicators are included too, so nothing is missed on a
  * document whose version couldn't be detected.
  *
  * `$ref`s are not followed for discovery — a `$ref`'d schema is visited at its own definition site

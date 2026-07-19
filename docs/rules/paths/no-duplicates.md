@@ -6,7 +6,7 @@ Flags path templates that are equivalent once parameter names are stripped out �
 
 ## Version notes
 
-This rule walks path items with `iteratePathItems(ctx.graph, ctx.entryDoc)` — called **without** a `version` argument, so it only ever visits the root `paths` map and never the 3.1-only `webhooks` map. Webhook keys are arbitrary event names, not URL templates, so template-shape comparison doesn't make sense for them; `packages/linter/tests/webhooks.test.ts` ("3.1 webhooks: path-shaped rules do NOT apply" / `paths/no-duplicates ignores webhooks entirely`) confirms webhooks never participate in this check. Other than webhooks being entirely out of scope, there is no 3.0-vs-3.1 behavior difference — normalization and comparison work the same way on both.
+This rule only visits the root `paths` map and never the 3.1/3.2 `webhooks` map. Webhook keys are arbitrary event names, not URL templates, so template-shape comparison does not apply. Path normalization and comparison work the same way across supported versions.
 
 ## Options
 
