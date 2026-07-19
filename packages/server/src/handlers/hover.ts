@@ -23,7 +23,7 @@ export async function getHover(ctx: ServerContext, params: HoverParams): Promise
   const docCtx = await resolveDocContext(ctx, params.path);
   if (!docCtx) return undefined;
 
-  const found = findRefAtPosition(docCtx.doc, params.position);
+  const found = findRefAtPosition(docCtx.graph, docCtx.doc, params.position);
   if (!found) return undefined;
   const resolved = resolveRef(docCtx.graph, docCtx.doc, found.refString, found.range);
   if (!resolved.ok) return undefined;

@@ -1,6 +1,7 @@
 import { isScalar } from "yaml";
-import { nodeAtPosition, offsetAtPosition, resolveRef } from "@oasis/core";
+import { foundRefForNode, nodeAtPosition, offsetAtPosition, resolveRef } from "@oasis/core";
 import type { OasisDocument, Position, Range, ResolvedRef, WorkspaceGraph } from "@oasis/core";
+import { classifyPointer, inferRootKind } from "./keywords.ts";
 
 export interface RefAtPosition {
   /** JSON Pointer of the `$ref` (or ref-like) scalar node itself. */
@@ -12,10 +13,19 @@ export interface RefAtPosition {
 }
 
 /**
- * If `position` lands on a `$ref` value, or on any string that looks like a JSON-Pointer-style
- * reference (`#/...` or a relative-file-plus-fragment form), return it. Otherwise undefined.
+ * If `position` lands on a scalar that is a *genuine* reference occurrence, return it. Otherwise
+ * undefined.
+ *
+ * "Genuine" is decided semantically, not by the shape of the text (issue #182): `$ref`,
+ * `$dynamicRef`, and discriminator URI-style mappings are recognized via `foundRefForNode`, backed
+ * by the same semantic walk (`findRefs`) that builds the workspace graph — it already treats
+ * literal-data contexts (Schema Object `example`/`examples`/`default`/`enum`/`const` values,
+ * Specification Extension `x-*` payloads, and other Any-valued fields) as opaque, so a ref-looking
+ * string sitting in ordinary example data is never mistaken for a reference. Link Object
+ * `operationRef` is a reference-bearing field the core walk doesn't track (the linter validates it
+ * separately), so it's recognized here by its exact field position instead of by text shape.
  */
-export function findRefAtPosition(doc: OasisDocument, position: Position): RefAtPosition | undefined {
+export function findRefAtPosition(graph: WorkspaceGraph, doc: OasisDocument, position: Position): RefAtPosition | undefined {
   const offset = offsetAtPosition(doc.lineCounter, position);
   const found = nodeAtPosition(doc, offset);
   if (!found) return undefined;
@@ -24,9 +34,12 @@ export function findRefAtPosition(doc: OasisDocument, position: Position): RefAt
   const value = found.node.value;
   if (typeof value !== "string") return undefined;
 
-  const isRefKey = found.pointer.endsWith("/$ref") || found.pointer === "/$ref";
-  const looksLikeRef = isRefKey || value.includes("#/") || /^\.{1,2}\//.test(value);
-  if (!looksLikeRef) return undefined;
+  const occurrence = foundRefForNode(graph, doc, found.node);
+  if (occurrence) return { pointer: found.pointer, refString: occurrence.value, range: occurrence.range };
+
+  const isOperationRef = found.pointer.endsWith("/operationRef") &&
+    classifyPointer(parentPointer(found.pointer), inferRootKind(doc, graph)) === "link";
+  if (!isOperationRef) return undefined;
 
   return { pointer: found.pointer, refString: value, range: found.range };
 }
@@ -37,7 +50,7 @@ export function findRefAtPosition(doc: OasisDocument, position: Position): RefAt
  * with this exact "find the ref under the cursor, then resolve it" sequence.
  */
 export function resolveRefAtPosition(graph: WorkspaceGraph, doc: OasisDocument, position: Position): ResolvedRef | undefined {
-  const found = findRefAtPosition(doc, position);
+  const found = findRefAtPosition(graph, doc, position);
   if (!found) return undefined;
 
   const result = resolveRef(graph, doc, found.refString, found.range);

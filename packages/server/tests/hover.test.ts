@@ -28,3 +28,46 @@ describe("getHover", () => {
     expect(result).toBeUndefined();
   });
 });
+
+describe("getHover ignores ref-like strings in literal data (#182)", () => {
+  const PATH = "/lit/openapi.yaml";
+
+  test("a `#/...` pointer-shaped string in an `example` value produces no hover", async () => {
+    const text = `openapi: 3.1.0
+info: { title: Repro, version: "1.0.0" }
+paths: {}
+components:
+  schemas:
+    Foo: { type: string }
+    Holder:
+      type: string
+      example: '#/components/schemas/Foo'
+`;
+    const ctx = createServerContext(new InMemoryFileSystem({ [PATH]: text }));
+    const result = await getHover(ctx, { path: PATH, position: positionOf(text, "#/components/schemas/Foo") });
+    expect(result).toBeUndefined();
+  });
+
+  test("a Link Object `operationRef` still produces hover for the target operation", async () => {
+    const text = `openapi: 3.1.0
+info: { title: Repro, version: "1.0.0" }
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          description: OK
+components:
+  responses:
+    Ok:
+      description: OK
+      links:
+        Self:
+          operationRef: '#/paths/~1pets/get'
+`;
+    const ctx = createServerContext(new InMemoryFileSystem({ [PATH]: text }));
+    const result = await getHover(ctx, { path: PATH, position: positionOf(text, "#/paths/~1pets/get") });
+    expect(result).toBeDefined();
+  });
+});
