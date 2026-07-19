@@ -207,3 +207,114 @@ describe("one-character URI scheme refs never touch the FileSystem (issue #151)"
     expect(fs.readFileCalls).toEqual(["/virtual/entry.yaml"]);
   });
 });
+
+describe("duplicate canonical JSON Schema resource identifiers (issue #178)", () => {
+  function fixture(order: "a-then-b" | "b-then-a") {
+    const refs = order === "a-then-b"
+      ? ["    A: { $ref: './a.yaml' }", "    B: { $ref: './b.yaml' }"]
+      : ["    B: { $ref: './b.yaml' }", "    A: { $ref: './a.yaml' }"];
+    return new InMemoryFileSystem({
+      "/virtual/entry.yaml": [
+        "openapi: 3.1.0",
+        "components:",
+        "  schemas:",
+        ...refs,
+        "    Use: { $ref: 'https://schemas.example/dup#/$defs/Value' }",
+      ].join("\n"),
+      "/virtual/a.yaml": ["$id: https://schemas.example/dup", "$defs:", "  Value: { type: string }"].join("\n"),
+      "/virtual/b.yaml": ["$id: https://schemas.example/dup", "$defs:", "  Value: { type: integer }"].join("\n"),
+    });
+  }
+
+  test("two documents declaring the same canonical $id produce a duplicate-resource diagnostic", async () => {
+    const graph = await loadWorkspaceGraph(fixture("a-then-b"), "/virtual/entry.yaml");
+
+    const dupes = allDiagnostics(graph).filter((d) => d.code === "no-duplicate-schema-id");
+    expect(dupes).toHaveLength(1);
+    expect(dupes[0]?.message).toContain("https://schemas.example/dup");
+    expect(dupes[0]?.message).toContain("/virtual/a.yaml");
+    expect(dupes[0]?.message).toContain("/virtual/b.yaml");
+    expect(dupes[0]?.severity).toBe("error");
+  });
+
+  test("a reference to the collided URI does not silently resolve to whichever document was indexed last", async () => {
+    const graph = await loadWorkspaceGraph(fixture("a-then-b"), "/virtual/entry.yaml");
+    const entry = graph.documents.get("/virtual/entry.yaml")!;
+
+    const result = resolveRef(graph, entry, "https://schemas.example/dup#/$defs/Value");
+    expect(result.ok).toBe(false);
+  });
+
+  test("reordering the referencing documents does not change the observable resolution result", async () => {
+    const forward = await loadWorkspaceGraph(fixture("a-then-b"), "/virtual/entry.yaml");
+    const reversed = await loadWorkspaceGraph(fixture("b-then-a"), "/virtual/entry.yaml");
+
+    const forwardEntry = forward.documents.get("/virtual/entry.yaml")!;
+    const reversedEntry = reversed.documents.get("/virtual/entry.yaml")!;
+
+    const forwardResult = resolveRef(forward, forwardEntry, "https://schemas.example/dup#/$defs/Value");
+    const reversedResult = resolveRef(reversed, reversedEntry, "https://schemas.example/dup#/$defs/Value");
+
+    expect(forwardResult.ok).toBe(false);
+    expect(reversedResult.ok).toBe(false);
+
+    const forwardDupes = allDiagnostics(forward).filter((d) => d.code === "no-duplicate-schema-id");
+    const reversedDupes = allDiagnostics(reversed).filter((d) => d.code === "no-duplicate-schema-id");
+    expect(forwardDupes).toHaveLength(1);
+    expect(reversedDupes).toHaveLength(1);
+    // The diagnostic content is independent of load order.
+    expect(forwardDupes[0]?.message).toBe(reversedDupes[0]?.message);
+  });
+
+  test("re-indexing the same document as generic then schema-aware is not a collision", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": [
+        "openapi: 3.1.0",
+        "components:",
+        "  schemas:",
+        "    A: { $ref: './shared.yaml' }",
+        "    B: { $ref: './shared.yaml#/$defs/Value' }",
+      ].join("\n"),
+      "/virtual/shared.yaml": ["$id: https://schemas.example/shared", "$defs:", "  Value: { type: string }"].join("\n"),
+    });
+
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+
+    expect(allDiagnostics(graph).filter((d) => d.code === "no-duplicate-schema-id")).toEqual([]);
+    const entry = graph.documents.get("/virtual/entry.yaml")!;
+    const result = resolveRef(graph, entry, "https://schemas.example/shared#/$defs/Value");
+    expect(result.ok).toBe(true);
+  });
+
+  test("a duplicate $id nested as an embedded resource is also detected", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": [
+        "openapi: 3.1.0",
+        "components:",
+        "  schemas:",
+        "    A: { $ref: './a.yaml' }",
+        "    B: { $ref: './b.yaml' }",
+        "    Use: { $ref: 'https://schemas.example/embedded#/$defs/Value' }",
+      ].join("\n"),
+      "/virtual/a.yaml": [
+        "type: object",
+        "properties:",
+        "  nested:",
+        "    $id: https://schemas.example/embedded",
+        "    $defs:",
+        "      Value: { type: string }",
+      ].join("\n"),
+      "/virtual/b.yaml": [
+        "$id: https://schemas.example/embedded",
+        "$defs:",
+        "  Value: { type: integer }",
+      ].join("\n"),
+    });
+
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+
+    const dupes = allDiagnostics(graph).filter((d) => d.code === "no-duplicate-schema-id");
+    expect(dupes).toHaveLength(1);
+    expect(dupes[0]?.message).toContain("https://schemas.example/embedded");
+  });
+});

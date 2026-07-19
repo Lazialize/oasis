@@ -482,6 +482,21 @@ export function resolveRef(
     }
   }
 
+  // The URI was claimed by more than one document (see `no-duplicate-schema-id` on `graph.diagnostics`).
+  // Never fall through to picking one claimant by load order — report it as unresolved instead.
+  if (graph.collidedResourceUris.has(resourceUri)) {
+    return {
+      ok: false,
+      diagnostic: {
+        message: `Unresolved reference: "${refString}" targets "${resourceUri}", which is declared as a canonical $id by more than one document; fix the duplicate $id to resolve this reference`,
+        severity: "error",
+        code: "no-unresolved-ref",
+        source: "core",
+        range: diagnosticRange,
+      },
+    };
+  }
+
   // An absolute non-filesystem URI (`https:`, `urn:`, ...) is an external target, not a document in
   // the workspace graph. Report it explicitly instead of routing it through filesystem resolution.
   if (isExternalUriReference(resourceUri)) {
