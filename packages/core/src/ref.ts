@@ -6,6 +6,8 @@ import { nodeAtFragmentPointer, nodeAtFragmentPointerFrom, pointerToNode, resour
 import { canonicalPointer } from "./pointer.ts";
 import { resolveFileReference } from "./filesystem.ts";
 import { containerExtensionsAreOpaque, isContainerKey, isLiteralDataKey } from "./node-context.ts";
+import { containerEntryKind, directObjectKind } from "./semantic-traversal.ts";
+import type { OpenApiObjectKind } from "./semantic-traversal.ts";
 import { resolveAlias } from "./walk.ts";
 import type { OasisDocument } from "./parse.ts";
 import { rangeFromOffsets, zeroRange } from "./position.ts";
@@ -90,25 +92,8 @@ export function foundRefForNode(graph: WorkspaceGraph, doc: OasisDocument, node:
  */
 const findRefsCache = new WeakMap<Node, Map<string, FoundRef[]>>();
 
-export type OpenApiObjectKind =
-  | "root"
-  | "components"
-  | "paths-map"
-  | "webhooks-map"
-  | "path-item"
-  | "operation"
-  | "parameter"
-  | "header"
-  | "request-body"
-  | "response"
-  | "media-type"
-  | "encoding"
-  | "callback"
-  | "example"
-  | "link"
-  | "schema";
+export type { OpenApiObjectKind } from "./semantic-traversal.ts";
 
-const HTTP_METHODS = new Set(["get", "put", "post", "delete", "options", "head", "patch", "trace"]);
 const INHERITED_31_KINDS = new Set<OpenApiObjectKind>([
   "path-item",
   "operation",
@@ -122,22 +107,12 @@ const INHERITED_31_KINDS = new Set<OpenApiObjectKind>([
   "schema",
 ]);
 
-const SINGLE_SCHEMA_KEYS = new Set([
-  "items",
-  "additionalProperties",
-  "not",
-  "if",
-  "then",
-  "else",
-  "propertyNames",
-  "contains",
-  "unevaluatedItems",
-  "unevaluatedProperties",
-  "contentSchema",
-]);
-const MAP_SCHEMA_KEYS = new Set(["properties", "patternProperties", "$defs", "definitions", "dependentSchemas"]);
-const SEQUENCE_SCHEMA_KEYS = new Set(["allOf", "oneOf", "anyOf", "prefixItems"]);
-
+/**
+ * Classify a named-entry container occurrence for `findRefs`. The kind→kind edges live in the shared
+ * `containerEntryKind` table; the value-shape guards stay here because they depend on the resolved
+ * node: a container value must be a map or sequence, and `examples`/`links` name Example/Link Object
+ * maps only in their map form (a sequence-form `examples` is literal instance data).
+ */
 function namedEntryKind(
   key: string,
   value: Node,
@@ -147,57 +122,8 @@ function namedEntryKind(
 ): OpenApiObjectKind | undefined {
   const resolvedValue = resolveAlias(value, doc.yamlDoc);
   if (!resolvedValue || (!isMap(resolvedValue) && !isSeq(resolvedValue))) return undefined;
-  if (key === "examples" && isMap(resolvedValue)) return "example";
-  if (key === "links" && isMap(resolvedValue)) return "link";
-  if (!schema31) return undefined;
-
-  if (parentKind === "root" && key === "paths") return "paths-map";
-  if (parentKind === "root" && key === "webhooks") return "webhooks-map";
-  if (parentKind === "components") {
-    if (key === "schemas") return "schema";
-    if (key === "parameters") return "parameter";
-    if (key === "headers") return "header";
-    if (key === "requestBodies") return "request-body";
-    if (key === "responses") return "response";
-    if (key === "pathItems") return "path-item";
-    if (key === "callbacks") return "callback";
-  }
-  if ((parentKind === "path-item" || parentKind === "operation") && key === "parameters") return "parameter";
-  if (parentKind === "operation" && key === "responses") return "response";
-  if (parentKind === "operation" && key === "callbacks") return "callback";
-  if (parentKind === "response" && key === "headers") return "header";
-  if (parentKind === "media-type" && key === "encoding") return "encoding";
-  if (parentKind === "encoding" && key === "headers") return "header";
-  if (
-    (parentKind === "parameter" ||
-      parentKind === "header" ||
-      parentKind === "request-body" ||
-      parentKind === "response") &&
-    key === "content"
-  ) return "media-type";
-  if (parentKind === "schema" && MAP_SCHEMA_KEYS.has(key)) return "schema";
-  return undefined;
-}
-
-function directObjectKind(
-  parentKind: OpenApiObjectKind | undefined,
-  key: string | undefined,
-  schema31: boolean,
-): OpenApiObjectKind | undefined {
-  if (parentKind === "root" && key === "components") return "components";
-  if (!schema31 || key === undefined) return undefined;
-  if (parentKind === "path-item" && HTTP_METHODS.has(key)) return "operation";
-  if (parentKind === "operation" && key === "requestBody") return "request-body";
-  if (
-    (parentKind === "parameter" || parentKind === "header" || parentKind === "media-type") &&
-    key === "schema"
-  ) return "schema";
-  if (parentKind === "callback" && !key.startsWith("x-")) return "path-item";
-  if (
-    parentKind === "schema" &&
-    (SINGLE_SCHEMA_KEYS.has(key) || SEQUENCE_SCHEMA_KEYS.has(key))
-  ) return "schema";
-  return undefined;
+  if ((key === "examples" || key === "links") && !isMap(resolvedValue)) return undefined;
+  return containerEntryKind(parentKind, key, schema31);
 }
 
 function isAnyValuedField(kind: OpenApiObjectKind | undefined, key: string): boolean {

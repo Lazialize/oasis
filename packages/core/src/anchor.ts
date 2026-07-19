@@ -4,6 +4,14 @@ import type { Node, Scalar } from "yaml";
 import type { OasisDocument } from "./parse.ts";
 import { safeDecodeURIComponent } from "./pointer.ts";
 import { rangeFromOffsets, zeroRange } from "./position.ts";
+import {
+  containerEntryKind,
+  directObjectKind,
+  MAP_SCHEMA_KEYS,
+  SEQUENCE_SCHEMA_KEYS,
+  SINGLE_SCHEMA_KEYS,
+} from "./semantic-traversal.ts";
+import type { OpenApiObjectKind } from "./semantic-traversal.ts";
 import type { Range } from "./types.ts";
 import { resolveUriReference, stripUriFragment } from "./uri.ts";
 import { detectVersion } from "./version.ts";
@@ -36,16 +44,6 @@ export interface AnchorIndex {
 export interface AnchorIndexOptions { baseUri?: string; schemaDocument?: boolean }
 
 const cacheByDocument = new WeakMap<OasisDocument, Map<string, AnchorIndex>>();
-const SINGLE_SCHEMA_KEYS = new Set([
-  "items", "additionalProperties", "not", "if", "then", "else", "propertyNames", "contains",
-  "unevaluatedItems", "unevaluatedProperties", "contentSchema",
-]);
-const MAP_SCHEMA_KEYS = new Set(["properties", "patternProperties", "$defs", "definitions", "dependentSchemas"]);
-const SEQUENCE_SCHEMA_KEYS = new Set(["allOf", "oneOf", "anyOf", "prefixItems"]);
-const HTTP_METHODS = new Set(["get", "put", "post", "delete", "options", "head", "patch", "trace"]);
-
-type ObjectKind = "root" | "components" | "paths-map" | "webhooks-map" | "path-item" | "operation" |
-  "parameter" | "header" | "request-body" | "response" | "media-type" | "encoding" | "callback" | "schema";
 
 function scalarString(node: unknown): string | undefined {
   return isScalar(node) && typeof (node as Scalar).value === "string" ? String((node as Scalar).value) : undefined;
@@ -129,37 +127,11 @@ export function buildAnchorIndex(doc: OasisDocument, options: AnchorIndexOptions
     }
   }
 
-  function entryKind(parent: ObjectKind | undefined, key: string): ObjectKind | undefined {
-    if (parent === "root" && key === "paths") return "paths-map";
-    if (parent === "root" && key === "webhooks") return "webhooks-map";
-    if (parent === "components") {
-      if (key === "schemas") return "schema";
-      if (key === "parameters") return "parameter";
-      if (key === "headers") return "header";
-      if (key === "requestBodies") return "request-body";
-      if (key === "responses") return "response";
-      if (key === "pathItems") return "path-item";
-      if (key === "callbacks") return "callback";
-    }
-    if ((parent === "path-item" || parent === "operation") && key === "parameters") return "parameter";
-    if (parent === "operation" && key === "responses") return "response";
-    if (parent === "operation" && key === "callbacks") return "callback";
-    if (parent === "response" && key === "headers") return "header";
-    if (parent === "media-type" && key === "encoding") return "encoding";
-    if (parent === "encoding" && key === "headers") return "header";
-    if (["parameter", "header", "request-body", "response"].includes(parent ?? "") && key === "content") return "media-type";
-    return undefined;
-  }
-  function directKind(parent: ObjectKind | undefined, key: string): ObjectKind | undefined {
-    if (parent === "root" && key === "components") return "components";
-    if (parent === "path-item" && HTTP_METHODS.has(key)) return "operation";
-    if (parent === "operation" && key === "requestBody") return "request-body";
-    if (["parameter", "header", "media-type"].includes(parent ?? "") && key === "schema") return "schema";
-    if (parent === "callback" && !key.startsWith("x-")) return "path-item";
-    return undefined;
-  }
+  // Navigate the OpenAPI object graph using the shared transition tables until a Schema Object is
+  // reached, then hand off to `walkSchema`. The tables are version-aware; anchors only exist in
+  // 3.1 (and standalone schema documents), so this walk always runs with 3.1 semantics enabled.
   const openApiSeen = new Map<string, Set<Node>>();
-  function scanOpenApi(node: Node, kind: ObjectKind | undefined, containerKind?: ObjectKind): void {
+  function scanOpenApi(node: Node, kind: OpenApiObjectKind | undefined, containerKind?: OpenApiObjectKind): void {
     const resolved = resolveAlias(node, doc.yamlDoc);
     if (!resolved) return;
     if (kind === "schema") { walkSchema(resolved, baseUri, baseUri, ""); return; }
@@ -175,8 +147,8 @@ export function buildAnchorIndex(doc: OasisDocument, options: AnchorIndexOptions
         if (containerKind === "paths-map" && key.startsWith("x-")) continue;
         const nextKind = containerKind
           ? containerKind === "paths-map" || containerKind === "webhooks-map" ? "path-item" : containerKind
-          : directKind(kind, key);
-        const nextContainer = containerKind ? undefined : entryKind(kind, key);
+          : directObjectKind(kind, key, true);
+        const nextContainer = containerKind ? undefined : containerEntryKind(kind, key, true);
         scanOpenApi(pair.value, nextKind, nextContainer);
       }
     } else if (isSeq(resolved)) {
