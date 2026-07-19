@@ -28,6 +28,8 @@ export interface WorkspaceGraph {
   references: Map<string, FoundRef[]>;
   /** Canonical JSON Schema resource URI -> physical source document/node. */
   resources: Map<string, GraphResource>;
+  /** Canonical resource URIs claimed by more than one document (see `no-duplicate-schema-id`). */
+  collidedResourceUris: Set<string>;
 }
 
 export async function loadWorkspaceGraph(fs: FileSystem, entryPath: string): Promise<WorkspaceGraph> {
@@ -38,6 +40,7 @@ export async function loadWorkspaceGraph(fs: FileSystem, entryPath: string): Pro
   const resources = new Map<string, GraphResource>();
   const indexed = new Map<string, AnchorIndex>();
   const failed = new Set<string>();
+  const collidedResourceUris = new Set<string>();
 
   async function loadFile(path: string, viaRefRange?: Range): Promise<OasisDocument | undefined> {
     const canonicalPath = fs.canonicalize(path);
@@ -79,6 +82,32 @@ export async function loadWorkspaceGraph(fs: FileSystem, entryPath: string): Pro
       const effectiveBase = entry.uri === retrievalUri
         ? [...index.resources.values()].find((candidate) => candidate.node === entry.node && candidate.uri !== retrievalUri)?.uri ?? entry.uri
         : entry.uri;
+      const existing = resources.get(entry.uri);
+      // A document may first be reached as a generic OpenAPI object and later as a Schema Object,
+      // or reached again via a retrieval alias — both re-index the *same* document object, which is
+      // not a collision. Two distinct documents claiming the same canonical URI is: JSON Schema
+      // 2020-12 (9.1.2) requires a URI to identify at most one schema, so report it and make the
+      // URI unresolvable rather than silently letting one claimant win by load order.
+      if (existing && existing.doc !== doc) {
+        if (!collidedResourceUris.has(entry.uri)) {
+          collidedResourceUris.add(entry.uri);
+          // Order-independent: always anchor the diagnostic in whichever document's path sorts
+          // later, so the same pair of files produces the same diagnostic regardless of which one
+          // was indexed first.
+          const [firstPath, secondPath] = [existing.doc.filePath, doc.filePath].sort();
+          const range = doc.filePath > existing.doc.filePath ? entry.range : existing.range;
+          diagnostics.push({
+            message: `Duplicate JSON Schema resource identifier "${entry.uri}" is declared in both "${firstPath}" and "${secondPath}"; a URI must not identify more than one schema`,
+            severity: "error",
+            code: "no-duplicate-schema-id",
+            source: "core",
+            range,
+          });
+        }
+        resources.delete(entry.uri);
+        continue;
+      }
+      if (collidedResourceUris.has(entry.uri)) continue;
       // A document may first be reached as a generic OpenAPI object and later as a Schema Object.
       // Prefer the schema-aware index so its anchors/resources become available on the later walk.
       if (schemaDocument || !resources.has(entry.uri)) {
@@ -161,7 +190,7 @@ export async function loadWorkspaceGraph(fs: FileSystem, entryPath: string): Pro
     indexDocument(entryDoc, false);
     await scanScope(entryDoc, entryDoc.yamlDoc.contents, undefined, pathToFileURL(entryDoc.filePath).href);
   }
-  const graph = { entryPath: canonicalEntry, documents, diagnostics, fileSystem: fs, references, resources };
+  const graph = { entryPath: canonicalEntry, documents, diagnostics, fileSystem: fs, references, resources, collidedResourceUris };
   detectReferenceCycles(graph, referenceOccurrences);
   return graph;
 }
