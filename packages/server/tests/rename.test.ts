@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, test } from "bun:test";
-import { InMemoryFileSystem } from "@oasis/core";
+import { InMemoryFileSystem, NodeFileSystem } from "@oasis/core";
 import type { Range } from "@oasis/core";
 import { prepareRename, renameComponent } from "../src/handlers/rename.ts";
 import { OverlayFileSystem } from "../src/overlay-fs.ts";
@@ -775,16 +775,21 @@ components:
   });
 
   test("resolves positions and produces edits against the unsaved buffer, not disk content", async () => {
-    const fs = new OverlayFileSystem((path) => (path === entryPath ? overlayText : undefined));
+    // Mirrors what `connection.ts` actually passes downstream: `toPath(uri)` canonicalizes a
+    // `file:` URI (issue #153), so a handler's `path` is always the canonical (real, on-disk-cased)
+    // identity rather than whatever lexical spelling the caller started from — on macOS, `tmpdir()`
+    // itself sits behind a `/var` -> `/private/var` symlink, so this can differ from `entryPath`.
+    const canonicalEntryPath = new NodeFileSystem().canonicalize(entryPath);
+    const fs = new OverlayFileSystem((path) => (path === canonicalEntryPath ? overlayText : undefined));
     const ctx = createServerContext(fs);
 
     const position = positionOf(overlayText, "#/components/schemas/Pet");
-    const edits = await renameComponent(ctx, { path: entryPath, position, newName: "PetV2" });
+    const edits = await renameComponent(ctx, { path: canonicalEntryPath, position, newName: "PetV2" });
 
     expect(edits).toBeDefined();
     expect(edits).toHaveLength(2);
     for (const edit of edits!) {
-      expect(edit.filePath).toBe(entryPath);
+      expect(edit.filePath).toBe(canonicalEntryPath);
       expect(edit.newText).toBe("PetV2");
       expect(textAt(overlayText, edit.range)).toBe("Pet");
     }

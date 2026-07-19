@@ -68,7 +68,11 @@ async function resolveProjectEntries(
         warnings.push(`Entry glob "${raw}" in ${CONFIG_FILE_NAME} matched no files (resolved against "${configDir}"); skipping.`);
         continue;
       }
-      for (const abs of matches) {
+      for (const rawMatch of matches) {
+        // Canonicalize (issue #153) so a glob-expanded entry agrees with the physical identity
+        // `loadWorkspaceGraph`/`getGraph` key documents and graphs by, even when the workspace
+        // root is reached through a symlinked/case-aliased path.
+        const abs = ctx.fileSystem.canonicalize(rawMatch);
         if (seen.has(abs)) continue;
         seen.add(abs);
         entries.push(abs);
@@ -76,7 +80,7 @@ async function resolveProjectEntries(
       continue;
     }
 
-    const abs = ctx.fileSystem.resolve(configPath, raw);
+    const abs = ctx.fileSystem.canonicalize(ctx.fileSystem.resolve(configPath, raw));
     if (seen.has(abs)) continue;
     try {
       await ctx.fileSystem.readFile(abs);
@@ -131,7 +135,10 @@ function unloadProject(ctx: ServerContext, configPath: string): void {
  * negligible.
  */
 export async function loadProjectAtPath(ctx: ServerContext, rawConfigPath: string): Promise<ProjectState | undefined> {
-  const configPath = pathResolve(rawConfigPath);
+  // Canonicalize (issue #153): `configPath` keys `ctx.projects`/`ctx.graphCache` and is compared
+  // against paths derived from `toPath(uri)` (already canonical) elsewhere, so it must agree with
+  // that same physical identity rather than a plain lexical `path.resolve`.
+  const configPath = ctx.fileSystem.canonicalize(rawConfigPath);
   ctx.standaloneConfigCache.clear();
   const result = await readConfigFile(ctx, configPath);
 
@@ -225,12 +232,14 @@ function isUnder(dir: string, root: string): boolean {
   return dir === root || dir.startsWith(root + sep);
 }
 
-/** The innermost workspace root that contains `path`, if any. */
+/** The innermost workspace root that contains `path`, if any. `path` is expected to already be
+ * canonical (see `toPath` in `uri-path.ts`); `ctx.workspaceRoots` is canonicalized the same way at
+ * its point of construction (`connection.ts`), so both sides agree on physical identity even when
+ * the root is reached through a symlinked/case-aliased path (issue #153). */
 function enclosingWorkspaceRoot(ctx: ServerContext, path: string): string | undefined {
   let best: string | undefined;
   for (const root of ctx.workspaceRoots) {
-    const normRoot = pathResolve(root);
-    if (isUnder(path, normRoot) && (!best || normRoot.length > best.length)) best = normRoot;
+    if (isUnder(path, root) && (!best || root.length > best.length)) best = root;
   }
   return best;
 }

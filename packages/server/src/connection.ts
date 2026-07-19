@@ -18,8 +18,8 @@ import type {
 } from "vscode-languageserver";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { URI } from "vscode-uri";
-import { parseDocument } from "@oasis/core";
-import type { Range } from "@oasis/core";
+import { NodeFileSystem, parseDocument } from "@oasis/core";
+import type { FileSystem, Range } from "@oasis/core";
 import { getCodeActions } from "./handlers/code-actions.ts";
 import { getDefinition } from "./handlers/definition.ts";
 import { getDocumentLinks } from "./handlers/document-link.ts";
@@ -63,12 +63,15 @@ export function runSafely(connection: Connection, label: string, task: () => Pro
 
 /** Absolute filesystem roots of every workspace folder the client reported at initialize. Workspace
  * folders are `file:` URIs (remote folders are out of scope for on-disk scanning), so a plain
- * `fsPath` conversion is correct here. */
-function workspaceRootsFromInitialize(params: InitializeParams): string[] {
+ * `fsPath` conversion is correct here; `canonicalize` (issue #153) then brings it in line with the
+ * physical identity documents/entries are keyed by, so root-containment checks (`isPathAtOrUnder`,
+ * `enclosingWorkspaceRoot`) agree with those paths even when the workspace root is reached through
+ * a symlinked/case-aliased path. */
+function workspaceRootsFromInitialize(params: InitializeParams, fileSystem: FileSystem): string[] {
   if (params.workspaceFolders && params.workspaceFolders.length > 0) {
-    return params.workspaceFolders.map((folder) => URI.parse(folder.uri).fsPath);
+    return params.workspaceFolders.map((folder) => fileSystem.canonicalize(URI.parse(folder.uri).fsPath));
   }
-  if (params.rootUri) return [URI.parse(params.rootUri).fsPath];
+  if (params.rootUri) return [fileSystem.canonicalize(URI.parse(params.rootUri).fsPath)];
   return [];
 }
 
@@ -129,8 +132,10 @@ export function startServer(): Connection {
 
   // Maps between the canonical paths the graph keys documents by and the original open-document
   // URIs, so `untitled:`/`vscode-remote:` documents keep their identity for overlay lookups and
-  // every published response (issue #115).
-  const { toPath, toUri, forget } = createUriPathMapper();
+  // every published response (issue #115). A `file:` URI is mapped through `NodeFileSystem`'s own
+  // `canonicalize` (issue #153) so it agrees with the physical identity `loadWorkspaceGraph` keys
+  // documents by, even when the open document is reached through a symlinked/case-aliased path.
+  const { toPath, toUri, forget } = createUriPathMapper(new NodeFileSystem());
 
   const fileSystem = new OverlayFileSystem((path) => {
     const doc = documents.get(toUri(path));
@@ -399,11 +404,13 @@ export function startServer(): Connection {
     added: Array<{ uri: string }>;
     removed: Array<{ uri: string }>;
   }): Promise<void> {
-    const addedRoots = event.added.map((folder) => pathResolve(URI.parse(folder.uri).fsPath));
-    const removedRoots = event.removed.map((folder) => pathResolve(URI.parse(folder.uri).fsPath));
+    const addedRoots = event.added.map((folder) => fileSystem.canonicalize(URI.parse(folder.uri).fsPath));
+    const removedRoots = event.removed.map((folder) => fileSystem.canonicalize(URI.parse(folder.uri).fsPath));
     const removedSet = new Set(removedRoots);
     workspaceRoots = [
-      ...new Set([...workspaceRoots.map((root) => pathResolve(root)).filter((root) => !removedSet.has(root)), ...addedRoots]),
+      ...new Set(
+        [...workspaceRoots.map((root) => fileSystem.canonicalize(root)).filter((root) => !removedSet.has(root)), ...addedRoots],
+      ),
     ];
     ctx.workspaceRoots = workspaceRoots;
     ctx.upwardMissCache.clear();
@@ -455,7 +462,7 @@ export function startServer(): Connection {
   connection.onExit(() => process.exit(0));
 
   connection.onInitialize((params) => {
-    workspaceRoots = workspaceRootsFromInitialize(params);
+    workspaceRoots = workspaceRootsFromInitialize(params, fileSystem);
     clientSupportsWorkspaceFolders = params.capabilities.workspace?.workspaceFolders === true;
     ctx.restrictProjectDiscoveryToWorkspaceRoots =
       clientSupportsWorkspaceFolders || (params.workspaceFolders !== undefined && params.workspaceFolders !== null);

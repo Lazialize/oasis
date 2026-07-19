@@ -4,6 +4,7 @@ import type { Node } from "yaml";
 import { buildAnchorIndex, resolveAnchor } from "./anchor.ts";
 import type { AnchorIndex, SchemaResourceEntry } from "./anchor.ts";
 import { nodeAtFragmentPointerFrom, resourceBaseBeforeFragmentPointerTarget } from "./document.ts";
+import { canonicalizeResourceUri } from "./filesystem.ts";
 import type { FileSystem } from "./filesystem.ts";
 import { type OasisDocument, parseDocument } from "./parse.ts";
 import { rangeFromOffsets, zeroRange } from "./position.ts";
@@ -164,7 +165,10 @@ export async function loadWorkspaceGraph(fs: FileSystem, entryPath: string): Pro
     for (const ref of findRefs(doc, node, kind, baseUri)) {
       recordRef(doc.filePath, ref);
       const { pointer } = parseRefString(ref.value);
-      const resourceUri = stripUriFragment(resolveUriReference(ref.baseUri, ref.value));
+      // A `file:` resourceUri is canonicalized against the physical identity the target was (or
+      // will be) indexed under, so a reference reached through a symlinked/case-aliased spelling
+      // still finds a resource that was registered under its canonical retrieval URI.
+      const resourceUri = canonicalizeResourceUri(fs, stripUriFragment(resolveUriReference(ref.baseUri, ref.value)));
       let resource = resources.get(resourceUri);
       if (!resource) {
         if (uriScheme(resourceUri) !== "file") continue;

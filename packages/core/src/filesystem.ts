@@ -1,6 +1,7 @@
+import { realpathSync } from "node:fs";
 import { readFile as fsReadFile } from "node:fs/promises";
-import { dirname, isAbsolute, resolve as pathResolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { basename, dirname, isAbsolute, join, resolve as pathResolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { safeDecodeURIComponent } from "./pointer.ts";
 import { uriScheme } from "./uri.ts";
 
@@ -15,7 +16,16 @@ export interface FileSystem {
   /**
    * Reduce `path` to the single canonical identity this file system uses to key a document, so a
    * path reached two different ways (e.g. a relative entry vs. the absolute path a `$ref` resolves
-   * to) is recognised as the same file. Must be idempotent and agree with `resolve`'s output.
+   * to, or — for `NodeFileSystem` — a symlinked alias vs. its real path, or a case alias on a
+   * case-insensitive filesystem) is recognised as the same file. Must be idempotent and agree with
+   * `resolve`'s output. A path that does not exist (yet) still canonicalizes deterministically,
+   * lexically, so failed loads dedupe too.
+   *
+   * This value doubles as the display path used in diagnostics and editor locations (`filePath` on
+   * a parsed document): deliberately so, matching the existing precedent of canonicalizing a
+   * relative entry path before display (issue #25). Callers that reach the same physical file
+   * through different spellings will therefore see whichever spelling canonicalize normalizes to
+   * (e.g. the real, on-disk-cased path for `NodeFileSystem`), not the one they originally typed.
    */
   canonicalize(path: string): string;
 }
@@ -37,6 +47,21 @@ export function resolveFileReference(fs: FileSystem, fromPath: string, rawFilePa
   }
 }
 
+/**
+ * Canonicalize a `file:` resource URI to the identity `fs.canonicalize` assigns its path, so a
+ * resource reached via a symlinked/case-aliased spelling is recognised as the same resource that
+ * was indexed under its physical path (e.g. by `loadWorkspaceGraph`). Non-file URIs (`https:`,
+ * `urn:`, ...) and unparsable `file:` URIs are returned unchanged.
+ */
+export function canonicalizeResourceUri(fs: FileSystem, uri: string): string {
+  if (uriScheme(uri) !== "file") return uri;
+  try {
+    return pathToFileURL(fs.canonicalize(fileURLToPath(uri))).href;
+  } catch {
+    return uri;
+  }
+}
+
 /** Resolve a native path relative to the directory containing `fromPath`. */
 function resolvePath(fromPath: string, ref: string): string {
   if (isAbsolute(ref)) return pathResolve(ref);
@@ -44,6 +69,11 @@ function resolvePath(fromPath: string, ref: string): string {
 }
 
 export class NodeFileSystem implements FileSystem {
+  // Real filesystem access to resolve symlinks/on-disk casing is synchronous (canonicalize is a
+  // sync method) and happens on every `$ref` target lookup, so results are memoized per instance
+  // to keep the hot path to one syscall per distinct lexical path rather than one per lookup.
+  private readonly canonicalCache = new Map<string, string>();
+
   async readFile(path: string): Promise<string> {
     return fsReadFile(path, "utf-8");
   }
@@ -53,7 +83,28 @@ export class NodeFileSystem implements FileSystem {
   }
 
   canonicalize(path: string): string {
-    return pathResolve(path);
+    const lexical = pathResolve(path);
+    const cached = this.canonicalCache.get(lexical);
+    if (cached !== undefined) return cached;
+    const physical = this.resolvePhysical(lexical);
+    this.canonicalCache.set(lexical, physical);
+    return physical;
+  }
+
+  // realpath recovers the physical identity: it follows symlinks and, on case-insensitive
+  // filesystems (default macOS/Windows), the on-disk casing. A leaf that doesn't exist yet (or no
+  // longer does) can't be resolved this way, so it falls back to canonicalizing its parent
+  // directory and re-appending the (still lexical) leaf name — so a missing file reached through an
+  // existing symlinked/differently-cased ancestor still gets one deterministic identity, and a
+  // wholly nonexistent path bottoms out at its plain lexical form.
+  private resolvePhysical(lexical: string): string {
+    try {
+      return realpathSync.native(lexical);
+    } catch {
+      const parent = dirname(lexical);
+      if (parent === lexical) return lexical;
+      return join(this.canonicalize(parent), basename(lexical));
+    }
   }
 }
 
