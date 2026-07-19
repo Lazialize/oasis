@@ -1,5 +1,12 @@
 # @oasis/bundler
 
+## 0.9.4
+
+### Patch Changes
+
+- Updated dependencies [[`f51d2dd`](https://github.com/Lazialize/oasis/commit/f51d2ddbf227b444e88b6b7d08429cad413fc09f), [`2a49d0d`](https://github.com/Lazialize/oasis/commit/2a49d0dd8dd4a55945861e56ed781cab6bb9f22c), [`feff144`](https://github.com/Lazialize/oasis/commit/feff144bbbc0a7c7e0388c5b8386d2235c95f56a), [`9d82d70`](https://github.com/Lazialize/oasis/commit/9d82d700cb9fa98720309d46d9222c1d85e70111), [`18d7a3e`](https://github.com/Lazialize/oasis/commit/18d7a3e4ae57618089c9fed94f48a8b3f46b8e48)]:
+  - @oasis/core@0.9.4
+
 ## 0.9.3
 
 ### Patch Changes

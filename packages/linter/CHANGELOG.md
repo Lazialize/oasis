@@ -1,5 +1,16 @@
 # @oasis/linter
 
+## 0.9.4
+
+### Patch Changes
+
+- [#198](https://github.com/Lazialize/oasis/pull/198) [`d2118d6`](https://github.com/Lazialize/oasis/commit/d2118d6188b42e56f5bbbd9c48c40cbfe813d467) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(linter): deduplicate JSON Schema type-name validation across schema rules. The `structure/schema-keywords` rule is responsible for validating type-name correctness; `structure/schema-nullable` was duplicating this check, causing both rules to report the same error for invalid types like `type: wat`. Removed type-name validation from `structure/schema-nullable`, which now focuses exclusively on version-appropriate nullability forms: rejecting `type` arrays in 3.0, `type: null` scalars in 3.0, and `nullable` in 3.1. The `structure/schema-keywords` rule independently validates all type names for both scalar and array forms across both OpenAPI versions.
+
+- [#191](https://github.com/Lazialize/oasis/pull/191) [`c5c1c69`](https://github.com/Lazialize/oasis/commit/c5c1c69e7d5b527d6d1f13eed3b0a01e3898a14c) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(linter): accept prerelease suffixes in the `structure/openapi-version` rule. The rule now accepts version strings like `3.0.0-rc1` and `3.1.0-alpha.1`, matching the behavior of `@oasis/core`'s `detectVersion` function and the official OpenAPI schema, which already recognize and classify these prerelease versions correctly.
+
+- Updated dependencies [[`f51d2dd`](https://github.com/Lazialize/oasis/commit/f51d2ddbf227b444e88b6b7d08429cad413fc09f), [`2a49d0d`](https://github.com/Lazialize/oasis/commit/2a49d0dd8dd4a55945861e56ed781cab6bb9f22c), [`feff144`](https://github.com/Lazialize/oasis/commit/feff144bbbc0a7c7e0388c5b8386d2235c95f56a), [`9d82d70`](https://github.com/Lazialize/oasis/commit/9d82d700cb9fa98720309d46d9222c1d85e70111), [`18d7a3e`](https://github.com/Lazialize/oasis/commit/18d7a3e4ae57618089c9fed94f48a8b3f46b8e48)]:
+  - @oasis/core@0.9.4
+
 ## 0.9.3
 
 ### Patch Changes

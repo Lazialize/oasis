@@ -1,5 +1,42 @@
 # @oasis/core
 
+## 0.9.4
+
+### Patch Changes
+
+- [#200](https://github.com/Lazialize/oasis/pull/200) [`f51d2dd`](https://github.com/Lazialize/oasis/commit/f51d2ddbf227b444e88b6b7d08429cad413fc09f) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(core): canonicalize physical file identity across symlinks and case aliases. `NodeFileSystem.canonicalize` previously only ran `path.resolve`, so a symlinked directory alias or a differently-cased path on a case-insensitive filesystem (default macOS/Windows) could enter the workspace graph as a second, duplicate document instead of being recognised as the same physical file. `canonicalize` now recovers the real, on-disk-cased path (memoized per instance to avoid extra syscalls on hot lookups), falling back to a deterministic lexical path for references that don't exist on disk yet, and to an ancestor's resolved identity when only part of the path exists. `$ref` target lookups (`loadWorkspaceGraph` and `resolveRef`) canonicalize `file:` resource URIs the same way, so cycle detection and reference resolution also see one identity per physical file across aliased spellings. The LSP server canonicalizes open-document URIs, workspace roots, and config entries the same way (while still replying on the exact URI the client opened), and the CLI bundle command looks its entry up by the graph's canonical entry path.
+
+- [#192](https://github.com/Lazialize/oasis/pull/192) [`2a49d0d`](https://github.com/Lazialize/oasis/commit/2a49d0dd8dd4a55945861e56ed781cab6bb9f22c) Thanks [@Lazialize](https://github.com/Lazialize)! - refactor(core): centralize the version-aware OpenAPI object-edge and JSON Schema
+  applicator transition tables in a single internal module (`semantic-traversal.ts`).
+  Reference discovery (`findRefs`) and anchor/resource indexing (`buildAnchorIndex`)
+  previously each maintained their own copies of the schema-applicator key sets, HTTP
+  method set, and object-kind transition functions, so a new applicator or object
+  position could be added to one walker but silently omitted from the other. Both
+  walkers now consume one authoritative table while keeping their specialized outputs
+  and caches. No behavior change.
+
+- [#202](https://github.com/Lazialize/oasis/pull/202) [`feff144`](https://github.com/Lazialize/oasis/commit/feff144bbbc0a7c7e0388c5b8386d2235c95f56a) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(core): clamp `offsetAtPosition` to the real document and CRLF line boundaries. Out-of-range LSP positions (a character past the final line, or a line past the last line) previously produced offsets far beyond the source text, and a character past a CRLF-terminated line clamped to the LF byte instead of the position before the `\r\n` sequence. `offsetAtPosition` now takes the document's source text alongside the `LineCounter` so it can bound every result to `[0, text.length]` and detect `\r\n` vs `\n` line terminators when clamping. All server callers (`refs.ts`, `component-target.ts`, `completion.ts`, `code-actions.ts`) pass `doc.text` through accordingly.
+
+- [#197](https://github.com/Lazialize/oasis/pull/197) [`9d82d70`](https://github.com/Lazialize/oasis/commit/9d82d700cb9fa98720309d46d9222c1d85e70111) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(core): diagnose duplicate canonical JSON Schema resource identifiers. When two different
+  documents (or embedded resources) declared the same canonical `$id`, `loadWorkspaceGraph` let
+  whichever one was indexed last silently win, so a `$ref` to that URI could resolve to the wrong
+  schema with no diagnostic. The workspace graph now detects the collision while merging anchor
+  indexes, emits a source-ranged `no-duplicate-schema-id` diagnostic naming both documents (stable
+  regardless of load order), and makes the colliding URI unresolvable instead of resolving it to
+  either claimant. Retrieval aliases and re-indexing the same document as schema-aware after being
+  first reached generically are unaffected.
+
+- [#199](https://github.com/Lazialize/oasis/pull/199) [`18d7a3e`](https://github.com/Lazialize/oasis/commit/18d7a3e4ae57618089c9fed94f48a8b3f46b8e48) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(server): recognize percent-encoded component pointer segments in references and rename.
+  `$ref`s like `#/components/schemas/%46oo` (RFC 6901 §6 URI-fragment percent-encoding for `Foo`)
+  resolved correctly for definition navigation, but find-references and rename discarded them:
+  `collectComponentReferences` compared a resolved ref's raw, still-encoded pointer spelling against
+  the target's canonical (decoded) pointer, so an encoded segment could never match. It now compares
+  against `resolved.canonicalPointer`, and `componentNameSegmentRange` locates the name's source range
+  by decoding each raw fragment segment (percent-encoding and JSON Pointer `~0`/`~1`) instead of
+  searching for the decoded literal in the source text, so the returned range always spans the exact
+  encoded source span — preserving any nested pointer suffix and leaving plain, unencoded references
+  unaffected.
+
 ## 0.9.3
 
 ### Patch Changes
