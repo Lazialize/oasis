@@ -44,7 +44,7 @@ export async function prepareRename(ctx: ServerContext, params: RenamePositionPa
   const target = resolveComponentTarget(graph, doc, params.position);
   if (!target) return undefined;
 
-  const refAt = findRefAtPosition(doc, params.position);
+  const refAt = findRefAtPosition(graph, doc, params.position);
   if (refAt) {
     const range = componentNameSegmentRange(doc, refAt.range, target.section, target.name);
     if (!range) return undefined;

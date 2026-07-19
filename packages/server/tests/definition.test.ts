@@ -38,3 +38,110 @@ describe("getDefinition", () => {
     expect(result).toBeUndefined();
   });
 });
+
+describe("getDefinition ignores ref-like strings in literal data (#182)", () => {
+  const PATH = "/lit/openapi.yaml";
+
+  function ctxFor(text: string) {
+    return createServerContext(new InMemoryFileSystem({ [PATH]: text }));
+  }
+
+  test("a `#/...` pointer-shaped string in an `example` value is not a ref", async () => {
+    const text = `openapi: 3.1.0
+info: { title: Repro, version: "1.0.0" }
+paths: {}
+components:
+  schemas:
+    Foo: { type: string }
+    Holder:
+      type: string
+      example: '#/components/schemas/Foo'
+`;
+    const result = await getDefinition(ctxFor(text), { path: PATH, position: positionOf(text, "#/components/schemas/Foo") });
+    expect(result).toBeUndefined();
+  });
+
+  test("a relative-file-shaped string in a `default` value is not a ref", async () => {
+    const text = `openapi: 3.1.0
+info: { title: Repro, version: "1.0.0" }
+paths: {}
+components:
+  schemas:
+    Holder:
+      type: string
+      default: '../other.yaml'
+`;
+    const result = await getDefinition(ctxFor(text), { path: PATH, position: positionOf(text, "../other.yaml") });
+    expect(result).toBeUndefined();
+  });
+
+  test("a `#/...` pointer-shaped string inside an `enum` value is not a ref", async () => {
+    const text = `openapi: 3.1.0
+info: { title: Repro, version: "1.0.0" }
+paths: {}
+components:
+  schemas:
+    Foo: { type: string }
+    Holder:
+      type: string
+      enum:
+        - '#/components/schemas/Foo'
+`;
+    const result = await getDefinition(ctxFor(text), { path: PATH, position: positionOf(text, "#/components/schemas/Foo") });
+    expect(result).toBeUndefined();
+  });
+
+  test("a `#/...` pointer-shaped string inside a `const` value is not a ref", async () => {
+    const text = `openapi: 3.1.0
+info: { title: Repro, version: "1.0.0" }
+paths: {}
+components:
+  schemas:
+    Foo: { type: string }
+    Holder:
+      const: '#/components/schemas/Foo'
+`;
+    const result = await getDefinition(ctxFor(text), { path: PATH, position: positionOf(text, "#/components/schemas/Foo") });
+    expect(result).toBeUndefined();
+  });
+
+  test("a `#/...` pointer-shaped string inside an `x-*` extension payload is not a ref", async () => {
+    const text = `openapi: 3.1.0
+info: { title: Repro, version: "1.0.0" }
+paths: {}
+components:
+  schemas:
+    Foo: { type: string }
+    Holder:
+      type: string
+      x-vendor: '#/components/schemas/Foo'
+`;
+    const result = await getDefinition(ctxFor(text), { path: PATH, position: positionOf(text, "#/components/schemas/Foo") });
+    expect(result).toBeUndefined();
+  });
+
+  test("a Link Object `operationRef` still resolves to the target operation", async () => {
+    const text = `openapi: 3.1.0
+info: { title: Repro, version: "1.0.0" }
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          description: OK
+components:
+  responses:
+    Ok:
+      description: OK
+      links:
+        Self:
+          operationRef: '#/paths/~1pets/get'
+`;
+    const result = await getDefinition(ctxFor(text), { path: PATH, position: positionOf(text, "#/paths/~1pets/get") });
+    expect(result).toBeDefined();
+    expect(result?.targetPath).toBe(PATH);
+    // Should land on the `get` operation, before the Link Object referring to it.
+    expect(result?.range.start.line).toBeLessThan(positionOf(text, "operationRef").line);
+  });
+});

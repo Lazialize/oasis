@@ -171,7 +171,7 @@ function resolveNameBasedTarget(graph: WorkspaceGraph, doc: OasisDocument, nb: N
  * undefined when the cursor isn't on a renameable/referenceable component.
  */
 export function resolveComponentTarget(graph: WorkspaceGraph, doc: OasisDocument, position: Position): ComponentTarget | undefined {
-  const refAt = findRefAtPosition(doc, position);
+  const refAt = findRefAtPosition(graph, doc, position);
   if (refAt) {
     const resolved = resolveRef(graph, doc, refAt.refString, refAt.range);
     if (!resolved.ok) return undefined;

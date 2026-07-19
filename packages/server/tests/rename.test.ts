@@ -433,6 +433,71 @@ components:
   });
 });
 
+describe("prepareRename/renameComponent ignore ref-like strings in literal example data (#182)", () => {
+  const PATH = "/repro/openapi.yaml";
+  // The exact repro from the issue: an `example` value that merely looks like a `$ref`.
+  const TEXT = `openapi: 3.1.0
+info: { title: Repro, version: 1.0.0 }
+paths: {}
+components:
+  schemas:
+    Foo: { type: string }
+    Holder:
+      type: string
+      example: '#/components/schemas/Foo'
+`;
+
+  function ctx() {
+    return createServerContext(new InMemoryFileSystem({ [PATH]: TEXT }));
+  }
+
+  // The cursor sits inside `Holder`'s own subtree (its `example` value), so `resolveComponentTarget`
+  // still resolves it as "cursor inside the Holder definition" — the pre-existing, intentional
+  // fallback for renaming a component from anywhere within its body (independent of this bug). What
+  // must NOT happen is treating the example string's text as a `$ref`-like pointer to `Foo`.
+  test("prepareRename on the example string targets the enclosing Holder component, never Foo", async () => {
+    const result = await prepareRename(ctx(), { path: PATH, position: positionOf(TEXT, "Foo", 1) });
+    expect(result).toBeDefined();
+    expect(result?.placeholder).toBe("Holder");
+  });
+
+  test("renameComponent from the example string only renames Holder, and never rewrites the example text or Foo's definition", async () => {
+    const edits = await renameComponent(ctx(), { path: PATH, position: positionOf(TEXT, "Foo", 1), newName: "Bar" });
+    expect(edits).toBeDefined();
+    expect(edits).toHaveLength(1);
+    // The single edit is Holder's own definition key, not Foo's, and the example string is untouched.
+    expect(textAt(TEXT, edits![0]!.range)).toBe("Holder");
+    const exampleLine = positionOf(TEXT, "example:").line;
+    expect(edits!.some((e) => e.range.start.line === exampleLine)).toBe(false);
+  });
+
+  // A ref-like literal outside any component's own subtree (in a Path Item's response example) has
+  // no enclosing-component fallback to fall back to, so this isolates the fix: it must resolve to
+  // nothing at all, not to the `Foo` component the text merely resembles a pointer to.
+  test("prepareRename on a ref-like literal outside any component subtree returns undefined", async () => {
+    const path = "/repro2/openapi.yaml";
+    const text = `openapi: 3.1.0
+info: { title: Repro, version: 1.0.0 }
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              example: '#/components/schemas/Foo'
+components:
+  schemas:
+    Foo: { type: string }
+`;
+    const c = createServerContext(new InMemoryFileSystem({ [path]: text }));
+    const result = await prepareRename(c, { path, position: positionOf(text, "#/components/schemas/Foo") });
+    expect(result).toBeUndefined();
+  });
+});
+
 describe("renameComponent ignores lookalikes in literal data contexts (#118)", () => {
   const PATH = "/ctx/openapi.yaml";
   const TEXT = `openapi: 3.1.0
