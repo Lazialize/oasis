@@ -1,6 +1,8 @@
-import { describe, expect, test } from "bun:test";
-import { resolve as pathResolve } from "node:path";
-import { InMemoryFileSystem } from "../src/filesystem.ts";
+import { afterEach, describe, expect, test } from "bun:test";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve as pathResolve } from "node:path";
+import { InMemoryFileSystem, NodeFileSystem } from "../src/filesystem.ts";
 import { allDiagnostics, graphReferences, loadWorkspaceGraph } from "../src/graph.ts";
 import { resolveRef } from "../src/ref.ts";
 
@@ -316,5 +318,136 @@ describe("duplicate canonical JSON Schema resource identifiers (issue #178)", ()
     const dupes = allDiagnostics(graph).filter((d) => d.code === "no-duplicate-schema-id");
     expect(dupes).toHaveLength(1);
     expect(dupes[0]?.message).toContain("https://schemas.example/embedded");
+  });
+});
+
+describe("physical file identity across symlinks and case aliases (issue #153)", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  function makeTempDir(): string {
+    const dir = mkdtempSync(join(tmpdir(), "oasis-graph-canon-"));
+    dirs.push(dir);
+    return dir;
+  }
+
+  test("an entry reached through a symlinked directory alias and its real path is parsed once", async () => {
+    const root = makeTempDir();
+    const realDir = join(root, "real");
+    mkdirSync(realDir);
+    writeFileSync(
+      join(realDir, "entry.yaml"),
+      ["openapi: 3.0.3", "info: { title: t, version: '1' }", "paths: {}"].join("\n"),
+    );
+    symlinkSync(realDir, join(root, "alias"), "dir");
+
+    const fs = new NodeFileSystem();
+    const graph = await loadWorkspaceGraph(fs, join(root, "alias", "entry.yaml"));
+
+    expect(graph.documents.size).toBe(1);
+    // The one document is keyed under the physical identity, shared by both spellings.
+    const real = fs.canonicalize(join(realDir, "entry.yaml"));
+    const alias = fs.canonicalize(join(root, "alias", "entry.yaml"));
+    expect(real).toBe(alias);
+    expect(graph.documents.has(real)).toBe(true);
+  });
+
+  test("a two-file cycle reached via a symlink alias on one side yields a single cycle diagnostic", async () => {
+    const root = makeTempDir();
+    const realDir = join(root, "real");
+    mkdirSync(realDir);
+    symlinkSync(realDir, join(root, "alias"), "dir");
+    // b.yaml refers back to a.yaml through the alias, while a.yaml is reached through the real path.
+    writeFileSync(join(realDir, "a.yaml"), "x: { $ref: './b.yaml#/y' }");
+    writeFileSync(join(realDir, "b.yaml"), `y: { $ref: '${join(root, "alias", "a.yaml")}#/x' }`);
+
+    const fs = new NodeFileSystem();
+    const graph = await loadWorkspaceGraph(fs, join(realDir, "a.yaml"));
+
+    expect(graph.documents.size).toBe(2);
+    const cycles = allDiagnostics(graph).filter((d) => d.code === "no-ref-cycle");
+    expect(cycles).toHaveLength(1);
+  });
+
+  test("a self reference through a symlink alias does not duplicate the document", async () => {
+    const root = makeTempDir();
+    const realDir = join(root, "real");
+    mkdirSync(realDir);
+    symlinkSync(realDir, join(root, "alias"), "dir");
+    writeFileSync(
+      join(realDir, "self.yaml"),
+      [
+        "openapi: 3.0.3",
+        "info: { title: t, version: '1' }",
+        "components:",
+        "  schemas:",
+        "    A: { type: object }",
+        `    B: { $ref: '${join(root, "alias", "self.yaml")}#/components/schemas/A' }`,
+      ].join("\n"),
+    );
+
+    const fs = new NodeFileSystem();
+    const graph = await loadWorkspaceGraph(fs, join(realDir, "self.yaml"));
+
+    expect(graph.documents.size).toBe(1);
+    expect(allDiagnostics(graph).filter((d) => d.code === "no-ref-cycle")).toHaveLength(0);
+  });
+
+  test("a missing reference reached through two alias spellings is attempted and diagnosed once", async () => {
+    const root = makeTempDir();
+    const realDir = join(root, "real");
+    mkdirSync(realDir);
+    symlinkSync(realDir, join(root, "alias"), "dir");
+    writeFileSync(
+      join(realDir, "entry.yaml"),
+      [
+        "openapi: 3.0.3",
+        "info: { title: t, version: '1' }",
+        "components:",
+        "  schemas:",
+        "    A: { $ref: './missing.yaml#/x' }",
+        `    B: { $ref: '${join(root, "alias", "missing.yaml")}#/y' }`,
+      ].join("\n"),
+    );
+
+    const fs = new NodeFileSystem();
+    const graph = await loadWorkspaceGraph(fs, join(realDir, "entry.yaml"));
+
+    const failures = allDiagnostics(graph).filter((d) => d.code === "no-unresolved-ref");
+    expect(failures).toHaveLength(1);
+  });
+
+  test("diagnostics report a deliberate canonical display path rather than the alias spelling", async () => {
+    const root = makeTempDir();
+    const realDir = join(root, "real");
+    mkdirSync(realDir);
+    symlinkSync(realDir, join(root, "alias"), "dir");
+    writeFileSync(join(realDir, "entry.yaml"), "openapi: 3.0.3\n");
+
+    const fs = new NodeFileSystem();
+    const graph = await loadWorkspaceGraph(fs, join(root, "alias", "entry.yaml"));
+
+    // The entry path exposed on the graph is the canonical (physical) identity, matching the
+    // single document key below — not the alias spelling the caller passed in. This mirrors the
+    // existing relative-vs-absolute precedent (issue #25): the displayed path is always the
+    // canonicalized one.
+    expect(graph.entryPath).toBe(fs.canonicalize(join(realDir, "entry.yaml")));
+    expect([...graph.documents.keys()]).toEqual([graph.entryPath]);
+  });
+
+  // Only meaningful on case-insensitive filesystems (default macOS/Windows).
+  test("case aliases of the same physical file are parsed once on case-insensitive filesystems", async () => {
+    const root = makeTempDir();
+    writeFileSync(join(root, "Entry.yaml"), "openapi: 3.0.3\n");
+    const caseInsensitive = existsSync(join(root, "entry.yaml"));
+    if (!caseInsensitive) return;
+
+    const fs = new NodeFileSystem();
+    const graph = await loadWorkspaceGraph(fs, join(root, "ENTRY.yaml"));
+
+    expect(graph.documents.size).toBe(1);
+    expect(graph.entryPath).toBe(fs.canonicalize(join(root, "Entry.yaml")));
   });
 });

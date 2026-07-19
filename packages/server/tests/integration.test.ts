@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -156,7 +156,7 @@ paths:
   }, 20000);
 
   test("adding and removing a workspace folder loads and unloads its projects", async () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), "oasis-lsp-workspace-added-"));
+    const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "oasis-lsp-workspace-added-")));
     const projectDir = join(projectRoot, "nested");
     mkdirSync(projectDir);
     const configPath = join(projectDir, "oasis.config.jsonc");
@@ -462,7 +462,7 @@ paths:
     // On disk everything is clean; the open buffer for the fragment is edited (unsaved) to drop
     // its operationId. Closing that buffer discards the edit, so the server must recompute the
     // project's diagnostics from disk instead of leaving the discarded buffer's error published.
-    const dir = mkdtempSync(join(tmpdir(), "oasis-lsp-close-revalidate-"));
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "oasis-lsp-close-revalidate-")));
     mkdirSync(join(dir, "paths"), { recursive: true });
     const fragmentPath = join(dir, "paths", "pets.yaml");
     const fragmentUri = pathToFileURL(fragmentPath).toString();
@@ -537,7 +537,7 @@ paths:
     // On disk the config declares one (bad) entry. The open config buffer is edited (unsaved) to
     // an empty entries list, unloading the project and clearing its diagnostics. Closing that
     // buffer must reload the config from disk and bring the entry's diagnostics back.
-    const dir = mkdtempSync(join(tmpdir(), "oasis-lsp-config-close-"));
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "oasis-lsp-config-close-")));
     const configPath = join(dir, "oasis.config.jsonc");
     const entryUri = pathToFileURL(join(dir, "a.yaml")).toString();
     writeFileSync(configPath, `{ "entries": ["a.yaml"] }`);
@@ -598,7 +598,7 @@ paths:
   }, 20000);
 
   test("an external disk change to a closed project fragment refreshes diagnostics (#51)", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "oasis-lsp-watch-change-"));
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "oasis-lsp-watch-change-")));
     mkdirSync(join(dir, "paths"), { recursive: true });
     const fragmentPath = join(dir, "paths", "pets.yaml");
     const fragmentUri = pathToFileURL(fragmentPath).toString();
@@ -650,7 +650,7 @@ paths:
   }, 20000);
 
   test("creating a previously-missing $ref target on disk resolves the entry's diagnostics (#51)", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "oasis-lsp-watch-create-"));
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "oasis-lsp-watch-create-")));
     mkdirSync(join(dir, "paths"), { recursive: true });
     const entryUri = pathToFileURL(join(dir, "openapi.yaml")).toString();
     const fragmentPath = join(dir, "paths", "pets.yaml");
@@ -787,7 +787,7 @@ paths:
   }, 20000);
 
   test("removing an open entry from project config reroutes it as standalone and re-validates it (#113)", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "oasis-lsp-remove-entry-open-"));
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "oasis-lsp-remove-entry-open-")));
     const configPath = join(dir, "oasis.config.jsonc");
     const entryPath = join(dir, "api.yaml");
     const configUri = pathToFileURL(configPath).toString();
@@ -849,7 +849,7 @@ paths:
   }, 20000);
 
   test("a watched change followed by removing the entry from config before the debounce fires never resurrects diagnostics (#113)", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "oasis-lsp-remove-entry-watched-"));
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "oasis-lsp-remove-entry-watched-")));
     const configPath = join(dir, "oasis.config.jsonc");
     const entryPath = join(dir, "a.yaml");
     const configUri = pathToFileURL(configPath).toString();

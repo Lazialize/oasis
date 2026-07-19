@@ -50,7 +50,11 @@ export async function runBundleCommand(args: string[], io: RunBundleOptions): Pr
   // (unresolved external `$ref` targets, ref cycles). An unresolved external target is NOT a fatal
   // error here: the bundler preserves the `$ref` verbatim and returns a warning, matching its API,
   // so only an entry that failed to load or a real syntax error aborts the command (#30).
-  const entryDoc = graph.documents.get(absEntry);
+  // Look the entry up by `graph.entryPath` rather than `absEntry`: the graph keys documents by
+  // `FileSystem.canonicalize`'s physical identity (real path, on-disk casing), which can differ
+  // lexically from a plain `path.resolve` when the entry is reached through a symlinked ancestor
+  // (e.g. macOS's `/var` -> `/private/var`).
+  const entryDoc = graph.documents.get(graph.entryPath);
   const parseErrors = [...graph.documents.values()].flatMap((d) => d.diagnostics).filter((d) => d.severity === "error");
   if (!entryDoc || parseErrors.length > 0) {
     for (const d of parseErrors) {

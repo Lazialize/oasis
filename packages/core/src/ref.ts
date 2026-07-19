@@ -4,7 +4,7 @@ import type { Node, Scalar } from "yaml";
 import { resolveAnchor } from "./anchor.ts";
 import { nodeAtFragmentPointer, nodeAtFragmentPointerFrom, pointerToNode, resourceBaseAtFragmentPointer } from "./document.ts";
 import { canonicalPointer } from "./pointer.ts";
-import { resolveFileReference } from "./filesystem.ts";
+import { canonicalizeResourceUri, resolveFileReference } from "./filesystem.ts";
 import { containerExtensionsAreOpaque, isContainerKey, isLiteralDataKey } from "./node-context.ts";
 import { containerEntryKind, directObjectKind } from "./semantic-traversal.ts";
 import type { OpenApiObjectKind } from "./semantic-traversal.ts";
@@ -445,7 +445,10 @@ export function resolveRef(
 
   const baseUri = contextualRef?.baseUri ?? defaultBaseUri;
   const resolvedUri = resolveUriReference(baseUri, refString);
-  const resourceUri = stripUriFragment(resolvedUri);
+  // Canonicalize a `file:` resourceUri against its physical identity so a reference reached
+  // through a symlinked/case-aliased spelling still finds the resource registered under its
+  // canonical retrieval URI (see `loadWorkspaceGraph`'s indexing).
+  const resourceUri = canonicalizeResourceUri(graph.fileSystem, stripUriFragment(resolvedUri));
   const resource = graph.resources.get(resourceUri);
 
   if (resource) {
