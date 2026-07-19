@@ -519,6 +519,58 @@ describe("structure/schema-nullable", () => {
     expect(d?.range.start.line).toBe(21);
   });
 
+  test("only structure/schema-keywords reports invalid scalar type names in 3.0 (not both rules)", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": `
+openapi: 3.0.3
+info:
+  title: T
+  version: "1"
+paths: {}
+components:
+  schemas:
+    Bad:
+      type: wat
+`,
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    const typeErrorsFromSchemaKeywords = diagnostics.filter(
+      (d) => d.rule === "structure/schema-keywords" && d.message.includes("type: wat"),
+    );
+    const typeErrorsFromSchemaNullable = diagnostics.filter(
+      (d) => d.rule === "structure/schema-nullable" && d.message.includes("type: wat"),
+    );
+    expect(typeErrorsFromSchemaKeywords).toHaveLength(1);
+    expect(typeErrorsFromSchemaNullable).toHaveLength(0);
+  });
+
+  test("only structure/schema-keywords reports invalid array entry type names in 3.1 (not both rules)", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": `
+openapi: 3.1.0
+info:
+  title: T
+  version: "1"
+paths: {}
+components:
+  schemas:
+    Bad:
+      type: [string, invalid]
+`,
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    const typeErrorsFromSchemaKeywords = diagnostics.filter(
+      (d) => d.rule === "structure/schema-keywords" && d.message.includes("type: invalid"),
+    );
+    const typeErrorsFromSchemaNullable = diagnostics.filter(
+      (d) => d.rule === "structure/schema-nullable" && d.message.includes("type: invalid"),
+    );
+    expect(typeErrorsFromSchemaKeywords).toHaveLength(1);
+    expect(typeErrorsFromSchemaNullable).toHaveLength(0);
+  });
+
   test("valid fixture passes", async () => {
     const diagnostics = await lintFixture("valid/openapi.yaml");
     expect(diagnostics.some((d) => d.rule === "structure/schema-nullable")).toBe(false);
