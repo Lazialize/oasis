@@ -148,7 +148,7 @@ export function collectNameBasedRefs(doc: OasisDocument): NameBasedRef[] {
 
 /** The name-based reference whose own scalar range contains `position`, if any. */
 export function nameBasedRefAtPosition(doc: OasisDocument, position: Position): NameBasedRef | undefined {
-  const offset = offsetAtPosition(doc.lineCounter, position);
+  const offset = offsetAtPosition(doc.lineCounter, doc.text, position);
   return collectNameBasedRefs(doc).find((nb) => offset >= nb.range.startOffset && offset <= nb.range.endOffset);
 }
 
@@ -185,7 +185,7 @@ export function resolveComponentTarget(graph: WorkspaceGraph, doc: OasisDocument
   const nameBased = nameBasedRefAtPosition(doc, position);
   if (nameBased) return resolveNameBasedTarget(graph, doc, nameBased);
 
-  const offset = offsetAtPosition(doc.lineCounter, position);
+  const offset = offsetAtPosition(doc.lineCounter, doc.text, position);
   const found = nodeAtPosition(doc, offset);
   if (!found) return undefined;
 

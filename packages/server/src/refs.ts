@@ -26,7 +26,7 @@ export interface RefAtPosition {
  * separately), so it's recognized here by its exact field position instead of by text shape.
  */
 export function findRefAtPosition(graph: WorkspaceGraph, doc: OasisDocument, position: Position): RefAtPosition | undefined {
-  const offset = offsetAtPosition(doc.lineCounter, position);
+  const offset = offsetAtPosition(doc.lineCounter, doc.text, position);
   const found = nodeAtPosition(doc, offset);
   if (!found) return undefined;
   if (!isScalar(found.node)) return undefined;
