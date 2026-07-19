@@ -21,7 +21,7 @@
     "onLanguage:yaml",
     "onLanguage:json",
     "onLanguage:jsonc",
-    "workspaceContains:oasis.config.jsonc"
+    "workspaceContains:**/oasis.config.jsonc"
   ],
   "main": "./dist/extension.js",
   "contributes": {
