@@ -2,7 +2,8 @@ import { isMap, isScalar } from "yaml";
 import { childAt } from "../util.ts";
 import type { Rule } from "../types.ts";
 
-const VALID_VERSION = /^3\.[01]\.\d+$/;
+// Mirrors the official OpenAPI schema pattern `^3\.[01]\.\d+(-.+)?$` for the `openapi` field.
+const VALID_VERSION = /^3\.[01]\.\d+(-.+)?$/;
 
 export const structureOpenapiVersion: Rule = {
   name: "structure/openapi-version",

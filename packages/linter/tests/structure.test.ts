@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { InMemoryFileSystem, loadWorkspaceGraph, NodeFileSystem } from "@oasis/core";
+import { detectVersion, InMemoryFileSystem, loadWorkspaceGraph, NodeFileSystem, parseDocument } from "@oasis/core";
 import { lint } from "../src/engine.ts";
 import { resolveConfig } from "../src/config.ts";
 
@@ -34,6 +34,183 @@ describe("structure/openapi-version", () => {
     const d = diagnostics.find((d) => d.rule === "structure/openapi-version");
     expect(d).toBeDefined();
     expect(d?.range.start.line).toBe(0);
+  });
+
+  test("accepts a valid 3.0.x version", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": `
+openapi: 3.0.3
+info:
+  title: T
+  version: "1"
+paths: {}
+`,
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    expect(diagnostics.some((d) => d.rule === "structure/openapi-version")).toBe(false);
+  });
+
+  test("accepts a valid 3.1.x version", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": `
+openapi: 3.1.0
+info:
+  title: T
+  version: "1"
+paths: {}
+`,
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    expect(diagnostics.some((d) => d.rule === "structure/openapi-version")).toBe(false);
+  });
+
+  test("accepts a 3.0.x prerelease version (3.0.0-rc1)", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": `
+openapi: 3.0.0-rc1
+info:
+  title: T
+  version: "1"
+paths: {}
+`,
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    expect(diagnostics.some((d) => d.rule === "structure/openapi-version")).toBe(false);
+  });
+
+  test("accepts a 3.1.x prerelease version (3.1.0-rc1)", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": `
+openapi: 3.1.0-rc1
+info:
+  title: T
+  version: "1"
+paths: {}
+`,
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    expect(diagnostics.some((d) => d.rule === "structure/openapi-version")).toBe(false);
+  });
+
+  test("accepts a 3.0.x prerelease version with complex suffix (3.0.0-alpha.1)", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": `
+openapi: 3.0.0-alpha.1
+info:
+  title: T
+  version: "1"
+paths: {}
+`,
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    expect(diagnostics.some((d) => d.rule === "structure/openapi-version")).toBe(false);
+  });
+
+  test("accepts a 3.1.x prerelease version with complex suffix (3.1.0-beta.2)", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": `
+openapi: 3.1.0-beta.2
+info:
+  title: T
+  version: "1"
+paths: {}
+`,
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    expect(diagnostics.some((d) => d.rule === "structure/openapi-version")).toBe(false);
+  });
+
+  test("rejects a version missing patch number (3.0)", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": `
+openapi: 3.0
+info:
+  title: T
+  version: "1"
+paths: {}
+`,
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    const d = diagnostics.find((d) => d.rule === "structure/openapi-version");
+    expect(d).toBeDefined();
+  });
+
+  test("rejects an unsupported minor version (3.2.0)", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": `
+openapi: 3.2.0
+info:
+  title: T
+  version: "1"
+paths: {}
+`,
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    const d = diagnostics.find((d) => d.rule === "structure/openapi-version");
+    expect(d).toBeDefined();
+  });
+
+  test("rejects a malformed prerelease suffix (3.1.0-)", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": `
+openapi: 3.1.0-
+info:
+  title: T
+  version: "1"
+paths: {}
+`,
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    const d = diagnostics.find((d) => d.rule === "structure/openapi-version");
+    expect(d).toBeDefined();
+  });
+
+  test("accepts a prerelease suffix containing hyphens (3.1.0-rc-1)", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": `
+openapi: 3.1.0-rc-1
+info:
+  title: T
+  version: "1"
+paths: {}
+`,
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    expect(diagnostics.some((d) => d.rule === "structure/openapi-version")).toBe(false);
+  });
+
+  test("every version accepted by the rule is also detected by core's detectVersion", () => {
+    const accepted = ["3.0.0", "3.0.3", "3.1.0", "3.0.0-rc1", "3.1.0-rc1", "3.1.0-alpha.1", "3.1.0-rc-1"];
+    for (const version of accepted) {
+      const doc = parseDocument(`openapi: "${version}"\ninfo:\n  title: x\n`, "/virtual/doc.yaml");
+      expect(detectVersion(doc)).toBe(version.startsWith("3.0") ? "3.0" : "3.1");
+    }
+  });
+
+  test("rejects a non-string openapi field", async () => {
+    const fs = new InMemoryFileSystem({
+      "/virtual/entry.yaml": `
+openapi: 3.1
+info:
+  title: T
+  version: "1"
+paths: {}
+`,
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/entry.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+    const d = diagnostics.find((d) => d.rule === "structure/openapi-version");
+    expect(d).toBeDefined();
   });
 
   test("valid fixture passes", async () => {
