@@ -861,10 +861,12 @@ export async function getCodeActions(ctx: ServerContext, params: CodeActionsPara
   const results: CodeActionResult[] = [];
 
   // Every loaded graph that holds the edited file, so the remove-unused quickfix can check for
-  // cross-entry references before offering a destructive delete. Computed once, lazily used.
-  const graphsWithDoc = await findAllGraphsContaining(ctx, doc.filePath);
+  // cross-entry references before offering a destructive delete. Only loaded when needed for
+  // components/no-unused diagnostic, not for other operations/refactorings.
+  let graphsWithDoc: WorkspaceGraph[] | undefined;
 
-  params.diagnostics.forEach((diag, index) => {
+  for (let index = 0; index < params.diagnostics.length; index++) {
+    const diag = params.diagnostics[index]!;
     let action: CodeActionResult | undefined;
     switch (diag.code) {
       case "operation/operation-id":
@@ -877,13 +879,17 @@ export async function getCodeActions(ctx: ServerContext, params: CodeActionsPara
         action = buildAddPathParam(graph, entryDoc, doc, diag, index);
         break;
       case "components/no-unused":
+        // Lazily load all graphs only when needed for this destructive operation.
+        if (!graphsWithDoc) {
+          graphsWithDoc = await findAllGraphsContaining(ctx, doc.filePath);
+        }
         action = buildRemoveUnusedComponent(doc, diag, index, graphsWithDoc);
         break;
       default:
         break;
     }
     if (action) results.push(action);
-  });
+  }
 
   const extract = buildExtractToComponent(graph, entryDoc, doc, params.position);
   if (extract) results.push(extract);
