@@ -44,14 +44,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-
-      - name: Cache node_modules
-        uses: actions/cache@v4
-        with:
-          path: editors/vscode/node_modules
-          key: ${{ runner.os }}-vscode-node_modules-${{ hashFiles('editors/vscode/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-vscode-node_modules-
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
 
       - name: Install dependencies
         run: npm ci
