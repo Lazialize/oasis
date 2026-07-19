@@ -208,6 +208,71 @@ components:
   });
 });
 
+describe("getReferences with percent-encoded component pointers (#184)", () => {
+  const ENTRY = "/percent/openapi.yaml";
+  const TEXT = `openapi: 3.1.0
+info:
+  title: Test
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Foo:
+      type: object
+      properties:
+        id:
+          type: string
+    Holder:
+      $ref: '#/components/schemas/%46oo'
+    NestedHolder:
+      $ref: '#/components/schemas/%46oo/properties/id'
+`;
+
+  test("from the definition finds a reference whose pointer segment is percent-encoded", async () => {
+    const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY]: TEXT }));
+    const position = positionOf(TEXT, "Foo:");
+
+    const results = await getReferences(ctx, { path: ENTRY, position, includeDeclaration: false });
+
+    expect(results).toHaveLength(2);
+    const lines = new Set(results.map((r) => r.range.start.line));
+    expect(lines.has(positionOf(TEXT, "'#/components/schemas/%46oo'").line)).toBe(true);
+    expect(lines.has(positionOf(TEXT, "'#/components/schemas/%46oo/properties/id'").line)).toBe(true);
+  });
+
+  test("from the encoded reference resolves to the target and finds all references", async () => {
+    const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY]: TEXT }));
+    const position = positionOf(TEXT, "%46oo'");
+
+    const results = await getReferences(ctx, { path: ENTRY, position, includeDeclaration: true });
+
+    expect(results).toHaveLength(3);
+  });
+
+  test("mixed-case percent escapes are recognized the same as canonical uppercase escapes", async () => {
+    const path = "/percent/mixed.yaml";
+    const text = `openapi: 3.1.0
+info:
+  title: Test
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Foo:
+      type: string
+    Holder:
+      $ref: '#/components/schemas/%46%6F%6f'
+`;
+    const ctx = createServerContext(new InMemoryFileSystem({ [path]: text }));
+    const position = positionOf(text, "Foo:");
+
+    const results = await getReferences(ctx, { path, position, includeDeclaration: false });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]!.range.start.line).toBe(positionOf(text, "%46%6F%6f").line);
+  });
+});
+
 describe("getReferences with name-based references (#54)", () => {
   const PATH = "/named/openapi.yaml";
   const TEXT = `openapi: 3.1.0

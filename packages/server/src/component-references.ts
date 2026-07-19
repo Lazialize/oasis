@@ -72,7 +72,11 @@ export function collectComponentReferences(
     for (const ref of graphReferences(graph, doc)) {
       const resolved = resolveRef(graph, doc, ref);
       if (!resolved.ok || resolved.doc.filePath !== target.doc.filePath) continue;
-      if (resolved.pointer !== target.pointer && !resolved.pointer.startsWith(nestedPrefix)) continue;
+      // Compare canonical (decoded) pointers, not the raw `resolved.pointer` spelling: a ref whose
+      // pointer segment is percent-encoded (`%46oo` for `Foo`, RFC 6901 §6) resolves fine but keeps
+      // its original encoding in `resolved.pointer`, which would never equal `target.pointer`'s
+      // canonical form otherwise.
+      if (resolved.canonicalPointer !== target.pointer && !resolved.canonicalPointer.startsWith(nestedPrefix)) continue;
       const nameRange = componentNameSegmentRange(doc, ref.range, target.section, target.name);
       if (!nameRange) continue;
       results.push({ filePath: doc.filePath, locationRange: ref.range, nameRange, context: "pointer-segment" });
