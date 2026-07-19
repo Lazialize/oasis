@@ -11,6 +11,8 @@ import {
   rangeFromOffsets,
   resolveAlias,
   resolveRef,
+  safeDecodeURIComponent,
+  unescapePointerSegment,
 } from "@oasis/core";
 import type { OasisDocument, Position, Range, WorkspaceGraph } from "@oasis/core";
 import { classifyPointer, inferRootKind } from "./keywords.ts";
@@ -220,7 +222,15 @@ export function componentKeyRange(doc: OasisDocument, target: Pick<ComponentTarg
  * search, this locates the name specifically as the segment following `components/<section>/`, so a
  * nested-pointer reference such as `#/components/schemas/Foo/properties/id` yields the range of
  * `Foo` (not `id`) and rename can replace only the name while preserving the `/properties/id`
- * suffix. Returns undefined if the marker isn't present or the name isn't a complete segment there.
+ * suffix.
+ *
+ * The raw pointer segment may carry an extra layer of URI percent-encoding on top of its own RFC
+ * 6901 `~0`/`~1` escaping (e.g. `#/components/schemas/%46oo` for `Foo`, per RFC 6901 §6). Segments
+ * are located by splitting the *raw*, still-encoded fragment text on `/` and decoding each one
+ * (mirroring `parseFragmentPointer`) to find the `components`/`<section>`/`<name>` triple, so the
+ * returned range always spans the exact encoded source span rather than a decoded literal that may
+ * not appear in the source at all. Returns undefined if the fragment marker isn't present or the
+ * name isn't found as a complete decoded segment there.
  */
 export function componentNameSegmentRange(
   doc: OasisDocument,
@@ -229,15 +239,37 @@ export function componentNameSegmentRange(
   name: string,
 ): Range | undefined {
   const raw = doc.text.slice(refRange.startOffset, refRange.endOffset);
-  const marker = `components/${section}/`;
-  const markerIdx = raw.indexOf(marker);
-  if (markerIdx === -1) return undefined;
-  const nameStart = markerIdx + marker.length;
-  if (raw.slice(nameStart, nameStart + name.length) !== name) return undefined;
-  // The name must be a complete pointer segment: end-of-string, the next pointer separator, or a
-  // closing quote — never a longer identifier that merely starts with `name`.
-  const after = raw[nameStart + name.length];
-  if (after !== undefined && after !== "/" && after !== '"' && after !== "'") return undefined;
-  const startOffset = refRange.startOffset + nameStart;
-  return rangeFromOffsets(doc.filePath, doc.lineCounter, startOffset, startOffset + name.length);
+
+  // `refRange` spans the whole scalar, which may be wrapped in matching quotes; strip them to get
+  // at the actual ref string (and remember the offset of its first character within `raw`).
+  const quoted = raw.length >= 2 && (raw[0] === '"' || raw[0] === "'") && raw[raw.length - 1] === raw[0];
+  const core = quoted ? raw.slice(1, -1) : raw;
+  const coreStart = quoted ? 1 : 0;
+
+  const hashIdx = core.indexOf("#");
+  if (hashIdx === -1) return undefined;
+  const fragment = core.slice(hashIdx + 1);
+  const fragmentStart = hashIdx + 1;
+
+  // Split on the *raw* (still percent-encoded) fragment text, then decode each segment to find the
+  // `components`/`<section>`/`<name>` triple — an encoded `%2F` must never be mistaken for a pointer
+  // separator, matching `parseFragmentPointer`'s own splitting order.
+  const rawSegments = fragment.split("/");
+  const decodedSegments = rawSegments.map((seg) => unescapePointerSegment(safeDecodeURIComponent(seg)));
+
+  let nameIdx = -1;
+  for (let i = 0; i + 2 < decodedSegments.length; i++) {
+    if (decodedSegments[i] === "components" && decodedSegments[i + 1] === section && decodedSegments[i + 2] === name) {
+      nameIdx = i + 2;
+      break;
+    }
+  }
+  if (nameIdx === -1) return undefined;
+
+  let offsetInFragment = 0;
+  for (let i = 0; i < nameIdx; i++) offsetInFragment += rawSegments[i]!.length + 1; // +1 for the "/"
+  const nameSegRaw = rawSegments[nameIdx]!;
+
+  const startOffset = refRange.startOffset + coreStart + fragmentStart + offsetInFragment;
+  return rangeFromOffsets(doc.filePath, doc.lineCounter, startOffset, startOffset + nameSegRaw.length);
 }

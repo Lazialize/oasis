@@ -328,6 +328,135 @@ components:
   });
 });
 
+describe("prepareRename/renameComponent with percent-encoded component pointers (#184)", () => {
+  const PATH = "/percent/openapi.yaml";
+  const TEXT = `openapi: 3.1.0
+info:
+  title: Test
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Foo:
+      type: object
+      properties:
+        id:
+          type: string
+    Holder:
+      $ref: '#/components/schemas/%46oo'
+    NestedHolder:
+      $ref: '#/components/schemas/%46oo/properties/id'
+`;
+
+  function ctx() {
+    return createServerContext(new InMemoryFileSystem({ [PATH]: TEXT }));
+  }
+
+  test("prepareRename on the encoded reference highlights just the encoded name segment", async () => {
+    const result = await prepareRename(ctx(), { path: PATH, position: positionOf(TEXT, "%46oo'") });
+
+    expect(result).toBeDefined();
+    expect(result?.placeholder).toBe("Foo");
+    expect(textAt(TEXT, result!.range)).toBe("%46oo");
+  });
+
+  test("renameComponent from the declaration edits the definition key and every encoded reference", async () => {
+    const edits = await renameComponent(ctx(), { path: PATH, position: positionOf(TEXT, "Foo:"), newName: "Bar" });
+
+    expect(edits).toBeDefined();
+    expect(edits).toHaveLength(3);
+    for (const edit of edits!) expect(edit.newText).toBe("Bar");
+
+    const holderEdit = edits!.find((e) => e.range.start.line === positionOf(TEXT, "'#/components/schemas/%46oo'").line)!;
+    expect(textAt(TEXT, holderEdit.range)).toBe("%46oo");
+
+    const nestedEdit = edits!.find((e) => e.range.start.line === positionOf(TEXT, "'#/components/schemas/%46oo/properties/id'").line)!;
+    expect(textAt(TEXT, nestedEdit.range)).toBe("%46oo");
+    const nestedLine = TEXT.split("\n")[nestedEdit.range.start.line]!;
+    // The nested pointer suffix after the encoded name segment is preserved untouched.
+    expect(nestedLine.slice(nestedEdit.range.end.character)).toContain("/properties/id");
+  });
+
+  test("renameComponent invoked from the encoded reference produces the same edit set as from the declaration", async () => {
+    const edits = await renameComponent(ctx(), { path: PATH, position: positionOf(TEXT, "%46oo'"), newName: "Bar" });
+
+    expect(edits).toBeDefined();
+    expect(edits).toHaveLength(3);
+    for (const edit of edits!) expect(edit.newText).toBe("Bar");
+  });
+
+  test("mixed-case percent escapes resolve and rename to a plain new name", async () => {
+    const path = "/percent/mixed.yaml";
+    const text = `openapi: 3.1.0
+info:
+  title: Test
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Foo:
+      type: string
+    Holder:
+      $ref: '#/components/schemas/%46%6F%6f'
+`;
+    const c = createServerContext(new InMemoryFileSystem({ [path]: text }));
+    const edits = await renameComponent(c, { path, position: positionOf(text, "Foo:"), newName: "Bar" });
+
+    expect(edits).toBeDefined();
+    expect(edits).toHaveLength(2);
+    const refEdit = edits!.find((e) => e.range.start.line === positionOf(text, "%46%6F%6f").line)!;
+    expect(textAt(text, refEdit.range)).toBe("%46%6F%6f");
+    expect(refEdit.newText).toBe("Bar");
+  });
+
+  test("JSON document: percent-encoded pointer segment is recognized and renamed", async () => {
+    const jsonPath = "/percent/openapi.json";
+    const jsonText = JSON.stringify(
+      {
+        openapi: "3.1.0",
+        info: { title: "Test", version: "1.0.0" },
+        components: {
+          schemas: {
+            Foo: { type: "string" },
+            Holder: { $ref: "#/components/schemas/%46oo" },
+          },
+        },
+      },
+      null,
+      2,
+    );
+    const c = createServerContext(new InMemoryFileSystem({ [jsonPath]: jsonText }));
+    const edits = await renameComponent(c, { path: jsonPath, position: positionOf(jsonText, '"Foo"'), newName: "Bar" });
+
+    expect(edits).toBeDefined();
+    expect(edits).toHaveLength(2);
+    const refEdit = edits!.find((e) => jsonText.slice(e.range.startOffset, e.range.endOffset) === "%46oo")!;
+    expect(refEdit.newText).toBe("Bar");
+  });
+
+  test("plain (non-encoded) component pointer behavior is unchanged", async () => {
+    const path = "/percent/plain.yaml";
+    const text = `openapi: 3.1.0
+info:
+  title: Test
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Foo:
+      type: string
+    Holder:
+      $ref: '#/components/schemas/Foo'
+`;
+    const c = createServerContext(new InMemoryFileSystem({ [path]: text }));
+    const edits = await renameComponent(c, { path, position: positionOf(text, "Foo:"), newName: "Bar" });
+
+    expect(edits).toBeDefined();
+    expect(edits).toHaveLength(2);
+    for (const edit of edits!) expect(edit.newText).toBe("Bar");
+  });
+});
+
 describe("renameComponent with name-based references (#54)", () => {
   const PATH = "/named/openapi.yaml";
   const TEXT = `openapi: 3.1.0

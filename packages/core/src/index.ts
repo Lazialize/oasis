@@ -8,7 +8,14 @@ export { PreciseNumber, preserveNumericLiteral } from "./number.ts";
 export type { PointerLookupResult, PositionLookupResult } from "./document.ts";
 export { nodeAtPointer, nodeAtPosition } from "./document.ts";
 
-export { escapePointerSegment, formatPointer, parseFragmentPointer, parsePointer, unescapePointerSegment } from "./pointer.ts";
+export {
+  escapePointerSegment,
+  formatPointer,
+  parseFragmentPointer,
+  parsePointer,
+  safeDecodeURIComponent,
+  unescapePointerSegment,
+} from "./pointer.ts";
 
 export type { OpenApiVersion } from "./version.ts";
 export { detectVersion } from "./version.ts";
