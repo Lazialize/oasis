@@ -137,7 +137,7 @@ export async function getCompletions(ctx: ServerContext, params: CompletionParam
   const version = detectVersion(doc) ?? detectVersion(graph.documents.get(graph.entryPath) ?? doc) ?? "3.1";
   const rootKind = inferRootKind(doc, graph);
   const syntax: DocumentSyntax = isJsonDocument(doc.filePath) ? "json" : "yaml";
-  const offset = offsetAtPosition(doc.lineCounter, params.position);
+  const offset = offsetAtPosition(doc.lineCounter, doc.text, params.position);
   const found = nodeAtPosition(doc, offset);
 
   // `$ref` value: prefer a raw-text description of what's typed so far (handles quotes the AST's

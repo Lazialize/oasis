@@ -71,7 +71,10 @@ function isYamlDocument(doc: OasisDocument): boolean {
 }
 
 function toRangeOffsets(doc: OasisDocument, range: { start: Position; end: Position }): { start: number; end: number } {
-  return { start: offsetAtPosition(doc.lineCounter, range.start), end: offsetAtPosition(doc.lineCounter, range.end) };
+  return {
+    start: offsetAtPosition(doc.lineCounter, doc.text, range.start),
+    end: offsetAtPosition(doc.lineCounter, doc.text, range.end),
+  };
 }
 
 function matchesNodeRange(node: Node, start: number, end: number): boolean {
@@ -601,7 +604,7 @@ function buildInsertComponentSchemaEdit(
 }
 
 function buildExtractToComponent(graph: WorkspaceGraph, entryDoc: OasisDocument, doc: OasisDocument, position: Position): CodeActionResult | undefined {
-  const offset = offsetAtPosition(doc.lineCounter, position);
+  const offset = offsetAtPosition(doc.lineCounter, doc.text, position);
   const found = nodeAtPosition(doc, offset);
   if (!found) return undefined;
 
@@ -771,7 +774,7 @@ function applyRewritesToSlice(text: string, sliceStart: number, sliceEnd: number
 }
 
 function buildInlineRef(graph: WorkspaceGraph, entryDoc: OasisDocument, doc: OasisDocument, position: Position): CodeActionResult | undefined {
-  const offset = offsetAtPosition(doc.lineCounter, position);
+  const offset = offsetAtPosition(doc.lineCounter, doc.text, position);
   const found = findRefObjectAtPosition(doc, offset);
   if (!found) return undefined;
   const { node: refNode, pointer } = found;
