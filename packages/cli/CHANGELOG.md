@@ -1,5 +1,17 @@
 # @oasis/cli
 
+## 0.9.4
+
+### Patch Changes
+
+- [#200](https://github.com/Lazialize/oasis/pull/200) [`f51d2dd`](https://github.com/Lazialize/oasis/commit/f51d2ddbf227b444e88b6b7d08429cad413fc09f) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(core): canonicalize physical file identity across symlinks and case aliases. `NodeFileSystem.canonicalize` previously only ran `path.resolve`, so a symlinked directory alias or a differently-cased path on a case-insensitive filesystem (default macOS/Windows) could enter the workspace graph as a second, duplicate document instead of being recognised as the same physical file. `canonicalize` now recovers the real, on-disk-cased path (memoized per instance to avoid extra syscalls on hot lookups), falling back to a deterministic lexical path for references that don't exist on disk yet, and to an ancestor's resolved identity when only part of the path exists. `$ref` target lookups (`loadWorkspaceGraph` and `resolveRef`) canonicalize `file:` resource URIs the same way, so cycle detection and reference resolution also see one identity per physical file across aliased spellings. The LSP server canonicalizes open-document URIs, workspace roots, and config entries the same way (while still replying on the exact URI the client opened), and the CLI bundle command looks its entry up by the graph's canonical entry path.
+
+- Updated dependencies [[`f51d2dd`](https://github.com/Lazialize/oasis/commit/f51d2ddbf227b444e88b6b7d08429cad413fc09f), [`2a49d0d`](https://github.com/Lazialize/oasis/commit/2a49d0dd8dd4a55945861e56ed781cab6bb9f22c), [`feff144`](https://github.com/Lazialize/oasis/commit/feff144bbbc0a7c7e0388c5b8386d2235c95f56a), [`d2118d6`](https://github.com/Lazialize/oasis/commit/d2118d6188b42e56f5bbbd9c48c40cbfe813d467), [`9d82d70`](https://github.com/Lazialize/oasis/commit/9d82d700cb9fa98720309d46d9222c1d85e70111), [`ed2cf75`](https://github.com/Lazialize/oasis/commit/ed2cf758645045d234d8e7c43ffe229803147567), [`accc685`](https://github.com/Lazialize/oasis/commit/accc6851e2286dd0277742802256ad86ca38e73a), [`81a0a9f`](https://github.com/Lazialize/oasis/commit/81a0a9f2e0bfe6bd493cbcdde4f1510f34e4f5d2), [`f79f7ad`](https://github.com/Lazialize/oasis/commit/f79f7adafad93d9f99756e5ac7debf28e2a4cdc9), [`18d7a3e`](https://github.com/Lazialize/oasis/commit/18d7a3e4ae57618089c9fed94f48a8b3f46b8e48), [`c5c1c69`](https://github.com/Lazialize/oasis/commit/c5c1c69e7d5b527d6d1f13eed3b0a01e3898a14c), [`907f650`](https://github.com/Lazialize/oasis/commit/907f6507f7551fe2a6e0f2c1b0d7227fc0e8fff3), [`181b215`](https://github.com/Lazialize/oasis/commit/181b215a582a60817bf4bf5b861d08592c0512fd)]:
+  - @oasis/core@0.9.4
+  - @oasis/server@0.9.4
+  - @oasis/linter@0.9.4
+  - @oasis/bundler@0.9.4
+
 ## 0.9.3
 
 ### Patch Changes

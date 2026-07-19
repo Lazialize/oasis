@@ -1,5 +1,67 @@
 # @oasis/server
 
+## 0.9.4
+
+### Patch Changes
+
+- [#200](https://github.com/Lazialize/oasis/pull/200) [`f51d2dd`](https://github.com/Lazialize/oasis/commit/f51d2ddbf227b444e88b6b7d08429cad413fc09f) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(core): canonicalize physical file identity across symlinks and case aliases. `NodeFileSystem.canonicalize` previously only ran `path.resolve`, so a symlinked directory alias or a differently-cased path on a case-insensitive filesystem (default macOS/Windows) could enter the workspace graph as a second, duplicate document instead of being recognised as the same physical file. `canonicalize` now recovers the real, on-disk-cased path (memoized per instance to avoid extra syscalls on hot lookups), falling back to a deterministic lexical path for references that don't exist on disk yet, and to an ancestor's resolved identity when only part of the path exists. `$ref` target lookups (`loadWorkspaceGraph` and `resolveRef`) canonicalize `file:` resource URIs the same way, so cycle detection and reference resolution also see one identity per physical file across aliased spellings. The LSP server canonicalizes open-document URIs, workspace roots, and config entries the same way (while still replying on the exact URI the client opened), and the CLI bundle command looks its entry up by the graph's canonical entry path.
+
+- [#202](https://github.com/Lazialize/oasis/pull/202) [`feff144`](https://github.com/Lazialize/oasis/commit/feff144bbbc0a7c7e0388c5b8386d2235c95f56a) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(core): clamp `offsetAtPosition` to the real document and CRLF line boundaries. Out-of-range LSP positions (a character past the final line, or a line past the last line) previously produced offsets far beyond the source text, and a character past a CRLF-terminated line clamped to the LF byte instead of the position before the `\r\n` sequence. `offsetAtPosition` now takes the document's source text alongside the `LineCounter` so it can bound every result to `[0, text.length]` and detect `\r\n` vs `\n` line terminators when clamping. All server callers (`refs.ts`, `component-target.ts`, `completion.ts`, `code-actions.ts`) pass `doc.text` through accordingly.
+
+- [#194](https://github.com/Lazialize/oasis/pull/194) [`ed2cf75`](https://github.com/Lazialize/oasis/commit/ed2cf758645045d234d8e7c43ffe229803147567) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(server): tokenize comments, escapes, and document prefixes in the OpenAPI root-key guard. The
+  "looks like OpenAPI" guard scanned comment text as mapping content, so `{ # openapi: fake ... }`
+  (YAML) and `{ // "openapi": "fake" ... }` (JSONC) matched as false positives; conversely, JSON
+  string escapes were copied rather than decoded (a key spelled with escapes such as
+  `{"open\u0061pi": ...}` never matched, and an escaped backslash before a closing quote desynced
+  the scanner), and flow roots preceded by a `---` document marker, `%YAML` directive, or leading
+  comment lines were missed. The guard now skips YAML/JSONC comments while scanning flow content,
+  decodes double-quoted JSON string escapes before comparing keys against `openapi`, and skips a
+  bounded document prefix (blank lines, comment lines, directives, and a `---` marker) before
+  classifying the root, while staying root-aware. The mirrored guard in the VS Code extension
+  receives the same fix.
+
+- [#196](https://github.com/Lazialize/oasis/pull/196) [`accc685`](https://github.com/Lazialize/oasis/commit/accc6851e2286dd0277742802256ad86ca38e73a) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(server): stop treating ref-like strings in literal data (Schema Object `example`, `examples`,
+  `default`, `enum`, `const`, and `x-*` Specification Extension payloads) as `$ref`s for definition,
+  hover, and rename. `findRefAtPosition` previously classified any scalar containing `#/` or starting
+  with `./`/`../` as a reference by text shape alone, so a value like `example: '#/components/schemas/Foo'`
+  could be navigated to, hovered over, and used to initiate a rename that edited the `Foo` component's
+  definition while leaving the example string itself untouched. It now recognizes reference occurrences
+  semantically, via the same `findRefs` walk that builds the workspace graph (which already treats
+  literal-data contexts as opaque), plus an explicit check for Link Object `operationRef`, which the
+  core walk doesn't track but which must keep resolving.
+
+- [#206](https://github.com/Lazialize/oasis/pull/206) [`81a0a9f`](https://github.com/Lazialize/oasis/commit/81a0a9f2e0bfe6bd493cbcdde4f1510f34e4f5d2) Thanks [@Lazialize](https://github.com/Lazialize)! - perf(server): lazy-load all workspace graphs only for `components/no-unused` code action. Previously, every code-action request eagerly loaded all project entry graphs to check for cross-entry references, even for simple operation ID/description/parameter fixes and extract/inline refactorings that only need the current document's graph. This added unnecessary I/O and latency. Now, all graphs are loaded only when the `components/no-unused` destructive quick fix is offered, keeping routine editor requests fast.
+
+- [#203](https://github.com/Lazialize/oasis/pull/203) [`f79f7ad`](https://github.com/Lazialize/oasis/commit/f79f7adafad93d9f99756e5ac7debf28e2a4cdc9) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(server): percent-encode generated file paths in `$ref` completions and code-action edits.
+  `relativeRefPath` (used by cross-file `$ref` completion, extract-to-component, and inline/relocate)
+  returned the raw, unencoded result of `node:path.relative`, so a target filename containing `#`
+  produced a reference like `./foo#bar.yaml#/components/schemas/Foo` — indistinguishable from a
+  `./foo` file part with a `bar.yaml#/components/schemas/Foo` fragment, so the generated reference
+  was unresolved. Other reserved/special characters (`%`, spaces, quotes, non-ASCII) could likewise
+  produce invalid URI or YAML/JSON text. Each relative path segment is now percent-encoded as a URI
+  reference (leaving only RFC 3986 unreserved characters literal), so a generated reference always
+  resolves back to the intended file and can never smuggle a raw quote into the surrounding YAML
+  single-quoted or JSON double-quoted scalar.
+
+- [#199](https://github.com/Lazialize/oasis/pull/199) [`18d7a3e`](https://github.com/Lazialize/oasis/commit/18d7a3e4ae57618089c9fed94f48a8b3f46b8e48) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(server): recognize percent-encoded component pointer segments in references and rename.
+  `$ref`s like `#/components/schemas/%46oo` (RFC 6901 §6 URI-fragment percent-encoding for `Foo`)
+  resolved correctly for definition navigation, but find-references and rename discarded them:
+  `collectComponentReferences` compared a resolved ref's raw, still-encoded pointer spelling against
+  the target's canonical (decoded) pointer, so an encoded segment could never match. It now compares
+  against `resolved.canonicalPointer`, and `componentNameSegmentRange` locates the name's source range
+  by decoding each raw fragment segment (percent-encoding and JSON Pointer `~0`/`~1`) instead of
+  searching for the decoded literal in the source text, so the returned range always spans the exact
+  encoded source span — preserving any nested pointer suffix and leaving plain, unencoded references
+  unaffected.
+
+- [#207](https://github.com/Lazialize/oasis/pull/207) [`907f650`](https://github.com/Lazialize/oasis/commit/907f6507f7551fe2a6e0f2c1b0d7227fc0e8fff3) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(server): revalidate open standalone entries when a watched file is created. When a file is created that could satisfy an unresolved `$ref` in a currently-open standalone entry (an entry without a project config), the server now revalidates that entry so the unresolved diagnostic is cleared. Previously, the diagnostic would linger until the entry document was edited or reopened. This fix applies to standalone entries only; project-member entries were already handled correctly.
+
+- [#195](https://github.com/Lazialize/oasis/pull/195) [`181b215`](https://github.com/Lazialize/oasis/commit/181b215a582a60817bf4bf5b861d08592c0512fd) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(server): quote YAML-sensitive path parameter names in quick fixes. Parameter names that are reserved YAML keywords (true, false, null), numeric-looking strings, or contain special characters are now properly quoted when inserted as parameter definitions. This ensures that the generated YAML parses correctly and the parameter name round-trips as the intended string value, not as a boolean, null, or number.
+
+- Updated dependencies [[`f51d2dd`](https://github.com/Lazialize/oasis/commit/f51d2ddbf227b444e88b6b7d08429cad413fc09f), [`2a49d0d`](https://github.com/Lazialize/oasis/commit/2a49d0dd8dd4a55945861e56ed781cab6bb9f22c), [`feff144`](https://github.com/Lazialize/oasis/commit/feff144bbbc0a7c7e0388c5b8386d2235c95f56a), [`d2118d6`](https://github.com/Lazialize/oasis/commit/d2118d6188b42e56f5bbbd9c48c40cbfe813d467), [`9d82d70`](https://github.com/Lazialize/oasis/commit/9d82d700cb9fa98720309d46d9222c1d85e70111), [`18d7a3e`](https://github.com/Lazialize/oasis/commit/18d7a3e4ae57618089c9fed94f48a8b3f46b8e48), [`c5c1c69`](https://github.com/Lazialize/oasis/commit/c5c1c69e7d5b527d6d1f13eed3b0a01e3898a14c)]:
+  - @oasis/core@0.9.4
+  - @oasis/linter@0.9.4
+
 ## 0.9.3
 
 ### Patch Changes
