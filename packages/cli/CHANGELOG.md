@@ -1,5 +1,15 @@
 # @oasis/cli
 
+## 0.10.0
+
+### Patch Changes
+
+- Updated dependencies [[`a70619f`](https://github.com/Lazialize/oasis/commit/a70619f516dd42abb425ee03640268ee29e8f3f9)]:
+  - @oasis/core@0.10.0
+  - @oasis/linter@0.10.0
+  - @oasis/bundler@0.10.0
+  - @oasis/server@0.10.0
+
 ## 0.9.4
 
 ### Patch Changes
