@@ -1,13 +1,13 @@
 // Root-aware "looks like OpenAPI" guard (issue #52, issue #122). Mirrored in
-// editors/vscode/src/openapi-guard.ts — the extension bundles with npm/esbuild and cannot import
-// from this Bun workspace package, so any change here must be copied there (both sites carry this
-// note).
+// packages/server/src/openapi-guard.ts — this extension bundles with npm/esbuild and cannot
+// import from that Bun workspace package, so any change here must be copied there (both sites
+// carry this note).
 //
 // The extension's client-side guard only applies when no oasis.config.jsonc is present in the
 // workspace; once project mode is active the client syncs every yaml/json/jsonc document and the
-// server decides membership itself (see findOwningEntry in workspace.ts). Files that are neither a
-// project member nor look like an OpenAPI document are silently ignored by the server so they
-// don't get spuriously linted as a broken standalone entry.
+// server decides membership itself (see findOwningEntry in packages/server/src/workspace.ts).
+// Files that are neither a project member nor look like an OpenAPI document are silently ignored
+// by the server so they don't get spuriously linted as a broken standalone entry.
 //
 // "Looks like an OpenAPI document" means an `openapi` property on the document's ROOT mapping.
 // A naive multiline regex also matches nested keys — `metadata:\n  openapi: not-a-root-key` or
@@ -189,7 +189,7 @@ function skipDocumentPrefix(text: string): number {
 }
 
 /** Whether `text` declares an `openapi` property on its ROOT mapping (YAML or JSON). */
-export function looksLikeOpenApi(text: string): boolean {
+export function looksLikeOpenApiText(text: string): boolean {
   const src = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 
   // JSON documents (and YAML documents whose root is a flow mapping) start with `{`, possibly

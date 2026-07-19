@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { looksLikeOpenApi } from "../src/openapi-guard.ts";
+import { guardVectors } from "./fixtures/guard-vectors.ts";
+
+describe("looksLikeOpenApi (issue #122: tokenization vectors)", () => {
+  for (const vector of guardVectors) {
+    test(vector.name, () => {
+      expect(looksLikeOpenApi(vector.input)).toBe(vector.expected);
+    });
+  }
+});
 
 describe("looksLikeOpenApi (issue #52: root-only detection)", () => {
   test("root-level YAML openapi key matches", () => {
