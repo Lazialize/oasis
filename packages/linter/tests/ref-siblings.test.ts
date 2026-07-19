@@ -50,14 +50,12 @@ components:
     });
 
     const nullable = byRule(diagnostics, "structure/schema-nullable");
-    // The invalid sibling `type: wat` is reported by schema-nullable's type-name check.
-    expect(nullable.some((d) => d.message.includes("wat"))).toBe(true);
+    // The 3.1-illegal `nullable` sibling is reported by structure/schema-nullable.
+    expect(nullable.some((d) => d.message.includes("nullable"))).toBe(true);
 
     const keywords = byRule(diagnostics, "structure/schema-keywords");
-    // The 3.1-illegal `nullable` sibling is reported by schema-keywords/schema-nullable.
-    expect(
-      [...nullable, ...keywords].some((d) => d.message.includes("nullable")),
-    ).toBe(true);
+    // The invalid sibling `type: wat` is reported by structure/schema-keywords.
+    expect(keywords.some((d) => d.message.includes("wat"))).toBe(true);
   });
 
   test("3.1 sibling diagnostics point at the Derived node's own file/range, not Base", async () => {
@@ -135,7 +133,7 @@ components:
 `,
     });
     expect(
-      byRule(diagnostics, "structure/schema-nullable").some((d) => d.message.includes("wat")),
+      byRule(diagnostics, "structure/schema-keywords").some((d) => d.message.includes("wat")),
     ).toBe(true);
   });
 });
@@ -158,7 +156,7 @@ components:
 `,
     });
     expect(
-      byRule(diagnostics, "structure/schema-nullable").some((d) => d.message.includes("wat")),
+      byRule(diagnostics, "structure/schema-keywords").some((d) => d.message.includes("wat")),
     ).toBe(true);
   });
 });

@@ -1,11 +1,9 @@
-import { isMap, isNode, isScalar, isSeq } from "yaml";
+import { isMap, isScalar, isSeq } from "yaml";
 import type { Node } from "yaml";
 import type { OasisDocument } from "@oasis/core";
 import { iterateSchemas, walkSchemaTree } from "../openapi-walk.ts";
 import { childAt } from "../util.ts";
 import type { Rule, RuleContext } from "../types.ts";
-
-const VALID_TYPES = new Set(["string", "number", "integer", "boolean", "array", "object", "null"]);
 
 function checkSchema(ctx: RuleContext, doc: OasisDocument, schema: Node): void {
   if (!isMap(schema)) return;
@@ -23,21 +21,11 @@ function checkSchema(ctx: RuleContext, doc: OasisDocument, schema: Node): void {
       ctx.report({ doc, node: nullableNode }, '"nullable" is not part of OpenAPI 3.1 (JSON Schema 2020-12); express nullability with a "type" array including "null" instead.');
     }
   }
-
-  if (typeNode && isScalar(typeNode) && typeof typeNode.value === "string" && !VALID_TYPES.has(typeNode.value)) {
-    ctx.report({ doc, node: typeNode }, `"type: ${typeNode.value}" is not a recognized JSON Schema type.`);
-  } else if (typeNode && isSeq(typeNode)) {
-    for (const item of typeNode.items) {
-      if (isScalar(item) && typeof item.value === "string" && !VALID_TYPES.has(item.value)) {
-        ctx.report({ doc, node: isNode(item) ? item : typeNode }, `"type: ${item.value}" is not a recognized JSON Schema type.`);
-      }
-    }
-  }
 }
 
 export const structureSchemaNullable: Rule = {
   name: "structure/schema-nullable",
-  description: 'Checks version-appropriate nullability and "type" usage in every schema, including inline ones (3.0 "nullable" vs 3.1 type arrays).',
+  description: 'Checks version-appropriate nullability in every schema, including inline ones: 3.0 "nullable" vs 3.1 type arrays with "null", and rejects invalid forms like type arrays in 3.0 or "type: null" scalars in 3.0.',
   defaultSeverity: "error",
   check(ctx) {
     if (ctx.version !== "3.0" && ctx.version !== "3.1") return;
