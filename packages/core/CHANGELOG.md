@@ -1,5 +1,11 @@
 # @oasis/core
 
+## 0.10.0
+
+### Minor Changes
+
+- [#216](https://github.com/Lazialize/oasis/pull/216) [`a70619f`](https://github.com/Lazialize/oasis/commit/a70619f516dd42abb425ee03640268ee29e8f3f9) Thanks [@Lazialize](https://github.com/Lazialize)! - Add OpenAPI 3.2 support across version detection, reference resolution, linting, bundling, and language-server completion/symbol features. This includes `$self`, `query` and `additionalOperations`, reusable media types and sequential encoding, expanded examples and security schemes, Security Requirement URI references, and the new 3.2 metadata fields.
+
 ## 0.9.4
 
 ### Patch Changes
