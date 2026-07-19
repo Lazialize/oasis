@@ -290,6 +290,190 @@ paths:
     expect(diags2.some((d) => d.code === "syntax-error")).toBe(false);
     expect(diags2.some((d) => d.code === "paths/params-defined" && d.message.includes('"{petId}"'))).toBe(false);
   });
+
+  test("YAML-sensitive parameter name 'true' is properly quoted when inserted", async () => {
+    const TEXT = `openapi: 3.1.0
+info:
+  title: Test API
+  version: "1.0.0"
+paths:
+  /pets/{true}:
+    get:
+      operationId: getPet
+      description: Get a pet.
+      responses:
+        '200':
+          description: OK
+`;
+    const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: TEXT }));
+    const diagnostics = (await diagnosticsFor(ctx, ENTRY_PATH)).get(ENTRY_PATH) ?? [];
+    expect(diagnostics.some((d) => d.code === "paths/params-defined" && d.message.includes('"{true}"'))).toBe(true);
+
+    const position = positionOf(TEXT, "/pets/{true}:");
+    const results = await getCodeActions(ctx, { path: ENTRY_PATH, position, diagnostics });
+    const action = results.find((r) => r.title === "Add parameter definition");
+    expect(action).toBeDefined();
+
+    const newText = applyEdits(TEXT, action!.edits);
+    // The name "true" must be quoted in YAML to round-trip as a string, not a boolean
+    expect(newText).toContain("- name: \"true\"");
+
+    const diags2 = (await diagnosticsFor(createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: newText })), ENTRY_PATH)).get(ENTRY_PATH) ?? [];
+    expect(diags2.some((d) => d.code === "syntax-error")).toBe(false);
+    expect(diags2.some((d) => d.code === "paths/params-defined" && d.message.includes('"{true}"'))).toBe(false);
+  });
+
+  test("YAML-sensitive parameter name 'false' is properly quoted when inserted", async () => {
+    const TEXT = `openapi: 3.1.0
+info:
+  title: Test API
+  version: "1.0.0"
+paths:
+  /pets/{false}:
+    get:
+      operationId: getPet
+      description: Get a pet.
+      responses:
+        '200':
+          description: OK
+`;
+    const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: TEXT }));
+    const diagnostics = (await diagnosticsFor(ctx, ENTRY_PATH)).get(ENTRY_PATH) ?? [];
+
+    const position = positionOf(TEXT, "/pets/{false}:");
+    const results = await getCodeActions(ctx, { path: ENTRY_PATH, position, diagnostics });
+    const action = results.find((r) => r.title === "Add parameter definition");
+    expect(action).toBeDefined();
+
+    const newText = applyEdits(TEXT, action!.edits);
+    expect(newText).toContain("- name: \"false\"");
+
+    const diags2 = (await diagnosticsFor(createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: newText })), ENTRY_PATH)).get(ENTRY_PATH) ?? [];
+    expect(diags2.some((d) => d.code === "syntax-error")).toBe(false);
+    expect(diags2.some((d) => d.code === "paths/params-defined" && d.message.includes('"{false}"'))).toBe(false);
+  });
+
+  test("YAML-sensitive parameter name 'null' is properly quoted when inserted", async () => {
+    const TEXT = `openapi: 3.1.0
+info:
+  title: Test API
+  version: "1.0.0"
+paths:
+  /pets/{null}:
+    get:
+      operationId: getPet
+      description: Get a pet.
+      responses:
+        '200':
+          description: OK
+`;
+    const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: TEXT }));
+    const diagnostics = (await diagnosticsFor(ctx, ENTRY_PATH)).get(ENTRY_PATH) ?? [];
+
+    const position = positionOf(TEXT, "/pets/{null}:");
+    const results = await getCodeActions(ctx, { path: ENTRY_PATH, position, diagnostics });
+    const action = results.find((r) => r.title === "Add parameter definition");
+    expect(action).toBeDefined();
+
+    const newText = applyEdits(TEXT, action!.edits);
+    expect(newText).toContain("- name: \"null\"");
+
+    const diags2 = (await diagnosticsFor(createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: newText })), ENTRY_PATH)).get(ENTRY_PATH) ?? [];
+    expect(diags2.some((d) => d.code === "syntax-error")).toBe(false);
+    expect(diags2.some((d) => d.code === "paths/params-defined" && d.message.includes('"{null}"'))).toBe(false);
+  });
+
+  test("YAML-sensitive parameter name '123' is properly quoted when inserted", async () => {
+    const TEXT = `openapi: 3.1.0
+info:
+  title: Test API
+  version: "1.0.0"
+paths:
+  /pets/{123}:
+    get:
+      operationId: getPet
+      description: Get a pet.
+      responses:
+        '200':
+          description: OK
+`;
+    const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: TEXT }));
+    const diagnostics = (await diagnosticsFor(ctx, ENTRY_PATH)).get(ENTRY_PATH) ?? [];
+
+    const position = positionOf(TEXT, "/pets/{123}:");
+    const results = await getCodeActions(ctx, { path: ENTRY_PATH, position, diagnostics });
+    const action = results.find((r) => r.title === "Add parameter definition");
+    expect(action).toBeDefined();
+
+    const newText = applyEdits(TEXT, action!.edits);
+    expect(newText).toContain("- name: \"123\"");
+
+    const diags2 = (await diagnosticsFor(createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: newText })), ENTRY_PATH)).get(ENTRY_PATH) ?? [];
+    expect(diags2.some((d) => d.code === "syntax-error")).toBe(false);
+    expect(diags2.some((d) => d.code === "paths/params-defined" && d.message.includes('"{123}"'))).toBe(false);
+  });
+
+  test("YAML-sensitive parameter name with single quote is properly quoted when inserted", async () => {
+    const TEXT = `openapi: 3.1.0
+info:
+  title: Test API
+  version: "1.0.0"
+paths:
+  /pets/{it's}:
+    get:
+      operationId: getPet
+      description: Get a pet.
+      responses:
+        '200':
+          description: OK
+`;
+    const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: TEXT }));
+    const diagnostics = (await diagnosticsFor(ctx, ENTRY_PATH)).get(ENTRY_PATH) ?? [];
+
+    const position = positionOf(TEXT, "/pets/{it's}:");
+    const results = await getCodeActions(ctx, { path: ENTRY_PATH, position, diagnostics });
+    const action = results.find((r) => r.title === "Add parameter definition");
+    expect(action).toBeDefined();
+
+    const newText = applyEdits(TEXT, action!.edits);
+    // A name with a quote needs to be escaped in double-quoted YAML string
+    expect(newText).toMatch(/- name: "it's"/);
+
+    const diags2 = (await diagnosticsFor(createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: newText })), ENTRY_PATH)).get(ENTRY_PATH) ?? [];
+    expect(diags2.some((d) => d.code === "syntax-error")).toBe(false);
+    expect(diags2.some((d) => d.code === "paths/params-defined" && d.message.includes('"{it\'s}"'))).toBe(false);
+  });
+
+  test("ordinary identifier-like parameter names remain readable without unnecessary quotes", async () => {
+    const TEXT = `openapi: 3.1.0
+info:
+  title: Test API
+  version: "1.0.0"
+paths:
+  /pets/{petId}:
+    get:
+      operationId: getPet
+      description: Get a pet.
+      responses:
+        '200':
+          description: OK
+`;
+    const ctx = createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: TEXT }));
+    const diagnostics = (await diagnosticsFor(ctx, ENTRY_PATH)).get(ENTRY_PATH) ?? [];
+
+    const position = positionOf(TEXT, "/pets/{petId}:");
+    const results = await getCodeActions(ctx, { path: ENTRY_PATH, position, diagnostics });
+    const action = results.find((r) => r.title === "Add parameter definition");
+    expect(action).toBeDefined();
+
+    const newText = applyEdits(TEXT, action!.edits);
+    // Readable identifiers should not be quoted
+    expect(newText).toContain("- name: petId");
+
+    const diags2 = (await diagnosticsFor(createServerContext(new InMemoryFileSystem({ [ENTRY_PATH]: newText })), ENTRY_PATH)).get(ENTRY_PATH) ?? [];
+    expect(diags2.some((d) => d.code === "syntax-error")).toBe(false);
+    expect(diags2.some((d) => d.code === "paths/params-defined" && d.message.includes('"{petId}"'))).toBe(false);
+  });
 });
 
 describe("Remove unused component", () => {

@@ -213,10 +213,32 @@ function buildAddDescription(
 // 3: Add parameter definition (paths/params-defined)
 // ---------------------------------------------------------------------------
 
+/** Encode a string value as a YAML scalar, quoting it if necessary to preserve its meaning.
+ * Plain scalars that look like booleans (true, false, yes, no, on, off), null/empty values,
+ * numbers, or contain special characters are interpreted by YAML parsers as their respective types.
+ * This function ensures they round-trip as the intended string value. */
+function encodeYamlScalar(value: string): string {
+  // Check if the value needs quoting by testing if YAML would parse it differently
+  const reservedPatterns = /^(true|false|yes|no|on|off|null|~)$/i;
+  const numericPattern = /^[-+]?(0x[0-9a-fA-F]+|0o[0-7]+|0b[01]+|[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?|\.inf|\.Inf|\.INF|-\.inf|-\.Inf|-\.INF|\.nan|\.NaN|\.NAN)$/;
+  // Check for unsafe characters: quotes, colons, special YAML chars, leading/trailing whitespace
+  const unsafeChars = /['":{}[\]#&*!|>@`]|\s$/;
+
+  if (reservedPatterns.test(value) || numericPattern.test(value) || value === "" || /^\s/.test(value) || unsafeChars.test(value)) {
+    // Quote the value and escape any backslashes and double quotes within it
+    const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    return `"${escaped}"`;
+  }
+
+  // For ordinary identifiers and safe strings, return unquoted
+  return value;
+}
+
 function buildParamItemLines(propColumn: number, name: string): string {
   const dashPad = " ".repeat(Math.max(propColumn - 2, 0));
   const propPad = " ".repeat(propColumn);
-  return [`${dashPad}- name: ${name}`, `${propPad}in: path`, `${propPad}required: true`, `${propPad}schema:`, `${propPad}  type: string`].join(
+  const quotedName = encodeYamlScalar(name);
+  return [`${dashPad}- name: ${quotedName}`, `${propPad}in: path`, `${propPad}required: true`, `${propPad}schema:`, `${propPad}  type: string`].join(
     "\n",
   );
 }
