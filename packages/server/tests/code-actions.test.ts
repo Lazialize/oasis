@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { InMemoryFileSystem } from "@oasis/core";
 import { getCodeActions } from "../src/handlers/code-actions.ts";
-import type { CodeActionFileEdit } from "../src/handlers/code-actions.ts";
+import type { CodeActionFileEdit, CodeActionDiagnosticInput } from "../src/handlers/code-actions.ts";
 import { getDiagnosticsByFile } from "../src/diagnostics.ts";
 import { scanWorkspaceRootsForProjects } from "../src/project.ts";
 import { createServerContext } from "../src/workspace.ts";
@@ -1966,5 +1966,250 @@ components:
     const results = await getCodeActions(ctx, { path: fragmentPath, position: positionOf(fragmentText, "type: object"), diagnostics: [] });
 
     expect(results.find((r) => r.title === "Extract inline schema to components")).toBeUndefined();
+  });
+});
+
+describe("Lazy loading of workspace graphs", () => {
+  test("does not load all project entry graphs for operation diagnostics (only for components/no-unused)", async () => {
+    const root = "/multi-entry-project";
+    const configPath = `${root}/oasis.config.jsonc`;
+    const entry1Path = `${root}/api1.yaml`;
+    const entry2Path = `${root}/api2.yaml`;
+
+    const entry1Text = `openapi: 3.1.0
+info:
+  title: API 1
+  version: "1.0.0"
+paths:
+  /resource1:
+    get:
+      responses:
+        '200':
+          description: OK
+`;
+
+    const entry2Text = `openapi: 3.1.0
+info:
+  title: API 2
+  version: "1.0.0"
+paths:
+  /resource2:
+    get:
+      responses:
+        '200':
+          description: OK
+`;
+
+    const ctx = createServerContext(
+      new InMemoryFileSystem({
+        [configPath]: `{ "entries": ["api1.yaml", "api2.yaml"] }`,
+        [entry1Path]: entry1Text,
+        [entry2Path]: entry2Text,
+      }),
+    );
+    await scanWorkspaceRootsForProjects(ctx, [root]);
+
+    // After scanning, project entries are loaded. Clear cache to test lazy loading behavior.
+    ctx.graphCache.clear();
+
+    // Simulate an operation diagnostic without pre-loading the graph by calling diagnosticsFor
+    const position = positionOf(entry1Text, "get:");
+    const operationDiag: CodeActionDiagnosticInput = {
+      code: "operation/operation-id",
+      message: "is missing an operationId",
+      range: { start: position, end: position },
+    };
+
+    await getCodeActions(ctx, { path: entry1Path, position, diagnostics: [operationDiag] });
+
+    // For operation diagnostics, only entry1's graph should be loaded on demand, not entry2's
+    expect(ctx.graphCache.has(entry1Path)).toBe(true);
+    expect(ctx.graphCache.has(entry2Path)).toBe(false);
+  });
+
+  test("loads all project entry graphs when components/no-unused diagnostic is present", async () => {
+    const root = "/multi-entry-project-unused";
+    const configPath = `${root}/oasis.config.jsonc`;
+    const entry1Path = `${root}/api1.yaml`;
+    const entry2Path = `${root}/api2.yaml`;
+
+    const entry1Text = `openapi: 3.1.0
+info:
+  title: API 1
+  version: "1.0.0"
+paths:
+  /resource1:
+    get:
+      operationId: getResource1
+      responses:
+        '200':
+          description: OK
+components:
+  schemas:
+    Unused:
+      type: object
+      description: never referenced
+`;
+
+    const entry2Text = `openapi: 3.1.0
+info:
+  title: API 2
+  version: "1.0.0"
+paths:
+  /resource2:
+    get:
+      operationId: getResource2
+      responses:
+        '200':
+          description: OK
+`;
+
+    const ctx = createServerContext(
+      new InMemoryFileSystem({
+        [configPath]: `{ "entries": ["api1.yaml", "api2.yaml"] }`,
+        [entry1Path]: entry1Text,
+        [entry2Path]: entry2Text,
+      }),
+    );
+    await scanWorkspaceRootsForProjects(ctx, [root]);
+
+    // Clear the cache to test lazy behavior
+    ctx.graphCache.clear();
+
+    // Request code actions with a components/no-unused diagnostic
+    const diags = (await diagnosticsFor(ctx, entry1Path)).get(entry1Path) ?? [];
+    const unusedDiag = diags.find((d) => d.code === "components/no-unused");
+    expect(unusedDiag).toBeDefined();
+
+    const position = positionOf(entry1Text, "Unused:");
+    await getCodeActions(ctx, { path: entry1Path, position, diagnostics: [unusedDiag!] });
+
+    // For components/no-unused, both entry1 and entry2 graphs should be loaded for cross-entry checking
+    expect(ctx.graphCache.has(entry1Path)).toBe(true);
+    expect(ctx.graphCache.has(entry2Path)).toBe(true);
+  });
+
+  test("does not load all graphs for extract-to-component refactoring", async () => {
+    const root = "/multi-entry-project-extract";
+    const configPath = `${root}/oasis.config.jsonc`;
+    const entry1Path = `${root}/api1.yaml`;
+    const entry2Path = `${root}/api2.yaml`;
+
+    const entry1Text = `openapi: 3.1.0
+info:
+  title: API 1
+  version: "1.0.0"
+paths:
+  /resource1:
+    get:
+      operationId: getResource1
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+`;
+
+    const entry2Text = `openapi: 3.1.0
+info:
+  title: API 2
+  version: "1.0.0"
+paths:
+  /resource2:
+    get:
+      operationId: getResource2
+      responses:
+        '200':
+          description: OK
+`;
+
+    const ctx = createServerContext(
+      new InMemoryFileSystem({
+        [configPath]: `{ "entries": ["api1.yaml", "api2.yaml"] }`,
+        [entry1Path]: entry1Text,
+        [entry2Path]: entry2Text,
+      }),
+    );
+    await scanWorkspaceRootsForProjects(ctx, [root]);
+
+    // Clear the cache to test lazy behavior
+    ctx.graphCache.clear();
+
+    // Request code actions with an extract refactoring (no diagnostic needed)
+    const position = positionOf(entry1Text, "type: object");
+    await getCodeActions(ctx, { path: entry1Path, position, diagnostics: [] });
+
+    // For refactorings, only entry1's graph should be loaded, not entry2's
+    expect(ctx.graphCache.has(entry1Path)).toBe(true);
+    expect(ctx.graphCache.has(entry2Path)).toBe(false);
+  });
+
+  test("does not load all graphs for inline-ref refactoring", async () => {
+    const root = "/multi-entry-project-inline";
+    const configPath = `${root}/oasis.config.jsonc`;
+    const entry1Path = `${root}/api1.yaml`;
+    const entry2Path = `${root}/api2.yaml`;
+
+    const entry1Text = `openapi: 3.1.0
+info:
+  title: API 1
+  version: "1.0.0"
+paths:
+  /resource1:
+    get:
+      operationId: getResource1
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Resource'
+components:
+  schemas:
+    Resource:
+      type: object
+      properties:
+        id:
+          type: string
+`;
+
+    const entry2Text = `openapi: 3.1.0
+info:
+  title: API 2
+  version: "1.0.0"
+paths:
+  /resource2:
+    get:
+      operationId: getResource2
+      responses:
+        '200':
+          description: OK
+`;
+
+    const ctx = createServerContext(
+      new InMemoryFileSystem({
+        [configPath]: `{ "entries": ["api1.yaml", "api2.yaml"] }`,
+        [entry1Path]: entry1Text,
+        [entry2Path]: entry2Text,
+      }),
+    );
+    await scanWorkspaceRootsForProjects(ctx, [root]);
+
+    // Clear the cache to test lazy behavior
+    ctx.graphCache.clear();
+
+    // Request code actions with an inline refactoring (no diagnostic needed)
+    const position = positionOf(entry1Text, "$ref: '#/components/schemas/Resource'");
+    await getCodeActions(ctx, { path: entry1Path, position, diagnostics: [] });
+
+    // For refactorings, only entry1's graph should be loaded, not entry2's
+    expect(ctx.graphCache.has(entry1Path)).toBe(true);
+    expect(ctx.graphCache.has(entry2Path)).toBe(false);
   });
 });
