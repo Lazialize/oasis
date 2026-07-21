@@ -591,12 +591,36 @@ function childNode(map: Node, name: string): Node | undefined {
   return pair && "value" in pair && pair.value && typeof pair.value === "object" ? (pair.value as Node) : undefined;
 }
 
+export interface ValidateShapeOptions {
+  /**
+   * Field names to exclude from the required-field-presence check, because another rule already
+   * owns reporting their absence (e.g. root's "openapi"/"info", both required by
+   * `structure/required-fields`).
+   */
+  skipRequired?: ReadonlySet<string>;
+  /**
+   * Field names to exclude from the per-field type check, because another rule already type-checks
+   * them (e.g. root's "servers"/"paths" arrays and objects, checked by `structure/field-types`). The
+   * field still counts as "known" (no unknown-field diagnostic) and its version-gate still applies.
+   */
+  skipTypeCheck?: ReadonlySet<string>;
+  /**
+   * Field names to exclude from the version-gate check, because another rule already reports the
+   * field's version availability (e.g. root's "$self", gated by `structure/openapi-version`).
+   */
+  skipVersionCheck?: ReadonlySet<string>;
+}
+
 /**
  * Validate the map `node` against `shape` for `version`, reporting each violation through `report`.
  * `label` is prefixed to messages (e.g. `"info"` -> `"info" is missing ...`). A Reference Object
  * (a referenceable shape carrying `$ref`) is skipped — its target is validated at its definition
  * site. Ranges are never computed here: the caller attaches `report` to nodes that already carry
  * source positions, keeping every diagnostic traceable to its file and line/column.
+ *
+ * `options` lets a caller reuse a shape's field table (for unknown-field detection and version
+ * gating) while deferring specific per-field checks to another rule that already performs them,
+ * so the two rules don't emit duplicate diagnostics for the same defect.
  */
 export function validateObjectShape(
   shape: ObjectShape,
@@ -604,6 +628,7 @@ export function validateObjectShape(
   version: OpenApiVersion,
   label: string,
   report: (node: Node, message: string) => void,
+  options?: ValidateShapeOptions,
 ): void {
   if (!isMap(node)) {
     report(node, `${label} must be an object.`);
@@ -633,16 +658,23 @@ export function validateObjectShape(
       }
       continue;
     }
-    if (!fieldAvailableIn(spec, version)) {
+    if (!options?.skipVersionCheck?.has(key) && !fieldAvailableIn(spec, version)) {
       report(value ?? node, `${label} field "${key}" is not valid in OpenAPI ${version}.`);
       continue;
     }
-    if (value && spec.types && spec.types.length > 0 && !nodeMatchesType(value, spec.types)) {
+    if (
+      !options?.skipTypeCheck?.has(key) &&
+      value &&
+      spec.types &&
+      spec.types.length > 0 &&
+      !nodeMatchesType(value, spec.types)
+    ) {
       report(value, `${label} field "${key}" must be ${typeLabel(spec.types)}.`);
     }
   }
 
   for (const req of shape.required ?? []) {
+    if (options?.skipRequired?.has(req)) continue;
     if (!present.has(req)) {
       report(node, `${label} is missing required field "${req}".`);
     }
