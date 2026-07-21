@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { escapePointerSegment, formatPointer, parseFragmentPointer, parsePointer, unescapePointerSegment } from "../src/pointer.ts";
+import {
+  canonicalPointer,
+  escapePointerSegment,
+  formatPointer,
+  parseFragmentPointer,
+  parsePointer,
+  unescapePointerSegment,
+} from "../src/pointer.ts";
 
 describe("JSON Pointer escaping", () => {
   test("escapes ~ and /", () => {
@@ -111,6 +118,46 @@ describe("parseFragmentPointer ($ref URI fragments: one percent-decode, then RFC
 
   test("an encoded '/' (%2F) inside a segment does not become a pointer separator", () => {
     expect(parseFragmentPointer("/a%2Fb/c")).toEqual(["a/b", "c"]);
+  });
+});
+
+describe("parseFragmentPointer rejects malformed tilde escapes (issue #211)", () => {
+  test("rejects a lone trailing tilde", () => {
+    expect(parseFragmentPointer("/bad~")).toBeUndefined();
+  });
+
+  test("rejects a tilde followed by a digit other than 0 or 1", () => {
+    expect(parseFragmentPointer("/components/schemas/a~2b")).toBeUndefined();
+  });
+
+  test("rejects a percent-encoded malformed tilde escape (%7E2 decodes to ~2)", () => {
+    expect(parseFragmentPointer("/components/schemas/a%7E2b")).toBeUndefined();
+  });
+
+  test("still accepts a valid ~0 escape", () => {
+    expect(parseFragmentPointer("/a/~0b")).toEqual(["a", "~b"]);
+  });
+
+  test("still accepts a valid ~1 escape", () => {
+    expect(parseFragmentPointer("/a/~1b")).toEqual(["a", "/b"]);
+  });
+
+  test("still accepts a percent-encoded valid ~0 escape", () => {
+    expect(parseFragmentPointer("/a/%7E0b")).toEqual(["a", "~b"]);
+  });
+});
+
+describe("canonicalPointer propagates a malformed fragment as undefined (issue #211)", () => {
+  test("returns undefined for a malformed tilde escape", () => {
+    expect(canonicalPointer("/components/schemas/a~2b")).toBeUndefined();
+  });
+
+  test("returns undefined for a percent-encoded malformed tilde escape", () => {
+    expect(canonicalPointer("/components/schemas/a%7E2b")).toBeUndefined();
+  });
+
+  test("still canonicalizes a valid fragment", () => {
+    expect(canonicalPointer("/components/schemas/%46oo")).toBe("/components/schemas/Foo");
   });
 });
 

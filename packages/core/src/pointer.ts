@@ -84,9 +84,14 @@ export function formatPointer(segments: string[]): string {
  * JSON Pointer (`~0`/`~1`) escaping. URI-equivalent spellings of the same target (`/Foo` vs
  * `/%46oo`, differently escaped segments) therefore collapse to one identity string, so callers can
  * key a resolved target by its canonical pointer instead of its raw spelling.
+ *
+ * Returns `undefined` when `fragment` is malformed (see `parseFragmentPointer`) — a malformed
+ * fragment has no canonical identity, and callers must treat that as an unresolved reference rather
+ * than fabricate one.
  */
-export function canonicalPointer(fragment: string): string {
-  return formatPointer(parseFragmentPointer(fragment));
+export function canonicalPointer(fragment: string): string | undefined {
+  const segments = parseFragmentPointer(fragment);
+  return segments === undefined ? undefined : formatPointer(segments);
 }
 
 /**
@@ -98,10 +103,21 @@ export function canonicalPointer(fragment: string): string {
  * percent-encoded (the common case) round-trip unchanged. Plain, non-fragment pointers (e.g. the
  * public `nodeAtPointer` API) must go through `parsePointer` instead — applying this decoding there
  * would corrupt a literal `%`-containing key.
+ *
+ * Per RFC 6901, `~` may only occur as `~0` or `~1` inside a token. That's validated here — reusing
+ * `parsePointer`'s own tilde-escape check — on each *percent-decoded* segment (so a malformed escape
+ * hidden behind percent-encoding, e.g. `%7E2` decoding to the literal text `~2`, is caught too) and
+ * before RFC 6901 unescaping. Returns `undefined` for a malformed fragment instead of silently
+ * treating the invalid `~` sequence as literal text, which would let an invalid `$ref` resolve to a
+ * real (but unintended) node.
  */
-export function parseFragmentPointer(fragment: string): string[] {
+export function parseFragmentPointer(fragment: string): string[] | undefined {
   if (fragment === "") return [];
   const raw = fragment.startsWith("/") ? fragment.slice(1) : fragment;
   if (raw === "") return [""];
-  return raw.split("/").map((seg) => unescapePointerSegment(safeDecodeURIComponent(seg)));
+  const decoded = raw.split("/").map((seg) => safeDecodeURIComponent(seg));
+  for (const seg of decoded) {
+    if (!isValidPointerSegment(seg)) return undefined;
+  }
+  return decoded.map((seg) => unescapePointerSegment(seg));
 }

@@ -134,6 +134,115 @@ describe("unresolved $ref", () => {
   });
 });
 
+describe("$ref fragments with malformed tilde escapes never resolve (issue #211)", () => {
+  // Exact reproduction from the issue: schema "A" refs "#/components/schemas/a~2b", a fragment
+  // whose "~2" is not a valid RFC 6901 escape (only "~0" and "~1" are defined). It must be treated
+  // as unresolved, never as targeting the real "a~2b" schema below it.
+  function buildGraph() {
+    return loadWorkspaceGraph(
+      new InMemoryFileSystem({
+        "/virtual/entry.yaml": [
+          "openapi: 3.1.0",
+          "info: { title: T, version: v }",
+          "paths: {}",
+          "components:",
+          "  schemas:",
+          "    A:",
+          "      $ref: '#/components/schemas/a~2b'",
+          "    a~2b:",
+          "      type: string",
+        ].join("\n"),
+      }),
+      "/virtual/entry.yaml",
+    );
+  }
+
+  test("does not resolve, and is reported with a source-ranged diagnostic (not a throw)", async () => {
+    const graph = await buildGraph();
+    const entryDoc = graph.documents.get("/virtual/entry.yaml")!;
+    const foundRef = findRefs(entryDoc).find((ref) => ref.value === "#/components/schemas/a~2b");
+    expect(foundRef).toBeDefined();
+
+    let result: ReturnType<typeof resolveRef> | undefined;
+    expect(() => {
+      result = resolveRef(graph, entryDoc, foundRef!);
+    }).not.toThrow();
+
+    expect(result!.ok).toBe(false);
+    if (result!.ok) throw new Error("expected the malformed fragment to be unresolved");
+    expect(result!.diagnostic.code).toBe("no-unresolved-ref");
+    // The diagnostic must carry the real source location of the offending "$ref" scalar, not a
+    // synthetic zero position -- this is what lets an editor point the user at the bad reference.
+    expect(result!.diagnostic.range.filePath).toBe("/virtual/entry.yaml");
+    expect(result!.diagnostic.range.start.line).toBeGreaterThan(0);
+  });
+
+  test("the graph never indexes the malformed fragment as resolving to the real 'a~2b' schema", async () => {
+    // `loadWorkspaceGraph` itself only surfaces file-load failures as diagnostics; pointer
+    // resolution is validated on demand via `resolveRef` (exercised above and below). This asserts
+    // the complementary half: the graph's own same-document schema-resource scan (which silently
+    // skips an unresolved target rather than diagnosing it -- see `targetScope`/`scanScope`) must
+    // likewise never treat the malformed fragment as reaching the "a~2b" schema node.
+    const graph = await buildGraph();
+    const entryDoc = graph.documents.get("/virtual/entry.yaml")!;
+    const aSchema = resolveRef(graph, entryDoc, "#/components/schemas/A");
+    expect(aSchema.ok).toBe(true);
+    if (!aSchema.ok) throw new Error("expected schema A itself to resolve");
+    const literalSchema = resolveRef(graph, entryDoc, "#/components/schemas/a~02b");
+    expect(literalSchema.ok).toBe(true);
+    if (!literalSchema.ok) throw new Error("expected the literal 'a~2b' schema to resolve via its escaped pointer");
+    // schema A's own body ($ref only) must not have collapsed into the literal schema's node.
+    expect(aSchema.node).not.toBe(literalSchema.node);
+  });
+
+  test("a bare '~' fragment never resolves", async () => {
+    const graph = await loadWorkspaceGraph(
+      new InMemoryFileSystem({
+        "/virtual/entry.yaml": [
+          "openapi: 3.1.0",
+          "info: { title: T, version: v }",
+          "paths: {}",
+          "components: {}",
+        ].join("\n"),
+      }),
+      "/virtual/entry.yaml",
+    );
+    const entryDoc = graph.documents.get("/virtual/entry.yaml")!;
+    const result = resolveRef(graph, entryDoc, "#~");
+    expect(result.ok).toBe(false);
+  });
+
+  test("a percent-encoded malformed escape ('%7E2', decoding to '~2') never resolves", async () => {
+    const graph = await buildGraph();
+    const entryDoc = graph.documents.get("/virtual/entry.yaml")!;
+    const result = resolveRef(graph, entryDoc, "#/components/schemas/a%7E2b");
+    expect(result.ok).toBe(false);
+  });
+
+  test("a valid '~0'/'~1' escape still resolves correctly (control case)", async () => {
+    const graph = await loadWorkspaceGraph(
+      new InMemoryFileSystem({
+        "/virtual/entry.yaml": [
+          "openapi: 3.1.0",
+          "info: { title: T, version: v }",
+          "paths: {}",
+          "components:",
+          "  schemas:",
+          '    "A~B":',
+          "      type: string",
+        ].join("\n"),
+      }),
+      "/virtual/entry.yaml",
+    );
+    const entryDoc = graph.documents.get("/virtual/entry.yaml")!;
+    const result = resolveRef(graph, entryDoc, "#/components/schemas/A~0B");
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected the valid ~0 escape to resolve");
+    expect(isScalar((result.node as YAMLMap).get("type", true))).toBe(true);
+    expect(result.canonicalPointer).toBe("/components/schemas/A~0B");
+  });
+});
+
 describe("percent-encoded $ref file part", () => {
   test("parseRefString preserves the raw file part for URI classification", () => {
     expect(parseRefString("foo%3Abar.yaml#/Foo")).toEqual({

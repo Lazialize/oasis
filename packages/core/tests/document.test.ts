@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { isScalar } from "yaml";
-import { nodeAtPointer, nodeAtPosition } from "../src/document.ts";
+import { nodeAtFragmentPointer, nodeAtPointer, nodeAtPosition } from "../src/document.ts";
 import { parseDocument } from "../src/parse.ts";
 
 const fixturesDir = `${import.meta.dir}/fixtures/misc`;
@@ -132,5 +132,39 @@ describe("nodeAtPointer rejects malformed RFC 6901 pointers (issue #152)", () =>
   test("returns a result for valid root pointer", () => {
     const result = nodeAtPointer(doc, "");
     expect(result).toBeDefined();
+  });
+});
+
+describe("nodeAtFragmentPointer rejects malformed tilde escapes in $ref fragments (issue #211)", () => {
+  // "~": the literal key "~" (reachable only via the valid escape "~0").
+  // "/": the literal key "/" (reachable only via the valid escape "~1").
+  // "a~2b": a literal key containing a raw, un-escaped tilde sequence that RFC 6901 never defines
+  // ("~2" is not "~0" or "~1") -- this is the exact shape from issue #211's reproduction.
+  const text = ['"~": tildeValue', '"/": slashValue', '"a~2b": literalValue'].join("\n");
+  const filePath = `${fixturesDir}/pointer-tilde-fragment.yaml`;
+  const doc = parseDocument(text, filePath);
+
+  test("a bare '~' fragment is malformed and does not resolve", () => {
+    expect(nodeAtFragmentPointer(doc, "~")).toBeUndefined();
+  });
+
+  test("'~2' (tilde followed by a digit other than 0/1) is malformed and does not resolve", () => {
+    expect(nodeAtFragmentPointer(doc, "/a~2b")).toBeUndefined();
+  });
+
+  test("a percent-encoded malformed escape ('%7E2', decoding to '~2') does not resolve", () => {
+    expect(nodeAtFragmentPointer(doc, "/a%7E2b")).toBeUndefined();
+  });
+
+  test("the valid '~0' escape still resolves to the literal '~' key", () => {
+    const result = nodeAtFragmentPointer(doc, "/~0");
+    expect(result).toBeDefined();
+    expect(isScalar(result?.node) && result?.node.value).toBe("tildeValue");
+  });
+
+  test("the valid '~1' escape still resolves to the literal '/' key", () => {
+    const result = nodeAtFragmentPointer(doc, "/~1");
+    expect(result).toBeDefined();
+    expect(isScalar(result?.node) && result?.node.value).toBe("slashValue");
   });
 });
