@@ -1,5 +1,14 @@
 # @oasis/linter
 
+## 0.10.3
+
+### Patch Changes
+
+- [#224](https://github.com/Lazialize/oasis/pull/224) [`d07b065`](https://github.com/Lazialize/oasis/commit/d07b065e9da3ca999d3b37af2bd35c313e48a7e8) Thanks [@Lazialize](https://github.com/Lazialize)! - Fix `structure/object-shape` not validating the root OpenAPI Object. The rule now checks the root against its version-aware shape: unknown non-extension root fields (e.g. a typo like `typoField`) are reported, and root fields introduced in later OpenAPI versions — `webhooks` and `jsonSchemaDialect` (3.1+) — are rejected on 3.0 documents, with `jsonSchemaDialect` also type-checked as a string where it's valid. Specification extensions (`x-*`) at the root continue to be accepted. The new root checks are coordinated with `structure/required-fields`, `structure/openapi-version`, and `structure/field-types` so existing root-level diagnostics (required `openapi`/`info`, array/object field types, `$self` gating) aren't duplicated.
+
+- Updated dependencies [[`f9862c0`](https://github.com/Lazialize/oasis/commit/f9862c037cb15ed46e8e34d6c6372a0819818af5)]:
+  - @oasis/core@0.10.3
+
 ## 0.10.2
 
 ### Patch Changes

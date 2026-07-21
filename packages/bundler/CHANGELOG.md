@@ -1,5 +1,19 @@
 # @oasis/bundler
 
+## 0.10.3
+
+### Patch Changes
+
+- [#226](https://github.com/Lazialize/oasis/pull/226) [`2990364`](https://github.com/Lazialize/oasis/commit/2990364c87cc1e991d49fac2fc4bb6a9add119ac) Thanks [@Lazialize](https://github.com/Lazialize)! - fix(bundler): materialize YAML merge keys ("<<") when bundling, instead of serializing a literal
+  `<<` property. Bundling a document that uses `<<: *anchor` (or `<<: [*a, *b]`) now emits the
+  effective merged mapping in both YAML and JSON output, using the same precedence semantics as
+  core's merge-aware `childAt` traversal: an explicit key always overrides a merged one regardless of
+  relative order, a sequence merge resolves left-to-right (earliest source wins a shared key), nested
+  merge sources are fully materialized, and `$ref`s reached only through a merged value are lifted and
+  rewritten like any other reference. Alias cycles through a merge key remain safely bounded.
+- Updated dependencies [[`f9862c0`](https://github.com/Lazialize/oasis/commit/f9862c037cb15ed46e8e34d6c6372a0819818af5)]:
+  - @oasis/core@0.10.3
+
 ## 0.10.2
 
 ### Patch Changes
