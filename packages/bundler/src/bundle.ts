@@ -203,6 +203,98 @@ function withAliasTarget<T>(
   }
 }
 
+/** One (key, value) entry produced by expanding a map node's own items, materializing a YAML merge
+ * key ("<<") into its source's own entries instead of leaving a literal `<<` property (issue #214).
+ * `value` mirrors `Pair["value"]`'s own type: always a `Node` for a parsed document, but typed
+ * `unknown` because the "yaml" package only guarantees that at runtime (via `isNode`). */
+interface MapEntry {
+  key: string;
+  value: unknown;
+}
+
+/**
+ * `mapNode.items` with every `<<` merge key expanded into its source's own materialized entries. A
+ * map with no `<<` key returns exactly the (key, value) sequence iterating `mapNode.items` directly
+ * would, so every caller's own duplicate-key handling (`setKey`'s last-value-wins,
+ * first-occurrence-position overlay) is unaffected for the common case.
+ *
+ * Precedence mirrors `childAtWithMerges`, the merge-aware lookup `@oasis/core`'s graph traversal
+ * already implements (`packages/core/src/walk.ts`), so bundling and graph inspection agree on the
+ * effective shape of the same source:
+ * - An explicit (non-`<<`) key anywhere on `mapNode` always overrides a merged value, regardless of
+ *   whether `<<` appears before or after it in the document.
+ * - Among merge sources - several sibling `<<` keys, or a single `<<: [seq]` of mappings - the
+ *   earliest source in document order wins a key more than one of them defines.
+ * - A mapping merge source is itself recursively expanded, so nested `<<` keys resolve.
+ * - A resolved map/seq is expanded at most once per call (tracked by node identity), bounding alias
+ *   cycles exactly as `childAtWithMerges` does; an unresolved or cyclic merge-source alias silently
+ *   contributes nothing, matching that traversal's own bound rather than raising a new diagnostic.
+ */
+function expandMerges(doc: OasisDocument, mapNode: Node & { items: readonly Pair[] }): MapEntry[] {
+  const items = mapNode.items;
+  const hasMerge = items.some((pair) => keyToString(pair.key) === "<<" && isNode(pair.value));
+  if (!hasMerge) {
+    return items.map((pair) => ({ key: keyToString(pair.key), value: pair.value }));
+  }
+  return materializeMap(doc, mapNode, new Set([mapNode]));
+}
+
+function materializeMap(doc: OasisDocument, mapNode: Node & { items: readonly Pair[] }, seen: Set<Node>): MapEntry[] {
+  const explicitKeys = new Set<string>();
+  for (const pair of mapNode.items) {
+    if (isNode(pair.value) && keyToString(pair.key) !== "<<") explicitKeys.add(keyToString(pair.key));
+  }
+
+  const out: MapEntry[] = [];
+  const mergeEmitted = new Set<string>();
+  for (const pair of mapNode.items) {
+    if (!isNode(pair.value)) continue;
+    const key = keyToString(pair.key);
+    if (key !== "<<") {
+      out.push({ key, value: pair.value });
+      continue;
+    }
+    for (const entry of expandMergeValue(doc, pair.value, seen)) {
+      if (explicitKeys.has(entry.key) || mergeEmitted.has(entry.key)) continue;
+      mergeEmitted.add(entry.key);
+      out.push(entry);
+    }
+  }
+  return out;
+}
+
+/**
+ * One `<<` value: resolve an Alias, then treat a mapping as a single merge source or a sequence as
+ * several (the earliest item in the sequence wins a key more than one item defines - matching
+ * `childAtWithMerges`'s first-match-wins iteration order). Anything else - an unresolved or cyclic
+ * alias, or a non-map/seq target - silently contributes nothing.
+ */
+function expandMergeValue(doc: OasisDocument, node: unknown, seen: Set<Node>): MapEntry[] {
+  if (!isNode(node)) return [];
+  const resolved = isAlias(node) ? node.resolve(doc.yamlDoc) : node;
+  if (!resolved) return [];
+  if (isMap(resolved)) {
+    if (seen.has(resolved)) return [];
+    seen.add(resolved);
+    return materializeMap(doc, resolved, seen);
+  }
+  if (isSeq(resolved)) {
+    if (seen.has(resolved)) return [];
+    seen.add(resolved);
+    const out: MapEntry[] = [];
+    const seenKeys = new Set<string>();
+    for (const item of resolved.items) {
+      for (const entry of expandMergeValue(doc, item, seen)) {
+        if (seenKeys.has(entry.key)) continue;
+        seenKeys.add(entry.key);
+        out.push(entry);
+      }
+    }
+    return out;
+  }
+  return [];
+}
+
 type OpenApiObjectKind = "discriminator" | "encoding" | "example" | "link" | "media-type" | "operation" | "schema";
 
 const SINGLE_SCHEMA_KEYS = new Set([
@@ -310,12 +402,12 @@ function mapChildren(
   return withAliasTarget(ctx, doc, mapNode, {}, (resolvedMap) => {
     if (!isMap(resolvedMap)) return convertValue(ctx, doc, resolvedMap, hint, false, entryKind) as Record<string, unknown>;
     const out: Record<string, unknown> = {};
-    for (const pair of resolvedMap.items) {
-      if (!isNode(pair.value)) continue;
+    for (const { key, value } of expandMerges(doc, resolvedMap)) {
+      if (!isNode(value)) continue;
       setKey(
         out,
-        keyToString(pair.key),
-        convertValue(ctx, doc, pair.value, hint, false, entryKind ?? objectKindForSection(hint)),
+        key,
+        convertValue(ctx, doc, value, hint, false, entryKind ?? objectKindForSection(hint)),
       );
     }
     return out;
@@ -681,16 +773,15 @@ function convertPathItemMap(
   return withAliasTarget(ctx, doc, mapNode, {}, (resolvedMap) => {
     if (!isMap(resolvedMap)) return convertValue(ctx, doc, resolvedMap, undefined) as Record<string, unknown>;
     const out: Record<string, unknown> = {};
-    for (const pair of resolvedMap.items) {
-      if (!isNode(pair.value)) continue;
-      const key = keyToString(pair.key);
+    for (const { key, value } of expandMerges(doc, resolvedMap)) {
+      if (!isNode(value)) continue;
       // Paths and Callback Objects allow extensions, while Webhooks uses arbitrary entry names.
       setKey(
         out,
         key,
         extensionsOpaque && key.startsWith("x-")
-          ? convertValue(ctx, doc, pair.value, undefined, true)
-          : convertPathItem(ctx, doc, pair.value),
+          ? convertValue(ctx, doc, value, undefined, true)
+          : convertPathItem(ctx, doc, value),
       );
     }
     return out;
@@ -709,8 +800,7 @@ function convertCallbacks(ctx: BundleContext, doc: OasisDocument, mapNode: Node)
   return withAliasTarget(ctx, doc, mapNode, {}, (resolvedMap) => {
     if (!isMap(resolvedMap)) return convertValue(ctx, doc, resolvedMap, "callbacks") as Record<string, unknown>;
     const out: Record<string, unknown> = {};
-    for (const pair of resolvedMap.items) {
-      const value = pair.value;
+    for (const { key, value } of expandMerges(doc, resolvedMap)) {
       if (!isNode(value)) continue;
       const converted = withAliasTarget(ctx, doc, value, {}, (resolvedValue) => {
         const refPair = findRefPair(doc, resolvedValue);
@@ -719,7 +809,7 @@ function convertCallbacks(ctx: BundleContext, doc: OasisDocument, mapNode: Node)
           ? convertRef(ctx, doc, resolvedValue, refPair, "callbacks")
           : convertPathItemMap(ctx, doc, resolvedValue, true);
       });
-      setKey(out, keyToString(pair.key), converted);
+      setKey(out, key, converted);
     }
     return out;
   });
@@ -730,15 +820,14 @@ function convertResponses(ctx: BundleContext, doc: OasisDocument, mapNode: Node)
   return withAliasTarget(ctx, doc, mapNode, {}, (resolvedMap) => {
     if (!isMap(resolvedMap)) return convertValue(ctx, doc, resolvedMap, "responses") as Record<string, unknown>;
     const out: Record<string, unknown> = {};
-    for (const pair of resolvedMap.items) {
-      if (!isNode(pair.value)) continue;
-      const key = keyToString(pair.key);
+    for (const { key, value } of expandMerges(doc, resolvedMap)) {
+      if (!isNode(value)) continue;
       setKey(
         out,
         key,
         key.startsWith("x-")
-          ? convertValue(ctx, doc, pair.value, "responses", true)
-          : convertValue(ctx, doc, pair.value, "responses"),
+          ? convertValue(ctx, doc, value, "responses", true)
+          : convertValue(ctx, doc, value, "responses"),
       );
     }
     return out;
@@ -815,17 +904,16 @@ function convertDiscriminatorMapping(ctx: BundleContext, doc: OasisDocument, map
   return withAliasTarget(ctx, doc, mapNode, {}, (resolvedMap) => {
     if (!isMap(resolvedMap)) return convertValue(ctx, doc, resolvedMap, "schemas") as Record<string, unknown>;
     const out: Record<string, unknown> = {};
-    for (const pair of resolvedMap.items) {
-      const value = pair.value;
+    for (const { key, value } of expandMerges(doc, resolvedMap)) {
       if (!isNode(value)) continue;
       const contextualValue = resolvedScalar(doc, value);
       if (contextualValue && typeof contextualValue.value === "string" && looksLikeMappingRef(contextualValue.value)) {
-        setKey(out, keyToString(pair.key), resolveMappingRefTarget(ctx, doc, contextualValue, "schemas"));
+        setKey(out, key, resolveMappingRefTarget(ctx, doc, contextualValue, "schemas"));
       } else {
         if (contextualValue && typeof contextualValue.value === "string") {
           registerBareMappingRetention(ctx, doc, contextualValue);
         }
-        setKey(out, keyToString(pair.key), convertValue(ctx, doc, value, "schemas"));
+        setKey(out, key, convertValue(ctx, doc, value, "schemas"));
       }
     }
     return out;
@@ -897,9 +985,7 @@ function convertValue(
     if (refPair) return convertRef(ctx, doc, node, refPair, hint);
 
     const out: Record<string, unknown> = {};
-    for (const pair of node.items) {
-      const key = keyToString(pair.key);
-      const value = pair.value;
+    for (const { key, value } of expandMerges(doc, node)) {
       if (!isNode(value)) {
         setKey(out, key, value);
         continue;
