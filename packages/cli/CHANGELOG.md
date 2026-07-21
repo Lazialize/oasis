@@ -1,5 +1,17 @@
 # @oasis/cli
 
+## 0.10.1
+
+### Patch Changes
+
+- [#219](https://github.com/Lazialize/oasis/pull/219) [`6816c62`](https://github.com/Lazialize/oasis/commit/6816c627ae4028628edf9c696bd646fc44cc182e) Thanks [@Lazialize](https://github.com/Lazialize)! - Accept the conventional `--stdio` transport flag on `oasis lsp` instead of rejecting it. LSP clients that declare the stdio transport (e.g. the VS Code extension via vscode-languageclient's `TransportKind.stdio`, and the same convention in Neovim/Helix/Emacs) append `--stdio` to the launch command. The server previously treated it as an unexpected argument and exited immediately, so the language server never started and restarting it surfaced an "unexpected argument \"--stdio\"" error. The flag is now a no-op (the server always speaks LSP over stdio).
+
+- Updated dependencies []:
+  - @oasis/bundler@0.10.1
+  - @oasis/core@0.10.1
+  - @oasis/linter@0.10.1
+  - @oasis/server@0.10.1
+
 ## 0.10.0
 
 ### Patch Changes
