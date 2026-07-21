@@ -1,5 +1,14 @@
 # @oasis/linter
 
+## 0.10.2
+
+### Patch Changes
+
+- [#222](https://github.com/Lazialize/oasis/pull/222) [`3eb7095`](https://github.com/Lazialize/oasis/commit/3eb70958e28125ae7983fa5e095970c05553e5bb) Thanks [@Lazialize](https://github.com/Lazialize)! - Fix `components/no-unused` falsely reporting a `$ref` "component" when a component section is imported from another file as a Reference Object (e.g. `schemas: { $ref: './schemas.yaml' }`). The `$ref`/`$dynamicRef` key is a reference marker, not a component name, so it is no longer flagged — a common multi-file layout no longer surfaces a spurious `Component "$ref" in "components/schemas" is not used` warning.
+
+- Updated dependencies []:
+  - @oasis/core@0.10.2
+
 ## 0.10.1
 
 ### Patch Changes
