@@ -269,7 +269,9 @@ function ensureSectionObject(ctx: BundleContext, section: string): Record<string
 
 /** Derive the components section a lifted value belongs in. `pointer` is a resolved `$ref` fragment. */
 function deriveSection(pointer: string, hint: string | undefined): string {
-  const segs = parseFragmentPointer(pointer);
+  // `pointer` is always a fragment that already resolved successfully (see callers), so
+  // `parseFragmentPointer` can't actually fail here; the fallback is only for the types.
+  const segs = parseFragmentPointer(pointer) ?? [];
   if (segs[0] === "components" && segs.length >= 2 && COMPONENT_SECTION_SET.has(segs[1] ?? "")) {
     return segs[1] as string;
   }
@@ -278,7 +280,8 @@ function deriveSection(pointer: string, hint: string | undefined): string {
 
 /** Derive a deterministic, unique candidate name for a lifted value. `pointer` is a resolved `$ref` fragment. */
 function deriveName(ctx: BundleContext, pointer: string, doc: OasisDocument, section: string): string {
-  const segs = parseFragmentPointer(pointer);
+  // Same reasoning as `deriveSection`: `pointer` already resolved, so this can't be malformed.
+  const segs = parseFragmentPointer(pointer) ?? [];
   const raw = segs.length > 0 ? segs[segs.length - 1] ?? "" : fileStem(doc.filePath);
   const candidate = sanitizeName(raw === "" ? fileStem(doc.filePath) : raw);
   return uniqueName(candidate, ensureUsedNames(ctx, section));
@@ -475,7 +478,8 @@ function assignCycleSlot(
   if (existing) return { assigned: existing, isNew: false };
 
   const section = deriveSection(result.pointer, hint);
-  const segs = parseFragmentPointer(result.pointer);
+  // Same reasoning as `deriveSection`: `result.pointer` already resolved, so this can't be malformed.
+  const segs = parseFragmentPointer(result.pointer) ?? [];
   const pointsAtEntryComponent =
     result.doc.filePath === ctx.entryDoc.filePath &&
     segs.length === 3 &&

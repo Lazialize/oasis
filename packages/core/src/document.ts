@@ -36,12 +36,16 @@ export function nodeAtPointerFrom(doc: OasisDocument, root: Node, pointer: strin
 export function nodeAtFragmentPointer(doc: OasisDocument, fragment: string): PointerLookupResult | undefined {
   const root = doc.yamlDoc.contents;
   if (!isNode(root)) return undefined;
-  return nodeAtSegments(doc, root, parseFragmentPointer(fragment));
+  const segments = parseFragmentPointer(fragment);
+  if (segments === undefined) return undefined;
+  return nodeAtSegments(doc, root, segments);
 }
 
 /** Resolve a `$ref` URI fragment relative to an embedded JSON Schema resource root. */
 export function nodeAtFragmentPointerFrom(doc: OasisDocument, root: Node, fragment: string): PointerLookupResult | undefined {
-  return nodeAtSegments(doc, root, parseFragmentPointer(fragment));
+  const segments = parseFragmentPointer(fragment);
+  if (segments === undefined) return undefined;
+  return nodeAtSegments(doc, root, segments);
 }
 
 function nodeAtSegments(doc: OasisDocument, root: Node, segments: string[]): PointerLookupResult | undefined {
@@ -75,7 +79,12 @@ function resourceBaseAtSegments(doc: OasisDocument, root: Node, segments: string
  * this distinguishes the same YAML alias target reached below different `$id` ancestors.
  */
 export function resourceBaseAtFragmentPointer(doc: OasisDocument, root: Node, fragment: string, initialBaseUri: string): string {
-  return resourceBaseAtSegments(doc, root, parseFragmentPointer(fragment), initialBaseUri);
+  const segments = parseFragmentPointer(fragment);
+  // Callers only ever reach here after a fragment has already resolved successfully via
+  // `nodeAtFragmentPointerFrom`/`nodeAtFragmentPointer` (which share the same parse), so a
+  // malformed fragment is unreachable in practice; the initial base is a safe, inert fallback.
+  if (segments === undefined) return initialBaseUri;
+  return resourceBaseAtSegments(doc, root, segments, initialBaseUri);
 }
 
 /**
@@ -90,6 +99,9 @@ export function resourceBaseBeforeFragmentPointerTarget(
   initialBaseUri: string,
 ): string {
   const segments = parseFragmentPointer(fragment);
+  // Same reasoning as `resourceBaseAtFragmentPointer`: reachable only for a fragment that already
+  // resolved, so this is a defensive fallback rather than a live code path.
+  if (segments === undefined) return initialBaseUri;
   return resourceBaseAtSegments(doc, root, segments.slice(0, -1), initialBaseUri);
 }
 

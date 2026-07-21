@@ -34,7 +34,7 @@ export interface ComponentTarget {
  * the enclosing component. */
 function enclosingComponent(fragment: string): { section: string; name: string; pointer: string } | undefined {
   const segments = parseFragmentPointer(fragment);
-  if (segments[0] !== "components" || segments.length < 3) return undefined;
+  if (segments === undefined || segments[0] !== "components" || segments.length < 3) return undefined;
   const section = segments[1]!;
   const name = segments[2]!;
   return { section, name, pointer: formatPointer(["components", section, name]) };

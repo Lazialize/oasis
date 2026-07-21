@@ -517,7 +517,7 @@ export function resolveRef(
           doc: resource.doc,
           node: anchor.node,
           pointer,
-          canonicalPointer: pointerToNode(resource.doc, resource.node, anchor.node) ?? canonicalPointer(pointer),
+          canonicalPointer: pointerToNode(resource.doc, resource.node, anchor.node) ?? canonicalPointer(pointer) ?? pointer,
           range: anchor.range,
           resourceUri: resource.baseUri,
         };
@@ -530,7 +530,10 @@ export function resolveRef(
         const targetBase = contextualRef?.targetKind === "schema" && pointer.startsWith("/")
           ? resourceBaseAtFragmentPointer(resource.doc, resource.node, pointer, resource.baseUri)
           : resource.baseUri;
-        return { ok: true, doc: resource.doc, node: result.node, pointer, canonicalPointer: canonicalPointer(pointer), range: result.range, resourceUri: targetBase };
+        // `result` only resolves once `pointer` has already parsed successfully (see
+        // `nodeAtFragmentPointerFrom`), so `canonicalPointer` cannot fail here; `?? pointer` is a
+        // type-level fallback only, never a live path.
+        return { ok: true, doc: resource.doc, node: result.node, pointer, canonicalPointer: canonicalPointer(pointer) ?? pointer, range: result.range, resourceUri: targetBase };
       }
     }
   }
@@ -621,7 +624,7 @@ export function resolveRef(
     }
     const root = targetDoc.yamlDoc.contents;
     const canonical = isNode(root) ? pointerToNode(targetDoc, root, anchor.node) : undefined;
-    return { ok: true, doc: targetDoc, node: anchor.node, pointer, canonicalPointer: canonical ?? canonicalPointer(pointer), range: anchor.range };
+    return { ok: true, doc: targetDoc, node: anchor.node, pointer, canonicalPointer: canonical ?? canonicalPointer(pointer) ?? pointer, range: anchor.range };
   }
 
   const result = nodeAtFragmentPointer(targetDoc, pointer);
@@ -638,5 +641,8 @@ export function resolveRef(
     };
   }
 
-  return { ok: true, doc: targetDoc, node: result.node, pointer, canonicalPointer: canonicalPointer(pointer), range: result.range };
+  // `result` only resolves once `pointer` has already parsed successfully (see
+  // `nodeAtFragmentPointer`), so `canonicalPointer` cannot fail here; `?? pointer` is a type-level
+  // fallback only, never a live path.
+  return { ok: true, doc: targetDoc, node: result.node, pointer, canonicalPointer: canonicalPointer(pointer) ?? pointer, range: result.range };
 }
