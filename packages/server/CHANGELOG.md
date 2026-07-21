@@ -1,5 +1,13 @@
 # @oasis/server
 
+## 0.10.1
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @oasis/core@0.10.1
+  - @oasis/linter@0.10.1
+
 ## 0.10.0
 
 ### Minor Changes
