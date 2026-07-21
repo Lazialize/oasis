@@ -140,6 +140,119 @@ describe("structure/object-shape — version-aware fields", () => {
   });
 });
 
+describe("structure/object-shape — root OpenAPI Object", () => {
+  test("3.0 rejects root \"webhooks\"", async () => {
+    const doc = `openapi: 3.0.3
+info:
+  title: T
+  version: v
+paths: {}
+webhooks: {}
+`;
+    const diags = shapeDiags(await lintDoc(doc));
+    expect(diags.some((d) => d.message.includes('field "webhooks" is not valid in OpenAPI 3.0'))).toBe(true);
+  });
+
+  test("3.0 rejects root \"jsonSchemaDialect\"", async () => {
+    const doc = `openapi: 3.0.3
+info:
+  title: T
+  version: v
+paths: {}
+jsonSchemaDialect: 42
+`;
+    const diags = shapeDiags(await lintDoc(doc));
+    expect(diags.some((d) => d.message.includes('field "jsonSchemaDialect" is not valid in OpenAPI 3.0'))).toBe(true);
+  });
+
+  test("unknown non-extension root field is rejected", async () => {
+    const doc = `openapi: 3.0.3
+info:
+  title: T
+  version: v
+paths: {}
+typoField: true
+`;
+    const diags = shapeDiags(await lintDoc(doc));
+    expect(diags.some((d) => d.message.includes('has unknown field "typoField"'))).toBe(true);
+  });
+
+  test("root \"x-\" extension fields are accepted", async () => {
+    const doc = `openapi: 3.1.0
+info:
+  title: T
+  version: v
+paths: {}
+x-custom: true
+`;
+    expect(shapeDiags(await lintDoc(doc))).toEqual([]);
+  });
+
+  test("3.1 accepts \"webhooks\" and \"jsonSchemaDialect\", type-checked", async () => {
+    const doc = `openapi: 3.1.0
+info:
+  title: T
+  version: v
+webhooks: {}
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+`;
+    expect(shapeDiags(await lintDoc(doc))).toEqual([]);
+  });
+
+  test("3.1 \"jsonSchemaDialect\" wrong type is reported", async () => {
+    const doc = `openapi: 3.1.0
+info:
+  title: T
+  version: v
+paths: {}
+jsonSchemaDialect: 42
+`;
+    const diags = shapeDiags(await lintDoc(doc));
+    expect(diags.some((d) => d.message.includes('field "jsonSchemaDialect" must be a string'))).toBe(true);
+  });
+
+  test("3.2 accepts \"webhooks\" and \"jsonSchemaDialect\"", async () => {
+    const doc = `openapi: 3.2.0
+info:
+  title: T
+  version: v
+webhooks: {}
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+`;
+    expect(shapeDiags(await lintDoc(doc))).toEqual([]);
+  });
+
+  test("root shape validation does not duplicate structure/required-fields or structure/field-types diagnostics", async () => {
+    const doc = `openapi: 3.0.3
+info:
+  title: T
+  version: v
+paths: {}
+`;
+    const diagnostics = await lintDoc(doc);
+    // A clean, valid 3.0 document should have no shape diagnostics for already-covered root fields
+    // (openapi/info required-ness and servers/tags/security/paths/components/webhooks types are
+    // owned by structure/required-fields, structure/openapi-version, and structure/field-types).
+    expect(shapeDiags(diagnostics)).toEqual([]);
+  });
+
+  test("a well-formed 3.0 root reports no shape diagnostics (baseline)", async () => {
+    expect(shapeDiags(await lintDoc(HEADER_30))).toEqual([]);
+  });
+
+  test("a well-formed 3.1 root with webhooks/jsonSchemaDialect/$self reports no shape diagnostics", async () => {
+    const doc = `openapi: 3.2.0
+info:
+  title: T
+  version: v
+\$self: https://example.com/openapi.yaml
+webhooks: {}
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+`;
+    expect(shapeDiags(await lintDoc(doc))).toEqual([]);
+  });
+});
+
 describe("shared object-shape table helpers", () => {
   test("allowedFieldNames respects version availability (root)", () => {
     const v31 = allowedFieldNames("root", "3.1");
