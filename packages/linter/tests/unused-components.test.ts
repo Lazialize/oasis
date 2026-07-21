@@ -128,6 +128,39 @@ describe("components/no-unused", () => {
     )).toBe(false);
   });
 
+  test("a component section imported as a Reference Object does not flag its `$ref` key as a component", async () => {
+    // Common multi-file layout: the whole `components/schemas` map is pulled in from another file
+    // via `{ $ref: './schemas.yaml' }`. The `$ref` key is a reference marker, not a component name,
+    // so it must never be reported as an unused component (issue: schemas appear "all unused").
+    const fs = new InMemoryFileSystem({
+      "/virtual/openapi.yaml": [
+        "openapi: 3.1.0",
+        "info: { title: t, version: '1' }",
+        "paths:",
+        "  /p:",
+        "    get:",
+        "      operationId: gp",
+        "      responses:",
+        "        '200':",
+        "          description: ok",
+        "          content:",
+        "            application/json:",
+        "              schema: { $ref: './schemas.yaml#/Schema' }",
+        "components:",
+        "  schemas:",
+        "    $ref: './schemas.yaml'",
+      ].join("\n"),
+      "/virtual/schemas.yaml": "Schema: { type: object }\n",
+    });
+    const graph = await loadWorkspaceGraph(fs, "/virtual/openapi.yaml");
+    const diagnostics = lint(graph, resolveConfig(undefined));
+
+    expect(diagnostics.some((diagnostic) =>
+      diagnostic.rule === "components/no-unused" && diagnostic.message.includes('"$ref"')
+    )).toBe(false);
+    expect(diagnostics.some((diagnostic) => diagnostic.rule === "components/no-unused")).toBe(false);
+  });
+
   test("a ref-shaped Example value in an external target does not mark a component used", async () => {
     const fs = new InMemoryFileSystem({
       "/virtual/entry.yaml": [
