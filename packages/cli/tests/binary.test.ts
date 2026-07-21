@@ -46,8 +46,8 @@ class LspClient {
   private notifications: unknown[] = [];
   private nextId = 1;
 
-  constructor() {
-    this.proc = Bun.spawn([binPath, "lsp"], {
+  constructor(extraArgs: string[] = []) {
+    this.proc = Bun.spawn([binPath, "lsp", ...extraArgs], {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
@@ -377,6 +377,24 @@ paths:
         expect(items.some((i) => typeof i.label === "string" && i.label.includes("Error"))).toBe(true);
       } finally {
         rootClient.kill();
+      }
+    }, 20000);
+
+    test("launched as `lsp --stdio` (vscode-languageclient's stdio transport) completes the handshake", async () => {
+      // vscode-languageclient appends `--stdio` to the launch command for a stdio-transport
+      // Executable, so the extension really spawns `oasis lsp --stdio`. Regression guard: the
+      // server must accept that flag and serve, not reject it and die on startup/restart.
+      const stdioClient = new LspClient(["--stdio"]);
+      try {
+        const initResult = await stdioClient.request("initialize", {
+          processId: null,
+          rootUri: null,
+          capabilities: {},
+        });
+        expect(initResult.error).toBeUndefined();
+        expect(initResult.result?.capabilities).toBeDefined();
+      } finally {
+        stdioClient.kill();
       }
     }, 20000);
 

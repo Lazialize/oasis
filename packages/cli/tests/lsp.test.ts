@@ -51,4 +51,28 @@ describe("oasis lsp CLI", () => {
     expect(result.stderr).toContain("unexpected argument");
     expect(result.stderr).toContain("extra");
   });
+
+  test("--help documents the accepted --stdio transport flag", async () => {
+    const result = await runCli(["lsp", "--help"]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("--stdio");
+  });
+
+  // vscode-languageclient (and Neovim/Helix/Emacs by the same convention) appends `--stdio` to the
+  // launch command for a stdio-transport server. The server must accept it instead of exiting 2,
+  // otherwise it dies the moment such a client starts it. We can't easily assert "server started"
+  // without driving the LSP handshake (see binary.test.ts), so here we assert the negative: it does
+  // not exit 2 with the "unexpected argument" rejection. The process runs until stdin closes.
+  test("accepts a bare --stdio transport flag without rejecting it", async () => {
+    const proc = Bun.spawn(["bun", "run", cliEntry, "lsp", "--stdio"], {
+      stdout: "pipe",
+      stderr: "pipe",
+      stdin: "pipe",
+    });
+    // Close stdin so the server's stdio reader hits EOF and the process can exit on its own.
+    proc.stdin.end();
+    const [stderr, exitCode] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+    expect(stderr).not.toContain("unexpected argument");
+    expect(exitCode).not.toBe(2);
+  });
 });
