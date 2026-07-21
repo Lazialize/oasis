@@ -149,6 +149,12 @@ export const noUnusedComponents: Rule = {
 
         for (const pair of categoryNode.items) {
           const name = keyToString(pair.key);
+          // A component section can be pulled in wholesale from another file as a Reference Object
+          // (`schemas: { $ref: './schemas.yaml' }`), a common multi-file layout. Its `$ref` /
+          // `$dynamicRef` key is a reference marker, not a component name — the real components live
+          // in (and are analyzed through) the referenced file. OpenAPI component keys must match
+          // `^[a-zA-Z0-9._-]+$`, so a `$`-prefixed key is never a component to report as unused.
+          if (name.startsWith("$")) continue;
           const pointer = `/components/${category}/${name}`;
           if (used.has(`${doc.filePath}::${pointer}`)) continue;
           // Requirement keys are implicit component-name references that resolve against the
